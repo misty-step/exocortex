@@ -1,6 +1,6 @@
 # Scrub the public boundary and close the frozen shape decisions
 
-Priority: P0 · Status: ready · Estimate: M
+Priority: P0 · Status: done · Estimate: M
 
 ## Goal
 Make the public repo safe to read and frozen-experimental by removing private
@@ -32,4 +32,4 @@ before any runtime implementation begins.
 
 ## Notes
 - The repo is public, so public docs should not teach a stranger the operator's private topology.
-- This is the top frozen-experimental execution item; do not add runtime code while completing it.
+- Completed by the frozen-experimental boundary scrub branch; no runtime code was added.
