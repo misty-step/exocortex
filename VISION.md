@@ -1,117 +1,144 @@
 # Exocortex Vision
 
-Exocortex is a public context engine for agent-first work. It turns many local
-and remote sources into cited, inspectable context packets that an agent can
-use without guessing what matters, where it came from, or whether it is safe to
-trust.
+Exocortex is the public, self-hosted context core for agent-first command
+centers.
 
-It is not "all of Phaedrus's context." It is the reusable program that a private
-system such as Daybook can consume, configure, and extend. Daybook stays the
-personal vault and command center. Exocortex supplies the public machinery:
-source adapters, normalized evidence, retrieval policy, citation discipline,
-and agent-facing surfaces.
+It competes with the default solution people already use: scattered Markdown,
+ad hoc folders, half-remembered scripts, and whatever context an agent happens
+to read this time. The win is not to become a giant app. The win is to make the
+better path just as easy: initialize a repo, declare sources, ingest or index
+them, and ask for a cited context packet through the same core from CLI, MCP,
+API, SDK, skills, or a thin UI.
 
-## The Job
+Daybook is the first demanding consumer, not the product boundary. Daybook stays
+private: the vault, QMD collection, personal policies, traces, people notes,
+finance context, rituals, and writeback rules remain there. Exocortex is the
+reusable program Daybook consumes: source registry, adapters, local indexes,
+embeddings, evidence logs, profiles, packets, and agent-facing tools.
 
-Agents already have access to files, tools, search, inboxes, voice transcripts,
-repos, and notes. Access is no longer the scarce part. The scarce part is a
-small, composable system that can answer:
+## What It Is For
 
-- Which sources should be consulted for this kind of question?
-- What exact evidence was retrieved?
-- How fresh, private, and trustworthy is it?
-- Can another agent fetch the same source again?
-- Did the final context packet cite reality or just summarize memory?
+Agents need a smaller, more trustworthy way to get the right context than
+"search everything and hope." Humans need to inspect, correct, and extend the
+same system without learning an agent's private prompt rituals.
 
-Exocortex exists to make context an evidence product, not a prompt accident.
+Exocortex answers a few durable questions:
 
-## Design Philosophy
+- What sources exist for this workspace?
+- Which sources are allowed for this question and profile?
+- What exact evidence was retrieved, and can it be fetched again?
+- Is the evidence fresh, private, trusted, or stale?
+- What compact packet should an agent read before acting?
+- What did the system exclude, and why?
 
-Exocortex should be boring in its core and opinionated at its boundaries.
+The user is the first-class consumer. Agents are delegated consumers. Every
+surface should expose the same capability: use context, manage context, inspect
+context, and cite context.
 
-- **One core, many faces.** The retrieval and evidence model lives once. CLI,
-  HTTP API, MCP server, SDK, bundled skill, and any thin UI are projections of
-  that same core.
-- **Rust by default.** Durable logic belongs in Rust. Non-Rust surfaces are
-  allowed only where an ecosystem boundary earns it, such as generated SDKs or
-  a small web UI.
-- **Source adapters are ports, not product identity.** A Markdown vault, QMD,
-  repo files, Monologue exports, web search, Gmail, or GitHub are replaceable
-  adapters behind the same evidence contract.
-- **Provenance beats clever ranking.** Every useful result carries a source
-  reference, retrieval time, freshness, trust label, privacy label, and enough
-  metadata to re-fetch or reject it.
-- **Rich context for models, structure for code.** Do not over-normalize prose
-  just because an LLM will read it. Add rigid fields only where deterministic
-  code must branch: privacy, trust, freshness, source identity, citation refs,
-  and capabilities.
-- **Read-only by default.** Retrieval and packet generation are safe. Ingest,
-  sync, writeback, deletion, and outward publication are separate capabilities
-  with explicit configuration and approval boundaries.
-- **Triggers over loops.** The long-term shape is event-driven ingest and
-  re-indexing. Polling is acceptable only as a cheap bridge with clear
-  freshness metadata.
+## Product Shape
 
-## What Belongs Here
+Exocortex should be thin at the product surface and serious in the substrate.
+
+- **One core, many faces.** The core owns source registry, ingest, indexes,
+  retrieval, packet assembly, evidence logs, and policy. CLI, MCP, HTTP API,
+  SDKs, skills, and any UI are projections over that same core.
+- **Local-first and self-hosted.** A single repo can carry its own
+  `.exocortex/` state. Service mode, hosted vector stores, or remote workers are
+  optional deployment choices, not the default premise.
+- **Batteries included, not platform swollen.** v0 should include local file and
+  Markdown ingest, URL/stdin ingest, embedded full-text and vector search,
+  local embeddings, QMD integration where available, and packet generation. It
+  should not require a user to design a retrieval stack before the first useful
+  result.
+- **Profiles over workflows.** Deterministic code owns privacy, trust,
+  freshness, capability checks, and citations. LLMs receive rich evidence, not a
+  maze of rigid schemas. Use profiles such as `repo_grounded`, `public_safe`,
+  `personal_context`, and `deep_research` instead of a workflow DSL.
+- **Agent-native, not agent-magical.** MCP tools should be intent-shaped:
+  `build_context_packet`, `search_context`, `fetch_source`, `ingest_source`,
+  and `organize_context`. They should call the same core as `exo packet`,
+  `exo search`, and `exo ingest`.
+- **Inspectable by default.** Every packet carries citations, source decisions,
+  freshness, gaps, and an evidence receipt. A future agent should not need chat
+  history to audit a decision.
+- **Manual and automatic.** Users can upload, ingest, tag, exclude, rebuild, and
+  organize by hand. Agents can suggest organization and run approved ingest
+  paths. Automated organization starts as suggestions; mutation requires an
+  explicit capability boundary.
+
+## Public Core Versus Private Consumers
 
 Public Exocortex owns:
 
-- Source registry and capability declarations.
-- Evidence and citation schemas.
-- Retrieval profiles and source-selection policy.
-- Adapter traits and a small set of reusable adapters.
-- Packet builder that emits compact, cited context for agents.
-- CLI, API, MCP, SDK, and skill surfaces over the same core.
-- Verification fixtures that prove privacy boundaries, citation stability, and
-  surface parity.
+- Workspace initialization and repo-local context state.
+- Source declarations, profiles, privacy/trust/freshness policy, and overlays.
+- Ingest adapters for files, Markdown, URLs, stdin, transcript/event JSONL, and
+  command-backed semantic search such as QMD.
+- Embedded metadata, full-text, vector, and relationship indexes.
+- Evidence chunks, source refs, context packets, citations, and JSONL receipts.
+- Surface parity across CLI, MCP, API, SDK, bundled skills, and an optional thin
+  evidence inspector UI.
+- Fixtures and gates proving citations are fetchable, private profiles do not
+  leak, and CLI/MCP/API behavior agrees.
 
 Private consumers own:
 
-- Actual personal or business data.
-- Source-specific configuration and secrets.
-- Personal workflows, rituals, voice, relationship context, and command-center
-  behavior.
-- Writeback policy into private systems.
-- Human-facing dashboards that are meaningful only for that private domain.
+- Real personal, business, client, and relationship data.
+- Secrets, source roots, collection names, and auth config.
+- Personal ranking preferences, rituals, voice, writeback policy, and command
+  center behavior.
+- Domain-specific dashboards, automations, and outbound actions.
 
-Daybook should be the first demanding consumer, not the product boundary.
+Daybook uses Exocortex. Adminifi may use a narrower overlay of Daybook or its
+own workspace. Neither should force private assumptions into the public core.
 
 ## What Exocortex Refuses
 
-Exocortex is not a universal RAG platform, a vector database project, an
-Obsidian replacement, a private memory dump, a scheduler, or an agent runner. It
-does not decide what a person should do. It does not hide citations behind a
-chat answer. It does not ship private Daybook assumptions as public defaults.
+Exocortex is not a chat app, an Obsidian replacement, a hosted SaaS premise, a
+workflow engine, a scheduler, an agent runner, or a vector database product.
+It can ship an embedded vector index, but the product is not "a vector DB." It
+can support research and ideation skills, but the core is not a research agent.
+It can expose a UI, but the UI is not the command center.
 
-If a feature cannot be explained as "make evidence from configured sources more
-available, trustworthy, reusable, or inspectable," it probably belongs
-elsewhere.
+If a feature cannot be explained as making configured context easier to ingest,
+search, assemble, cite, inspect, or safely reuse, it probably belongs in a
+consumer repo.
 
-## Excellence Bar
+## v0 Excellence
 
-For v0, excellence is a small contract that works end to end:
+v0 is excellent when a new repo can run this loop:
 
-- A downstream repo can declare sources.
-- A caller can ask for a context packet.
-- Exocortex retrieves from at least one semantic source, one exact-search source,
-  and one append-only firehose.
-- The packet includes citations and freshness metadata.
-- CLI and MCP expose the same behavior.
-- A fixture proves private sources do not leak into public-safe profiles.
+```sh
+exo init
+exo ingest ./notes --source notes
+exo ingest https://example.com/spec --source web
+exo search "what matters for this task?" --profile repo_grounded
+exo packet "prepare an implementation plan" --profile repo_grounded --out evidence/
+```
 
-For v1, excellence is composability:
+The same packet must be available through MCP with `build_context_packet`.
+The packet must include fetchable citations, freshness metadata, privacy/trust
+labels, source decisions, and gaps. The repo must remain understandable enough
+that a user can crack open the config or index receipts and fix what happened.
 
-- New sources are adapter additions, not new product branches.
-- SDK and MCP users can build against stable contracts.
-- Agents can request context by intent without loading every connector schema.
-- Consumers can inspect why a source was included, excluded, or downweighted.
+The first implementation should prove:
 
-For the long run, excellence is trust:
+- `exo init`, `exo ingest`, `exo search`, and `exo packet`.
+- MCP parity for packet building, search, fetch, ingest, and organization
+  suggestions.
+- Local embedded search with full-text plus vector search by default.
+- QMD as an optional command adapter, with Daybook keeping private collection
+  config outside the public repo.
+- A privacy fixture where `public_safe` excludes private-only sources.
+- A Daybook migration path that replaces context-gathering calls before moving
+  or rewriting any private data.
 
-- The system is useful enough that agents ask it before guessing.
-- The evidence log lets a future agent audit decisions without chat history.
-- Private consumers can adopt it without publishing their lives.
-- Public users can run it locally without signing up for a hosted platform.
+## Long-Term Bet
 
-The public promise is simple: bring your sources; get cited context packets;
-keep your private world private.
+The long-term bet is that every serious agent-run workspace will need a local
+context system: not a memory dump, not a chat transcript pile, but a composable
+evidence layer that both humans and agents can operate.
+
+The public promise stays simple: bring your sources, keep your private world
+private, and get cited context packets through whatever interface your agent or
+workflow needs.

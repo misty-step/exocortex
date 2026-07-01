@@ -3,27 +3,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Exocortex Public Context System Plan</title>
+  <title>Exocortex Public Context Core Shape</title>
   <style>
     :root {
       color-scheme: light dark;
-      --bg: #f7f4ee;
-      --ink: #1e2422;
-      --muted: #66706b;
-      --line: #d8d2c6;
+      --bg: #f5f1e9;
+      --ink: #18211f;
+      --muted: #5f6d68;
+      --line: #d8d0c2;
       --panel: #fffdf8;
-      --accent: #1f6f5b;
-      --warn: #9c4f18;
+      --accent: #1c7664;
+      --blue: #2d5f9a;
+      --warn: #9a501c;
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --bg: #111414;
-        --ink: #ece8df;
-        --muted: #a5ada7;
-        --line: #303736;
-        --panel: #181d1c;
-        --accent: #6bc6a8;
-        --warn: #e1a05f;
+        --ink: #eeece5;
+        --muted: #a7b0ab;
+        --line: #303836;
+        --panel: #191f1d;
+        --accent: #6ec7a8;
+        --blue: #86aee8;
+        --warn: #e0a467;
       }
     }
     * { box-sizing: border-box; }
@@ -34,38 +36,58 @@
       font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     .page {
-      width: min(1120px, calc(100% - 32px));
+      width: min(1180px, calc(100% - 32px));
       margin: 0 auto;
-      padding: 32px 0 56px;
+      padding: 30px 0 56px;
     }
-    h1, h2, h3 { line-height: 1.15; margin: 0; }
-    h1 { font-size: clamp(34px, 6vw, 74px); letter-spacing: 0; max-width: 10em; }
-    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
-    h3 { font-size: 18px; margin-bottom: 8px; }
-    p { margin: 8px 0 0; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
     .topbar {
       display: flex;
       justify-content: space-between;
       gap: 16px;
-      padding-bottom: 18px;
+      padding-bottom: 16px;
       border-bottom: 1px solid var(--line);
       color: var(--muted);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      text-transform: uppercase;
+      font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       letter-spacing: .08em;
+      text-transform: uppercase;
     }
     .hero {
       display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr);
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr);
       gap: 28px;
       align-items: end;
-      padding: 46px 0 30px;
+      padding: 42px 0 28px;
       border-bottom: 1px solid var(--line);
     }
-    .lede { font-size: 20px; color: var(--muted); max-width: 34em; margin-top: 18px; }
-    .panel {
+    h1, h2, h3 { margin: 0; line-height: 1.15; letter-spacing: 0; }
+    h1 { font-size: clamp(36px, 6vw, 76px); max-width: 10em; }
+    h2 {
+      color: var(--accent);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    h3 { font-size: 18px; margin: 8px 0 0; }
+    p { margin: 8px 0 0; }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .92em;
+    }
+    pre {
+      white-space: pre-wrap;
+      background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+      border: 1px solid var(--line);
+      padding: 16px;
+      margin: 20px 0 0;
+      overflow-x: auto;
+    }
+    .lede {
+      max-width: 38em;
+      color: var(--muted);
+      font-size: 20px;
+      margin-top: 16px;
+    }
+    .panel, .cell, .step {
       background: var(--panel);
       border: 1px solid var(--line);
       padding: 18px;
@@ -74,26 +96,28 @@
     .grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--line);
       border: 1px solid var(--line);
-      border-bottom: 0;
-      border-right: 0;
-      margin-top: 28px;
+      margin-top: 26px;
     }
-    .cell {
-      min-width: 0;
-      background: var(--panel);
-      border-right: 1px solid var(--line);
-      border-bottom: 1px solid var(--line);
-      padding: 18px;
-    }
+    .grid .cell { border: 0; min-width: 0; }
+    .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .wide { grid-column: span 2; }
-    .flow {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+    .section { margin-top: 30px; }
+    .pillrow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .pill {
       border: 1px solid var(--line);
-      padding: 18px;
-      overflow-x: auto;
-      margin-top: 24px;
+      background: color-mix(in srgb, var(--blue) 8%, var(--panel));
+      padding: 6px 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
     }
     table {
       width: 100%;
@@ -109,27 +133,20 @@
     }
     th {
       color: var(--muted);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
+      font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       text-transform: uppercase;
       letter-spacing: .06em;
     }
-    .section { margin-top: 32px; }
-    .steps {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 1px;
-      background: var(--line);
-      border: 1px solid var(--line);
-      margin-top: 14px;
-    }
-    .step { background: var(--panel); padding: 16px; }
-    .num { color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; }
-    ul { margin: 10px 0 0; padding-left: 18px; }
+    ul, ol { margin: 10px 0 0; padding-left: 20px; }
     li { margin: 5px 0; }
+    .num {
+      color: var(--accent);
+      font-weight: 700;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
     .warn { color: var(--warn); }
-    @media (max-width: 840px) {
-      .hero, .grid, .steps { grid-template-columns: 1fr; }
+    @media (max-width: 860px) {
+      .hero, .grid, .two, .four { grid-template-columns: 1fr; }
       .wide { grid-column: auto; }
     }
   </style>
@@ -138,141 +155,200 @@
 <div class="page">
   <div class="topbar">
     <span>Exocortex shape</span>
-    <span>Rendered planning artifact</span>
+    <span>Docs-only PR contract</span>
   </div>
 
   <div class="hero">
     <div>
-      <h1>Public context engine, private consumers.</h1>
-      <p class="lede">Exocortex should be the reusable evidence kernel that
-      Daybook consumes, not a public copy of Daybook. The chosen design is a
-      Rust-first core for source registry, evidence, retrieval profiles,
-      citations, and context packets, projected through CLI, API, MCP, SDK, and
-      a skill.</p>
+      <h1>Thin public core. Private command centers.</h1>
+      <p class="lede">Exocortex is the self-hosted context core that beats ad
+      hoc Markdown without turning into a chat app, vector database product, or
+      public copy of Daybook. One core owns ingest, indexes, evidence, profiles,
+      packets, and citations. CLI, MCP, API, SDK, skills, and any UI are thin
+      projections.</p>
     </div>
     <div class="panel">
       <h2>Work contract</h2>
-      <p><strong>Deliverable:</strong> root <code>VISION.md</code> plus a shaping
-      packet, no heavy scaffold and no remote.</p>
-      <p><strong>Proof now:</strong> files exist, HTML opened, boundary language
-      present, and git shows only the intended docs.</p>
-      <p><strong>Stop if:</strong> Daybook private content starts leaking into
-      public defaults, a code scaffold becomes necessary, or a remote/publish
-      step appears.</p>
+      <p><strong>Deliverable:</strong> update <code>VISION.md</code>, this
+      shaping packet, and the rendered HTML plan.</p>
+      <p><strong>Proof now:</strong> docs cover
+      <code>exo init</code>/<code>ingest</code>/<code>search</code>/<code>packet</code>,
+      MCP tools, public/private boundary, and Daybook migration.</p>
+      <p><strong>Stop condition:</strong> pause after PR. No crates, runtime
+      config, hidden Daybook data, or full build scaffold.</p>
     </div>
   </div>
 
   <div class="grid" aria-label="First viewport contract">
     <div class="cell">
-      <h2>Standards</h2>
-      <p>Evidence-first, cited, privacy-aware, source-extensible, and aligned
-      with the Factory one-core-many-faces pattern.</p>
+      <h2>Chosen design</h2>
+      <p>Thin product surface, batteries-included local substrate: source
+      registry, ingest, embedded full-text/vector search, local embeddings,
+      QMD adapter boundary, evidence logs, and packets.</p>
     </div>
     <div class="cell">
-      <h2>Acceptance</h2>
-      <p>A future implementer can tell what belongs in public Exocortex, what
-      stays private in Daybook, and what v0 proves.</p>
+      <h2>Why it wins</h2>
+      <p>It is easier and safer than hand-rolled Markdown conventions while
+      staying small enough to embed in Daybook, Adminifi, or any future repo.</p>
     </div>
     <div class="cell">
-      <h2>Verification</h2>
-      <p>Structural doc checks now. Future fixture: CLI and MCP produce the same
-      packet with fetchable citations and no private-source leakage.</p>
+      <h2>Proof surface</h2>
+      <p>This PR proves the design artifact. The first build PR must prove CLI
+      and MCP parity with fixture packets and privacy exclusions.</p>
     </div>
   </div>
 
-  <pre class="flow">sources -> adapters -> evidence log -> retrieval policy -> context packet
-                                      -> CLI / API / MCP / SDK / skill</pre>
+  <pre>sources -> ingest adapters -> object store -> indexes -> retrieval profiles
+        -> context packet builder -> CLI / MCP / API / SDK / skills / thin UI</pre>
 
-  <div class="grid" aria-label="Boundary">
-    <div class="cell wide">
-      <h2>Public core</h2>
-      <p>Source registry, adapter traits, evidence chunks, citation refs,
-      retrieval profiles, evidence logs, packet builder, fixture-backed
-      privacy/freshness tests, and agent-facing surfaces.</p>
+  <div class="section grid two" aria-label="Boundary">
+    <div class="cell">
+      <h2>Public Exocortex core</h2>
+      <p>Workspace init, source declarations, profiles, adapters, embedded
+      indexes, evidence chunks, source refs, context packets, citations, JSONL
+      receipts, MCP tools, SDK/API contracts, generic skills, and fixtures.</p>
+      <div class="pillrow">
+        <span class="pill">Source</span>
+        <span class="pill">SourceRef</span>
+        <span class="pill">EvidenceChunk</span>
+        <span class="pill">ContextPacket</span>
+        <span class="pill">IngestReceipt</span>
+      </div>
     </div>
     <div class="cell">
-      <h2>Private consumer</h2>
-      <p>Daybook owns its vault, QMD collection, Monologue paths, clippings,
-      people/project notes, voice, writeback policy, and personal workflows.</p>
+      <h2>Private Daybook consumer</h2>
+      <p>Vault content, QMD collection, source roots, secrets, Monologue paths,
+      clippings, people and finance context, personal ranking, voice, rituals,
+      writeback rules, and private evidence archives.</p>
+      <div class="pillrow">
+        <span class="pill">QMD config</span>
+        <span class="pill">Traces</span>
+        <span class="pill">MOCs</span>
+        <span class="pill">Private policy</span>
+      </div>
     </div>
   </div>
 
   <div class="section">
-    <h2>Minimal v0</h2>
-    <div class="steps">
-      <div class="step">
+    <h2>v0 command surface</h2>
+    <div class="grid four">
+      <div class="cell">
         <span class="num">01</span>
-        <h3>Sources</h3>
-        <p><code>Source</code>, <code>SourceRef</code>, capabilities, trust,
-        privacy, freshness, roots, and read-only flags.</p>
+        <h3><code>exo init</code></h3>
+        <p>Create repo-local config and state. No hosted dependency required.</p>
       </div>
-      <div class="step">
+      <div class="cell">
         <span class="num">02</span>
-        <h3>Evidence</h3>
-        <p><code>EvidenceChunk</code>, <code>EvidenceDocument</code>,
-        <code>ContextPacket</code>, citations, gaps, and JSONL logs.</p>
+        <h3><code>exo ingest</code></h3>
+        <p>Index files, Markdown, URLs, stdin, transcript/event JSONL, and
+        optional command-backed sources.</p>
       </div>
-      <div class="step">
+      <div class="cell">
         <span class="num">03</span>
-        <h3>Adapters</h3>
-        <p>Local files, Markdown vaults, repo context, firehose JSONL, and an
-        optional QMD command adapter.</p>
+        <h3><code>exo search</code></h3>
+        <p>Query configured sources by profile and return cited evidence chunks
+        with freshness and trust labels.</p>
       </div>
-      <div class="step">
+      <div class="cell">
         <span class="num">04</span>
-        <h3>Faces</h3>
-        <p>CLI first, MCP in parity, SDK after contract stability, HTTP when it
-        helps integration, UI deferred.</p>
+        <h3><code>exo packet</code></h3>
+        <p>Build compact agent-ready context packets with citations, decisions,
+        gaps, and evidence receipts.</p>
       </div>
     </div>
+  </div>
+
+  <div class="section grid two">
+    <div class="cell">
+      <h2>MCP tools</h2>
+      <ul>
+        <li><code>build_context_packet</code></li>
+        <li><code>search_context</code></li>
+        <li><code>fetch_source</code></li>
+        <li><code>ingest_source</code></li>
+        <li><code>organize_context</code> as suggest-only in v0</li>
+      </ul>
+    </div>
+    <div class="cell">
+      <h2>API and SDK</h2>
+      <p>Mirror the core verbs instead of creating a second product:
+      <code>init_workspace</code>, <code>list_sources</code>,
+      <code>ingest_source</code>, <code>search_context</code>,
+      <code>build_context_packet</code>, <code>fetch_source</code>,
+      <code>explain_packet</code>, and <code>suggest_organization</code>.</p>
+    </div>
+  </div>
+
+  <div class="section panel">
+    <h2>Daybook migration path</h2>
+    <ol>
+      <li>Preserve Daybook as private; no data move and no public config.</li>
+      <li>Add Daybook-local <code>.exocortex/config.yaml</code> for QMD, vault
+      roots, traces, Monologue, clippings, MOCs, and evidence destination.</li>
+      <li>Replace selected context-gathering calls with
+      <code>exo packet --profile personal_context</code>.</li>
+      <li>Write receipts under Daybook-owned evidence or trace paths.</li>
+      <li>Normalize firehoses through transcript/event JSONL ingest.</li>
+      <li>Register MCP only after CLI parity and fetchable citations.</li>
+      <li>Keep Daybook skills private; ship generic Exocortex skills publicly.</li>
+      <li>Test Adminifi-style overlays after the first read-only migration.</li>
+    </ol>
   </div>
 
   <div class="section panel">
     <h2>Alternatives</h2>
     <table>
       <thead>
-        <tr><th>Option</th><th>Tradeoff</th><th>Verdict</th></tr>
+        <tr><th>Option</th><th>Failure</th><th>Verdict</th></tr>
       </thead>
       <tbody>
         <tr>
+          <td>Ad hoc Markdown conventions</td>
+          <td>No shared API/MCP/SDK surface, weak receipts, weak privacy and freshness policy.</td>
+          <td class="warn">Baseline to beat</td>
+        </tr>
+        <tr>
           <td>Rename Daybook into Exocortex</td>
-          <td>Fast but publishes private assumptions as product shape.</td>
+          <td>Publishes private assumptions and makes personal policy look generic.</td>
           <td class="warn">Reject</td>
         </tr>
         <tr>
           <td>Full RAG/vector platform</td>
-          <td>Familiar but spends effort on commodity infrastructure.</td>
+          <td>Bloats into commodity infrastructure and loses the command-center core.</td>
           <td class="warn">Reject</td>
         </tr>
         <tr>
           <td>MCP wrapper over QMD/files</td>
-          <td>Quick access but no source governance, evidence log, or privacy model.</td>
+          <td>Fast but shallow: no evidence governance, parity, or packet contract.</td>
           <td class="warn">Reject</td>
         </tr>
         <tr>
-          <td>Public evidence kernel</td>
-          <td>Requires discipline, but cleanly composes with private consumers.</td>
+          <td>Thin context core with local index</td>
+          <td>Requires disciplined v0 scope and explicit private boundaries.</td>
           <td>Choose</td>
         </tr>
       </tbody>
     </table>
   </div>
 
-  <div class="section grid" aria-label="Migration and risks">
-    <div class="cell wide">
-      <h2>Daybook migration</h2>
-      <p>Configure private sources first. Replace selected QMD/context-gathering
-      paths with <code>exo packet</code>. Store evidence logs privately. Normalize
-      firehoses. Register MCP only after CLI parity. Keep Daybook skills private
-      and Exocortex skill generic.</p>
+  <div class="section grid two">
+    <div class="cell">
+      <h2>First build oracle</h2>
+      <p>Fixture repo runs <code>exo init</code>, ingests Markdown/URL/stdin,
+      searches with <code>repo_grounded</code>, writes
+      <code>packet.json</code> plus <code>evidence.jsonl</code>, replays the
+      same packet through MCP, and proves <code>public_safe</code> excludes
+      private-only sources.</p>
     </div>
     <div class="cell">
-      <h2>Open questions</h2>
+      <h2>Open design questions</h2>
       <ul>
-        <li>Optional QMD adapter in public v0, or private Daybook glue first?</li>
-        <li>Three profiles or the full five-profile set?</li>
-        <li>Stable JSON schema immediately, or Rust type plus export first?</li>
-        <li>Read-only MCP only, or separate ingest tool from day one?</li>
+        <li>Which embedded vector backend becomes the default?</li>
+        <li>Does QMD ship in first public slice or stay Daybook-private first?</li>
+        <li>How stable is <code>ContextPacket</code> JSON in v0?</li>
+        <li>Are Adminifi-style overlays v0 or post-Daybook-migration?</li>
+        <li>Does MCP include ingest on day one?</li>
+        <li>Is the thin evidence UI worth v0 scope?</li>
       </ul>
     </div>
   </div>
