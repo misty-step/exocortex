@@ -1,151 +1,266 @@
-# Context Packet: Public Composable Context System
+# Context Packet: Public Exocortex Core
 
 ## Goal
 
-Shape Exocortex as a public, reusable context engine that private systems such
-as Daybook can consume without turning their private content, commands, or
-personal workflows into public product assumptions.
+Shape Exocortex as a thin, public, self-hosted context core that private command
+centers such as Daybook can consume without publishing their data, rituals,
+ranking policy, or writeback behavior.
+
+The user outcome is simple: a human or agent can initialize a repo, point it at
+sources, ingest or index those sources, and ask for a cited context packet
+through CLI, MCP, API, SDK, skills, or a thin UI without rebuilding a bespoke
+Markdown/RAG stack each time.
 
 ## Non-Goals
 
-- Do not scaffold the Rust workspace yet.
-- Do not create a GitHub remote or publish anything.
-- Do not migrate Daybook in this session.
-- Do not copy private Daybook notes into this repo.
-- Do not build a vector database, scheduler, agent runner, or hosted SaaS.
-- Do not design personal Daybook rituals as public Exocortex features.
+- Do not scaffold the full Rust workspace in this PR.
+- Do not create `.exocortex/` runtime state in this repo yet.
+- Do not migrate Daybook in this PR.
+- Do not copy private Daybook content, config, secrets, traces, or QMD
+  collection names into the public repo.
+- Do not build a hosted SaaS, chat app, Obsidian clone, workflow engine,
+  scheduler, agent runner, or vector database product.
+- Do not make Daybook rituals, voice, personal ranking preferences, or writeback
+  behavior public defaults.
 
 ## Constraints And Invariants
 
-- Public/private separation is load-bearing: Exocortex is generic machinery;
+- Public/private separation is load-bearing: Exocortex is reusable machinery;
   Daybook is a private consumer and implementation.
-- The future durable implementation should be Rust-first unless a surface
-  boundary earns a small exception.
-- One core must feed many faces: API, CLI, MCP, SDK, skill, and possibly a thin
-  status UI.
-- MCP tools should be intent-shaped, not REST endpoints auto-wrapped 1:1.
-- Context returned to an LLM can stay rich and prose-like; deterministic code
+- The product should stay thinner than ad hoc Markdown in ceremony. A first user
+  should get value from `exo init`, `exo ingest`, `exo search`, and
+  `exo packet`.
+- The substrate should be batteries-included: local embedded metadata, full-text,
+  vector, and relationship indexes; local embeddings where possible; QMD as an
+  optional command adapter.
+- One core must feed many faces: CLI, MCP, HTTP API, SDK, bundled skills, and
+  any UI.
+- Surface parity matters. If a user can do it through CLI, an agent should be
+  able to do it through MCP, and an SDK/API caller should hit the same core
+  behavior.
+- MCP tools should be intent-shaped, not a 1:1 REST wrapper.
+- Context returned to an LLM can stay rich and prose-like. Deterministic code
   needs rigid fields only for source identity, privacy, trust, freshness,
   capabilities, citations, and branching policy.
-- Retrieval is read-only by default. Ingest/sync/writeback are separate
+- Retrieval and packet building are read-only by default. Ingest, sync,
+  organization, writeback, deletion, and outward publication are separate
   capabilities.
+
+## Repo Anchors
+
+- `VISION.md`: root north star for the public core.
+- `docs/shaping/public-context-system.md`: this buildable context packet.
+- `docs/shaping/public-context-system.html`: rendered planning artifact for
+  review.
+- `/Users/phaedrus/.factory-lanes/_brief.md`: Factory doctrine, especially one
+  core with API/CLI/MCP/SDK/skill and thin faces.
+- `/Users/phaedrus/.factory-lanes/exocortex.md`: lane contract and
+  public/private split.
+- `/Users/phaedrus/artifacts/public/a/factory/index.html`: Factory synthesis
+  report with the repeated MCP/SDK gap and one-core-many-faces pattern.
+- `/Users/phaedrus/Documents/daybook/AGENTS.md`: Daybook as private command
+  center with QMD-first context, traces, Monologue, and vault stewardship.
+- `/Users/phaedrus/Documents/daybook/docs/daybook-as-context-source-2026-05-22.md`:
+  prior Daybook context-source research and evidence contract.
 
 ## Current State Read
 
-The `exocortex` checkout was empty. I initialized a local-only git repository on
-`shape/public-context-system` to satisfy the lane guardrail to work on a branch;
-no remote was created.
+The repository currently contains only shaping artifacts on
+`shape/public-context-system`. No implementation scaffold exists. The first
+commit framed Exocortex as public evidence machinery consumed by Daybook. The
+operator then refined the target: keep the product very thin at the surface, but
+ship a useful local substrate by default rather than asking users to assemble
+Markdown conventions, embeddings, vector storage, QMD glue, MCP tools, and
+skills on their own.
 
-Daybook evidence read:
+Daybook evidence confirms the consumer pressure:
 
-- `AGENTS.md` / `CLAUDE.md`: Daybook is a private command center with QMD-first
-  semantic search, conversation traces, MOCs, Todoist/task surfaces, clippings,
-  Monologue ingest, and vault-maintenance conventions.
-- `docs/daybook-as-context-source-2026-05-22.md`: the prior best framing already
-  separates source adapters, normalized evidence, indexes/views, retrieval API,
-  context packets, and cited reports.
-- `scripts/MONOLOGUE-SYNC.md`: Monologue is a source adapter problem: read a
-  local JSON store, write normalized Markdown into a private inbox, preserve
-  source metadata.
-- `backlog.d/009`, `011`, `012`: Daybook has firehose pressure, stale navigation
-  artifacts, and a need for bounded maintenance loops.
+- Daybook is a private command center, not a public product.
+- QMD is the primary semantic context path today.
+- Conversation traces, Monologue sync, clippings, MOCs, project notes, and vault
+  maintenance already behave like sources and firehoses.
+- Daybook's value comes from private policy and context. Exocortex should
+  supply the public context engine underneath it.
 
-Factory evidence read:
+Factory evidence confirms the surface pattern:
 
-- The Factory synthesis makes "one core, many faces" the standing pattern:
-  functional core, thin API/CLI/MCP/SDK/skill/UI faces, no duplicated business
-  logic.
-- The recurring fleet gap is MCP plus SDK.
-- `bastion/apps/cairn` demonstrates the local exemplar: one Rust app with web,
-  JSON API, CLI, and MCP surfaces around shared models and storage.
+- One functional core should project into API, CLI, MCP, SDK, skill, and UI.
+- MCP plus SDK is the repeated fleet gap.
+- MCP tools should represent agent intent, not auto-wrapped endpoints.
 
-## Chosen Shape
+## Recommended Shape
 
-Exocortex should be a context kernel with three layers:
+Build the smallest credible command-center context kernel:
 
 ```text
-sources -> adapters -> evidence log -> retrieval policy -> context packet
-                                      -> API / CLI / MCP / SDK / skill
+sources -> ingest adapters -> object store -> indexes -> retrieval profiles
+        -> context packet builder -> CLI / MCP / API / SDK / skills / thin UI
 ```
 
-The core domain is not "notes" or "Daybook." The core domain is evidence:
-source identity, source capabilities, source trust, freshness, privacy, chunks,
-citations, and packet assembly.
+The product surface is intentionally small:
 
-### Public Exocortex Core
+```sh
+exo init
+exo ingest <path|url|stdin> [--source <id>]
+exo search "query" [--profile <profile>]
+exo packet "question" [--profile <profile>] [--out <dir>]
+```
 
-Own these concepts:
+Everything else exists to make those commands trustworthy, inspectable, and
+available to agents.
 
-- `Source`: declared context provider with capabilities, trust, privacy,
-  freshness, roots, auth mode, and read/write flags.
-- `SourceRef`: stable URI or path that can be cited and re-fetched.
-- `EvidenceChunk`: retrieved context with content, score, offsets when
-  available, metadata, freshness, privacy, and trust labels.
-- `EvidenceDocument`: hydrated full source behind a chunk.
-- `RetrievalProfile`: source-selection policy for intents such as
-  `repo_grounded`, `personal_context_heavy`, `external_validation_heavy`,
-  `compliance_safe`, and `fast_scan`.
-- `ContextPacket`: compact agent-ready bundle containing the question, profile,
-  evidence chunks, source decisions, citations, and residual gaps.
-- `EvidenceLog`: append-only JSONL receipt for what was searched, fetched,
-  included, excluded, and why.
+### Conceptual Repo-Local State
 
-### Adapter Boundary
-
-Adapters are imperative ports behind a small interface:
+This PR does not create runtime state, but the future default should be easy to
+understand:
 
 ```text
-search(intent, constraints) -> EvidenceChunk[]
-fetch(source_ref) -> EvidenceDocument
-ingest(input_ref) -> IngestReceipt
-health() -> SourceHealth
+.exocortex/
+  config.yaml            # sources, profiles, overlays, index settings
+  objects/               # normalized source refs, receipts, fetched metadata
+  index/                 # embedded metadata, FTS, vector, and graph indexes
+  packets/               # generated packets when --out is not supplied
+  logs/evidence.jsonl    # append-only retrieval and ingest receipts
+  views/                 # generated MOCs or source maps, never hand-authored truth
 ```
 
-Adapters know how QMD, ripgrep, filesystem roots, Markdown frontmatter,
-Monologue exports, MCP resources, or web search work. The core does not.
-
-### First Surfaces
-
-- CLI: `exo sources`, `exo search`, `exo fetch`, `exo packet`, `exo ingest`,
-  `exo explain`.
-- MCP: intent-level tools such as `build_context_packet`, `search_sources`,
-  `fetch_citation`, and `explain_source_decisions`.
-- SDK: thin Rust crate first; generated or tiny TypeScript/Python clients only
-  after the HTTP contract stabilizes.
-- HTTP API: useful once CLI/MCP behavior is proven; should mirror the core
-  verbs, not become the design authority.
-- Skill: describes when agents should use Exocortex and gives deterministic
-  commands for common packet-building flows.
-- Thin UI: deferred; if it exists, it should inspect evidence logs, source
-  freshness, and citations, not become a notebook app.
+The user should be able to crack the hood here without depending on a hosted
+dashboard or private Daybook scripts.
 
 ## Public Core Versus Private Daybook
 
 | Concern | Exocortex public core | Daybook private consumer |
 |---|---|---|
-| Identity | Context engine | Personal command center |
-| Data | Fixtures, schemas, generic adapters | Journal, people, finance, projects, voice, traces |
-| Search | Adapter traits, QMD-capable adapter, rg/filesystem adapter | `qmd -c daybook`, vault paths, private ranking preferences |
-| Firehoses | Generic append-only ingest schema | Monologue, clippings, conversation traces, private inboxes |
-| Navigation | MOC/link graph adapter primitives | Actual MOCs and vault maps |
-| Policy | Trust/freshness/privacy fields and profile engine | Which personal sources are allowed for which workflows |
-| Writeback | Capability boundary only | Notes, Todoist, traces, vault gardening, private approvals |
-| Surfaces | CLI/API/MCP/SDK/skill over evidence | Daybook commands that call Exocortex |
+| Identity | Self-hosted context core | Personal command center and vault |
+| Data | Fixtures, schemas, generic adapter code, generated receipts | Journal, people, finance, projects, voice, traces, clippings |
+| Config | Source/profile schema, overlay model, capability boundaries | Actual source roots, QMD collection, secrets, private policies |
+| Search | Embedded full-text/vector search, adapter traits, QMD command adapter | `qmd -c daybook`, private ranking preferences, vault-specific semantics |
+| Ingest | Files, Markdown, URL, stdin, transcript/event JSONL, command adapters | Monologue, Super Whisper, clippings, conversation traces, private inboxes |
+| Organization | Suggested tags, source maps, generated views, approval boundary | Real MOCs, vault gardening, personal taxonomy, writeback decisions |
+| Skills | Generic "build/fetch/inspect context" skills | Daybook-specific rituals, voice, kickoff/debrief behavior |
+| MCP | Intent tools over the public core | Registered private server/profile config and source permissions |
+| UI | Thin source/evidence/packet inspector | Any personal dashboard or command-center experience |
+| Logs | Generic JSONL receipts and packet provenance | Private evidence archives and conversation-trace links |
 
-## Minimal v0
+The boundary rule: public Exocortex may know that a `qmd_command` adapter
+exists. It must not know Daybook's private collection, folders, or policies.
 
-The v0 should prove the contract with fixtures before touching live private
-data.
+## v0 Surface
 
-### Data Model
+### CLI Surface
+
+- Command tree:
+  - `exo init`
+  - `exo sources list|add|doctor`
+  - `exo ingest <path|url|-> --source <id> [--profile <profile>]`
+  - `exo search "query" --profile <profile> [--json|--plain]`
+  - `exo packet "question" --profile <profile> [--out <dir>] [--json]`
+  - `exo fetch <source-ref> [--json|--plain]`
+  - `exo explain <packet-or-ref>`
+  - `exo organize suggest [--profile <profile>]`
+- Primary users: humans at a terminal, scripts, and agents shelling out.
+- Inputs: args, stdin, files, URLs, repo-local config, env for provider keys, and
+  optional adapter commands such as QMD.
+- Outputs: human summaries by default, `--json` for machines, packet files when
+  `--out` is supplied, diagnostics/progress to stderr.
+- Interactivity: prompts allowed only on TTY; `--no-input` disables prompts.
+- Safety: no destructive organization or writeback in v0. `organize suggest`
+  emits a plan; applying it is explicitly out of this PR and should require a
+  future approval flag/capability.
+- Config precedence: flags > env > repo `.exocortex/config.yaml` > user config >
+  defaults.
+- Platform/runtime: Rust single binary should be the default target. Non-Rust
+  clients are thin generated or handwritten SDK surfaces after the contract is
+  stable.
+- Exit code map:
+  - `0`: command succeeded.
+  - `1`: invalid input, missing source, or no usable config.
+  - `2`: partial packet with gaps or stale sources when `--strict` is set.
+  - `3`: privacy/capability violation blocked the request.
+
+### MCP Tools
+
+MCP should expose agent-intent tools, each backed by the same core path as the
+CLI:
+
+- `build_context_packet(question, profile, constraints)`: returns packet
+  content, citations, gaps, and receipt path.
+- `search_context(query, profile, constraints)`: returns ranked evidence chunks
+  with source decisions.
+- `fetch_source(source_ref)`: hydrates a cited source or chunk.
+- `ingest_source(input_ref, source_id, options)`: imports or indexes a source
+  when the configured capability allows it.
+- `organize_context(scope, profile, mode="suggest")`: proposes tags, source
+  maps, stale-source fixes, or view updates. v0 is suggest-only.
+
+Do not auto-wrap every CLI/API command. Keep read tools separate from ingest or
+mutation tools so risk levels are visible to agents and clients.
+
+### API And SDK
+
+The HTTP API and SDK should mirror core verbs, not become a second design:
+
+- `init_workspace`
+- `list_sources`
+- `ingest_source`
+- `search_context`
+- `build_context_packet`
+- `fetch_source`
+- `explain_packet`
+- `suggest_organization`
+
+SDKs should make common flows concise, but they should not add behavior that the
+CLI/MCP cannot exercise.
+
+### Thin UI
+
+A UI is allowed only as an inspector over the proven core:
+
+- source status and freshness
+- ingest receipts
+- packet explorer
+- citation fetch/preview
+- profile and privacy diagnostics
+- organization suggestions awaiting approval
+
+It should not become a notebook app, personal dashboard, or chat front-end in
+v0.
+
+## Built-In Substrate
+
+Exocortex should be thin, but not hollow. v0 should ship a local stack that works
+without asking the user to design retrieval infrastructure:
+
+- source registry with capabilities, trust, privacy, freshness, auth mode, and
+  roots
+- local object metadata and fetch receipts
+- embedded full-text search
+- embedded vector search with local embeddings by default
+- lightweight graph/relationship edges from links, paths, source refs, and
+  generated views
+- local file and Markdown ingest
+- URL and stdin ingest
+- transcript/event JSONL ingest for firehoses
+- optional QMD command adapter
+- packet builder with citations, source decisions, freshness, and gaps
+- JSONL evidence log
+
+Backend flexibility comes later through adapters: Qdrant, LanceDB, hosted file
+search, or provider embeddings can be swapped in, but a useful local default is
+part of the product promise.
+
+## Core Domain Model
 
 ```text
+Workspace
+  id, root, config_version, default_profile, inherits[]
+
 Source
   id, kind, display_name, capabilities[], roots[], auth_scope,
-  privacy_level, trust_level, freshness_policy, read_only
+  privacy_level, trust_level, freshness_policy, read_only, adapter_config
 
 SourceRef
-  source_id, uri, path, fragment, checksum, observed_at
+  source_id, uri, path, fragment, checksum, observed_at, fetch_hint
 
 EvidenceChunk
   source_ref, title, content, score, rank, offsets,
@@ -153,114 +268,134 @@ EvidenceChunk
 
 ContextPacket
   id, question, profile, constraints, generated_at,
-  source_decisions[], evidence[], citations[], gaps[]
+  source_decisions[], evidence[], citations[], gaps[], receipt_ref
 
 IngestReceipt
   source_id, input_ref, documents_seen, documents_changed,
-  index_updated, warnings[]
+  index_updated, warnings[], receipt_ref
+
+RetrievalProfile
+  id, include_sources[], exclude_sources[], privacy_floor,
+  trust_policy, freshness_policy, ranking_policy, max_chunks
 ```
 
-### First Adapters
+Keep this model as stable as possible at the boundaries, but do not freeze every
+internal index shape before the first Daybook migration teaches us what matters.
 
-1. `local_files`: read-only filesystem roots, frontmatter, exact fetch, checksum.
-2. `markdown_vault`: Markdown notes, wikilinks, MOC/index discovery, basic
-   frontmatter filtering.
-3. `repo_context`: `AGENTS.md`, `VISION.md`, README, backlog, docs, and rg
-   search in the current repo.
-4. `firehose_jsonl`: append-only transcript/event imports with stable source
-   refs and timestamps.
-5. `qmd_command`: optional command adapter for QMD-like local semantic search.
-   It ships as generic command integration; Daybook supplies the private
-   collection name and roots.
+## First Profiles
 
-Defer Gmail, Slack, GitHub, hosted vector stores, and full web search until the
-local evidence contract is proven.
+Start with four profiles:
 
-### First Public Commands
+- `repo_grounded`: current repo, docs, backlog, local files, exact search, and
+  only explicitly configured external/private sources.
+- `public_safe`: excludes private sources and secrets by default; suitable for
+  public docs, PRs, and external sharing.
+- `personal_context`: allows private command-center sources such as Daybook when
+  configured by the consumer.
+- `deep_research`: combines local configured context with external retrieval
+  adapters and subagent-ready packet receipts. The core builds the packets; a
+  research skill or downstream agent does the orchestration.
 
-```sh
-exo sources list
-exo search "query" --profile repo-grounded --source current_repo
-exo fetch qmd://daybook/meta/example.md
-exo packet "what context matters for this task?" --profile repo-grounded --out evidence/
-exo explain evidence/packet.json
-```
+Avoid a large taxonomy in v0. Profiles should be a small policy layer, not a
+workflow language.
 
-The CLI should emit machine-readable JSON by default when asked and human-readable
-summaries otherwise. The MCP server should call the same core path as `exo
-packet`.
+## Daybook To Exocortex Migration Path
 
-## Migration Path: Daybook On Exocortex
+1. **Preserve Daybook as private.** No data move. No public config. No private
+   notes, collection names, or secrets land in Exocortex.
+2. **Add private Daybook config.** Create Daybook-local `.exocortex/config.yaml`
+   mapping QMD, vault roots, conversation traces, Monologue inbox, clippings,
+   project notes, MOCs, and evidence-log destination.
+3. **Read path first.** Replace selected Daybook context-gathering calls with
+   `exo packet --profile personal_context` while leaving QMD and existing
+   scripts intact.
+4. **Record evidence privately.** Write receipts under a Daybook-owned location,
+   likely `meta/evidence/` or linked conversation traces, so future agents can
+   audit source decisions.
+5. **Normalize firehoses.** Route Monologue, clippings, and conversation traces
+   through the generic transcript/event JSONL adapter; Daybook keeps source
+   policy and raw transcript conventions.
+6. **Register MCP after CLI parity.** Daybook should use the Exocortex MCP server
+   only once the same packet can be produced through the CLI and citations are
+   fetchable.
+7. **Move skills by boundary.** Exocortex ships generic context skills. Daybook
+   skills call Exocortex but keep personal voice, kickoff/debrief behavior, and
+   writeback rules private.
+8. **Introduce overlays for subsets.** Adminifi can inherit a narrow Daybook
+   profile without copying Daybook data:
 
-1. **Configure, do not move.** Add a private Daybook `sources.yaml` that points
-   to QMD, vault roots, Monologue inbox, clippings, conversation traces, and MOC
-   files. No public repo receives private content.
-2. **Read path first.** Replace selected Daybook command context gathering with
-   `exo packet` calls while leaving existing QMD and scripts intact.
-3. **Evidence logs.** Write packet receipts next to Daybook conversation traces
-   or private `meta/briefs/` so future agents can audit sources without chat
-   context.
-4. **Firehose normalization.** Route Monologue/clippings/conversation traces
-   through a generic firehose adapter; Daybook keeps processing policy.
-5. **Agent-native access.** Register the Exocortex MCP server for Daybook once
-   CLI parity is verified.
-6. **Skill boundary.** Daybook skills say when to ask Exocortex; Exocortex skill
-   says how to build packets. Do not duplicate private voice or rituals into
-   the public skill.
+   ```yaml
+   workspace: adminifi
+   inherits:
+     - ../daybook/.exocortex
+   include_profiles:
+     - adminifi_context
+   exclude:
+     - personal
+     - finance_private
+     - relationship_private
+   ```
+
+   This overlay/inheritance design is promising, but it should remain an open
+   design question until Daybook proves the first read-only migration.
 
 ## Alternatives Considered
 
 | Option | Why it helps | Why it fails | Verdict |
 |---|---|---|---|
-| Rename Daybook into Exocortex | Fast path from working private system | Public repo would inherit private assumptions and personal data boundaries | Reject |
-| Build a full RAG/vector platform | Familiar category, broad connector story | Rebuilds commodity infrastructure and hides the real value: provenance, trust, and profiles | Reject |
-| MCP wrapper over QMD and files | Quick agent access | Becomes another shallow adapter; no evidence log, source policy, privacy, or citation discipline | Reject |
-| Public evidence kernel consumed by Daybook | Clean boundary, reusable, aligns with Factory pattern | Requires careful v0 scope and fixtures before it feels useful | Choose |
-| Keep this as Daybook-only scripts | Lowest immediate effort | Cannot become a public factory component or reusable SDK/MCP surface | Reject |
+| Ad hoc Markdown conventions | Lowest setup cost and already familiar | No shared API/MCP/SDK surface, no evidence receipts, weak privacy/freshness policy | Reject as the baseline to beat |
+| Rename Daybook into Exocortex | Fast path from a working private system | Public repo inherits private assumptions and risks leaking personal boundaries | Reject |
+| Full RAG/vector platform | Familiar category, connector-rich, easy to explain | Competes on commodity infrastructure and bloats past the command-center core | Reject |
+| MCP wrapper over QMD/files | Quick agent access | Shallow pass-through with no source governance, surface parity, or packet contract | Reject |
+| Hosted context SaaS | Easy onboarding story | Violates self-hosted/local-first premise and private-consumer trust | Reject for now |
+| Thin public context core with baked-in local index | Beats Markdown while staying composable; supports Daybook, Adminifi, and future repos | Requires careful v0 scope and parity discipline | Choose |
 
 ## Oracle
 
-For this shaping session:
+This PR is a shaping PR, not the implementation PR. It is done when:
 
-- `VISION.md` exists and states the public/private boundary.
-- `docs/shaping/public-context-system.md` exists and sketches boundary, v0 data
-  model, API surfaces, adapters, migration path, alternatives, and open
-  questions.
-- `docs/shaping/public-context-system.html` exists and has been opened for
-  rendered review.
-- No remote exists.
+- `VISION.md` states the public Exocortex core, private Daybook consumer
+  boundary, thin surface, embedded index promise, and v0 excellence loop.
+- `docs/shaping/public-context-system.md` covers the boundary, v0
+  `exo init/ingest/search/packet` surface, MCP tools, API/SDK parity, built-in
+  substrate, Daybook migration path, alternatives, and open questions.
+- `docs/shaping/public-context-system.html` is updated as the rendered planning
+  artifact and opened for review.
+- The branch is pushed to `origin/shape/public-context-system`.
+- A GitHub PR is open.
+- No full build scaffold is introduced.
 
-For the first implementation slice:
+First implementation PR oracle, for later:
 
-- A fixture repo plus fixture Markdown vault can declare sources.
-- `exo packet "..." --profile repo-grounded` emits a context packet and
-  `evidence.jsonl` with fetchable citations.
-- The same packet can be produced through MCP.
-- A privacy fixture proves a `public_safe` profile excludes private-only
-  sources.
-- A stale-source fixture shows freshness warnings in the packet.
+- Fixture repo runs `exo init`.
+- Fixture Markdown/URL/stdin sources run through `exo ingest`.
+- `exo search "query" --profile repo_grounded --json` returns cited evidence
+  chunks.
+- `exo packet "question" --profile repo_grounded --out evidence/` writes
+  `packet.json` and `evidence.jsonl`.
+- MCP `build_context_packet` produces an equivalent packet from the same core.
+- `public_safe` fixture excludes private-only sources.
+- `exo explain` shows included/excluded source decisions and freshness gaps.
 
 ## Verification System
 
-- Claim: Exocortex can produce an auditable context packet from configured
-  sources without leaking private sources into profiles that exclude them.
-- Falsifier: a packet cites an un-fetchable source, omits freshness metadata,
-  includes a private source under a public-safe profile, or CLI/MCP disagree.
-- Driver: future fixture command plus MCP replay:
-  `cargo test --workspace`, `cargo run -- exo packet ...`, and an MCP
-  `build_context_packet` replay.
-- Grader: JSON schema checks, citation fetch checks, privacy exclusion
-  assertions, and CLI/MCP golden comparison.
-- Evidence packet: `evidence.jsonl`, `packet.json`, command transcript, and MCP
-  replay transcript.
-- Cadence: before first implementation PR, after adapter additions, and before
-  registering Daybook as a live consumer.
-- Current gap: no code exists yet; this session verifies only the design
-  artifacts and local repo state.
+- Claim: the docs now define a buildable public Exocortex context core without
+  scaffolding the implementation or blurring the Daybook private boundary.
+- Falsifier: docs omit the v0 CLI/MCP surface, treat Daybook as public product,
+  describe Exocortex as only a vector DB/RAG app, or introduce runtime scaffold.
+- Driver: file inspection, targeted `rg` checks, ASCII scan, HTML parse,
+  `git diff --check`, git status, push, and PR creation.
+- Grader: expected terms and files are present; no unexpected runtime files are
+  created; GitHub reports an open PR; branch/remote sync check reports `0 0`.
+- Evidence packet: command transcript in this run plus the pushed PR URL.
+- Cadence: this docs PR now; first implementation PR must add executable
+  fixture commands and MCP replay.
+- Gap/waiver: no live `exo` binary exists yet, so implementation behavior is not
+  claimed in this PR.
 
 ## Premise Sources
 
-- `sha256:378a96eb94605bd996953e9e37ecc50d77c678ad11025b0786ae03456bb38175`
+- `sha256:fdbf950fca898db1eb0036fa83c291e090c4825d15a32fa8205c26d072cf79fa`
   `/Users/phaedrus/.factory-lanes/_brief.md`
 - `sha256:e6c8e8583a75ee850eb9ba823040ce7f29a7b6dc836b5a2304e693a77d729548`
   `/Users/phaedrus/.factory-lanes/exocortex.md`
@@ -270,42 +405,53 @@ For the first implementation slice:
   `/Users/phaedrus/Documents/daybook/AGENTS.md`
 - `sha256:3324198385b6ae223aab7221f68b389417e42569e3ceab9480fa9ce7c5879923`
   `/Users/phaedrus/Documents/daybook/docs/daybook-as-context-source-2026-05-22.md`
+- Waiver: the operator's 2026-07-01 chat refinement about thinness, embedded
+  vectors/embeddings/QMD, skills, self-hosting, Adminifi nesting, and the PR
+  pause instruction is not a stable repo file; this packet incorporates it
+  directly and reports the remaining decisions below.
 
 ## HTML Plan
 
-`docs/shaping/public-context-system.html`
+`docs/shaping/public-context-system.html`, opened locally after edit.
 
 ## Risks And Mitigations
 
-- **Daybook overfit:** keep Daybook config private and make public fixtures the
-  first implementation target.
-- **Connector sprawl:** require every adapter to enter through `Source` and the
-  adapter trait; no bespoke workflow prose per connector.
-- **Shallow MCP:** design MCP tools by agent intent and call the same packet
-  builder as the CLI.
+- **Daybook overfit:** use public fixtures first and keep Daybook config private.
+- **Too thin to beat Markdown:** ship embedded search, vector index, embeddings,
+  packet receipts, and MCP parity in v0 instead of just schemas.
+- **Too thick to stay composable:** keep research, ideation, writeback, and UI
+  workflows as skills or consumers over the core.
+- **Connector sprawl:** every adapter must enter through `Source`,
+  `SourceRef`, `EvidenceChunk`, and `IngestReceipt`.
+- **Shallow MCP:** design MCP tools around agent intent and keep read/ingest
+  risk levels separate.
 - **Over-structured AI seam:** keep chunk content rich; reserve rigid schema for
-  deterministic policy fields.
-- **Stale indexes:** freshness metadata is mandatory before any ranking looks
-  credible.
-- **Premature UI:** defer UI until evidence logs exist; otherwise it will be a
-  decorative browser over unproven retrieval.
+  deterministic policy and citations.
+- **Stale indexes:** freshness metadata and source health must be visible before
+  ranking looks credible.
+- **Unsafe self-organization:** v0 organization is suggest-only; apply/writeback
+  needs explicit future capability and approval design.
 
 ## Open Questions
 
-1. Should Exocortex v0 include an optional QMD command adapter, or should it
-   start with generic filesystem/Markdown/rg only and let Daybook keep QMD
-   behind private glue for one slice?
-2. What is the right first profile set: the five from the Daybook research note,
-   or a smaller trio of `repo_grounded`, `personal_context_heavy`, and
-   `public_safe`?
-3. Should `ContextPacket` be a stable public JSON schema in v0, or a Rust type
-   plus JSON export that is allowed to churn until the first Daybook migration?
-4. Is the first MCP server read-only only, or should `ingest_firehose` appear as
-   a separate write-capable tool from the start?
-5. Where should Daybook store evidence logs: beside conversation traces, under
-   `meta/briefs/`, or in a new private `meta/evidence/` area?
-6. How much source ranking should v0 attempt beyond deterministic profile
-   ordering, trust/freshness labels, and adapter scores?
-7. Does the public repo eventually want a thin UI for evidence-log inspection,
-   or should that remain a downstream consumer concern until API/MCP usage
-   proves demand?
+1. Should the embedded vector layer default to a specific local backend in v0, or
+   start behind a trait with a simple in-process implementation and choose the
+   durable backend after fixtures?
+2. Should QMD ship as a public optional command adapter in the first
+   implementation slice, or should Daybook keep QMD behind private glue until
+   the file/Markdown/URL path is proven?
+3. How much of `ContextPacket` should be a stable public JSON schema in v0
+   versus a Rust type with JSON export allowed to churn until Daybook migrates?
+4. Are overlays/inheritance (`Adminifi` as a subset of Daybook) a v0 design
+   requirement, or should they wait until Daybook has a working private
+   `.exocortex/` config?
+5. Should `ingest_source` appear in the first MCP server, or should v0 MCP be
+   read-only except for packet/search/fetch until privacy and capability gates
+   are battle-tested?
+6. Where should Daybook store Exocortex evidence logs: beside conversation
+   traces, under `meta/briefs/`, or in a new `meta/evidence/` area?
+7. What is the minimum useful skill pack for v0: one generic context skill, or
+   separate skills for packet building, deep research, creative ideation, and
+   organization review?
+8. Should the thin UI exist in v0 as an evidence inspector, or should it wait
+   until CLI/MCP/API usage proves the inspection gaps?
