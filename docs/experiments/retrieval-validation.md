@@ -77,12 +77,15 @@ Use Crucible to grade two layers:
 Implementation may resume only if the experiment report shows all of the
 following:
 
-- Deterministic citation-fetchability pass rate is at least 95%.
-- No critical private-profile violation occurs.
+- Deterministic citation-fetchability pass rate for the Exocortex arms is at
+  least 95%. The incumbent baseline is reported separately and cannot block
+  unfreeze solely for lacking Exocortex citation structure.
+- No critical private-profile violation occurs in either Exocortex arm.
 - `exo packet` beats the incumbent baseline on relevance/completeness for a
   majority of paired questions, with the Wilson lower bound above 0.50.
-- Any inconclusive or failed result produces a revised experiment or backlog
-  change before kernel implementation.
+
+If the result is inconclusive or failed, implementation remains frozen until a
+revised experiment or backlog change is recorded.
 
 ## Evidence Packet
 
