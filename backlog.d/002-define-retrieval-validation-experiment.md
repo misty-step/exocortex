@@ -1,6 +1,6 @@
 # Define the retrieval validation experiment before building
 
-Priority: P0 · Status: ready · Estimate: M
+Priority: P0 · Status: done · Estimate: M
 
 ## Goal
 Define the retrieval-quality experiment that must produce evidence before
@@ -30,5 +30,6 @@ Exocortex leaves frozen-experimental status.
 6. Specify privacy redaction and where private receipts live outside this public repo.
 
 ## Notes
+- Completed by `docs/experiments/retrieval-validation.md`.
 - This is an experiment-definition item only. It does not authorize building `exo`.
 - The public repo may describe the baseline generically; private command names and collection paths belong in the consumer workspace.

@@ -53,14 +53,14 @@
     }
     .hero {
       display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr);
+      grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr);
       gap: 28px;
       align-items: end;
       padding: 42px 0 28px;
       border-bottom: 1px solid var(--line);
     }
     h1, h2, h3 { margin: 0; line-height: 1.15; letter-spacing: 0; }
-    h1 { font-size: clamp(36px, 6vw, 76px); max-width: 10em; }
+    h1 { font-size: clamp(36px, 6vw, 72px); max-width: 11em; }
     h2 {
       color: var(--accent);
       font-size: 13px;
@@ -82,12 +82,12 @@
       overflow-x: auto;
     }
     .lede {
-      max-width: 38em;
+      max-width: 40em;
       color: var(--muted);
       font-size: 20px;
       margin-top: 16px;
     }
-    .panel, .cell, .step {
+    .panel, .cell {
       background: var(--panel);
       border: 1px solid var(--line);
       padding: 18px;
@@ -155,58 +155,55 @@
 <div class="page">
   <div class="topbar">
     <span>Exocortex shape</span>
-    <span>Docs-only PR contract</span>
+    <span>Frozen-experimental contract</span>
   </div>
 
   <div class="hero">
     <div>
-      <h1>Thin public core. Private command centers.</h1>
-      <p class="lede">Exocortex is the self-hosted context core that beats ad
-      hoc Markdown without turning into a chat app, vector database product, or
-      public copy of Daybook. One core owns ingest, indexes, evidence, profiles,
-      packets, and citations. CLI, MCP, API, SDK, skills, and any UI are thin
-      projections.</p>
+      <h1>Public evidence core. Private consumers.</h1>
+      <p class="lede">Exocortex is a local-first context evidence core for
+      agents. It ships reusable machinery for sources, profiles, citations,
+      receipts, and packets while private consumers keep roots, commands,
+      policies, secrets, and archives outside the public repo.</p>
     </div>
     <div class="panel">
       <h2>Work contract</h2>
-      <p><strong>Deliverable:</strong> update <code>VISION.md</code>, this
-      shaping packet, and the rendered HTML plan.</p>
-      <p><strong>Proof now:</strong> docs cover
-      <code>exo init</code>/<code>ingest</code>/<code>search</code>/<code>packet</code>,
-      MCP tools, public/private boundary, and Daybook migration.</p>
-      <p><strong>Stop condition:</strong> pause after PR. No crates, runtime
-      config, hidden Daybook data, or full build scaffold.</p>
+      <p><strong>Deliverable:</strong> scrub the public/private boundary, close
+      the shape questions as decisions, and define the retrieval experiment.</p>
+      <p><strong>Proof now:</strong> repo-wide boundary grep, markdown/HTML
+      inspection, experiment doc inspection, and no runtime scaffold.</p>
+      <p><strong>Stop condition:</strong> no implementation until the retrieval
+      experiment reports an accepted result.</p>
     </div>
   </div>
 
   <div class="grid" aria-label="First viewport contract">
     <div class="cell">
       <h2>Chosen design</h2>
-      <p>Thin product surface, batteries-included local substrate: source
-      registry, ingest, embedded full-text/vector search, local embeddings,
-      QMD adapter boundary, evidence logs, and packets.</p>
+      <p>One evidence core with generic adapters, LanceDB local index state,
+      profiles, fetchable citations, JSONL receipts, and packet compilation.</p>
     </div>
     <div class="cell">
       <h2>Why it wins</h2>
-      <p>It is easier and safer than hand-rolled Markdown conventions while
-      staying small enough to embed in Daybook, Adminifi, or any future repo.</p>
+      <p>It is more auditable than ad hoc Markdown without turning into a
+      private workspace, hosted memory product, scheduler, or agent runner.</p>
     </div>
     <div class="cell">
       <h2>Proof surface</h2>
-      <p>This PR proves the design artifact. The first build PR must prove CLI
-      and MCP parity with fixture packets and privacy exclusions.</p>
+      <p>The next proof is a Crucible-graded retrieval experiment on private
+      data. Build work waits for that result.</p>
     </div>
   </div>
 
-  <pre>sources -> ingest adapters -> object store -> indexes -> retrieval profiles
-        -> context packet builder -> CLI / MCP / API / SDK / skills / thin UI</pre>
+  <pre>sources -> adapters -> local store/index -> retrieval profiles
+        -> evidence session -> context packet -> CLI / MCP / API / SDK / skill</pre>
 
   <div class="section grid two" aria-label="Boundary">
     <div class="cell">
       <h2>Public Exocortex core</h2>
-      <p>Workspace init, source declarations, profiles, adapters, embedded
-      indexes, evidence chunks, source refs, context packets, citations, JSONL
-      receipts, MCP tools, SDK/API contracts, generic skills, and fixtures.</p>
+      <p>Workspace init, source declarations, profiles, generic adapters,
+      LanceDB-backed index state, source refs, packets, citations, receipts,
+      three MCP tools, SDK/API contracts, one generic skill, and fixtures.</p>
       <div class="pillrow">
         <span class="pill">Source</span>
         <span class="pill">SourceRef</span>
@@ -216,16 +213,31 @@
       </div>
     </div>
     <div class="cell">
-      <h2>Private Daybook consumer</h2>
-      <p>Vault content, QMD collection, source roots, secrets, Monologue paths,
-      clippings, people and finance context, personal ranking, voice, rituals,
-      writeback rules, and private evidence archives.</p>
+      <h2>Private consumers</h2>
+      <p>Actual roots, commands, credentials, ranking preferences, policies,
+      domain data, voice, rituals, outbound actions, and private evidence
+      archives stay outside this repo.</p>
       <div class="pillrow">
-        <span class="pill">QMD config</span>
-        <span class="pill">Traces</span>
-        <span class="pill">MOCs</span>
-        <span class="pill">Private policy</span>
+        <span class="pill">Private roots</span>
+        <span class="pill">Commands</span>
+        <span class="pill">Credentials</span>
+        <span class="pill">Policies</span>
       </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Closed decisions</h2>
+    <div class="grid three">
+      <div class="cell"><span class="num">01</span><h3>LanceDB</h3><p>Single v0 backend. No storage trait until a second backend earns it.</p></div>
+      <div class="cell"><span class="num">02</span><h3>Generic command adapter</h3><p>Public core parses configured command output; private command names stay private.</p></div>
+      <div class="cell"><span class="num">03</span><h3><code>citation/v1</code></h3><p>Freeze fetchable citation refs; keep packet body versioned and allowed to churn.</p></div>
+      <div class="cell"><span class="num">04</span><h3>No inheritance language</h3><p>Subsets are profiles owned by the source workspace.</p></div>
+      <div class="cell"><span class="num">05</span><h3>Read-only MCP</h3><p>First server exposes only packet, search, and fetch tools.</p></div>
+      <div class="cell"><span class="num">06</span><h3>Private receipt destinations</h3><p>Public repo defines receipt shape; consumers decide where private receipts live.</p></div>
+      <div class="cell"><span class="num">07</span><h3>One skill</h3><p>Build a cited context packet before acting. Domain skills stay with consumers.</p></div>
+      <div class="cell"><span class="num">08</span><h3>No v0 UI</h3><p>Packet files, JSONL receipts, and <code>exo explain --html</code> are the inspector.</p></div>
+      <div class="cell"><span class="num">09</span><h3>Evidence sessions</h3><p><code>exo packet</code> compiles iterative search/fetch receipts as well as one-shot packets.</p></div>
     </div>
   </div>
 
@@ -240,8 +252,8 @@
       <div class="cell">
         <span class="num">02</span>
         <h3><code>exo ingest</code></h3>
-        <p>Index files, Markdown, URLs, stdin, transcript/event JSONL, and
-        optional command-backed sources.</p>
+        <p>Index files, Markdown, URLs, stdin, and generic command-backed
+        sources.</p>
       </div>
       <div class="cell">
         <span class="num">03</span>
@@ -252,8 +264,8 @@
       <div class="cell">
         <span class="num">04</span>
         <h3><code>exo packet</code></h3>
-        <p>Build compact agent-ready context packets with citations, decisions,
-        gaps, and evidence receipts.</p>
+        <p>Build agent-ready packets with citations, decisions, gaps,
+        exclusions, and evidence receipts.</p>
       </div>
     </div>
   </div>
@@ -265,8 +277,6 @@
         <li><code>build_context_packet</code></li>
         <li><code>search_context</code></li>
         <li><code>fetch_source</code></li>
-        <li><code>ingest_source</code></li>
-        <li><code>organize_context</code> as suggest-only in v0</li>
       </ul>
     </div>
     <div class="cell">
@@ -274,25 +284,18 @@
       <p>Mirror the core verbs instead of creating a second product:
       <code>init_workspace</code>, <code>list_sources</code>,
       <code>ingest_source</code>, <code>search_context</code>,
-      <code>build_context_packet</code>, <code>fetch_source</code>,
-      <code>explain_packet</code>, and <code>suggest_organization</code>.</p>
+      <code>build_context_packet</code>, <code>fetch_source</code>, and
+      <code>explain_packet</code>.</p>
     </div>
   </div>
 
   <div class="section panel">
-    <h2>Daybook migration path</h2>
-    <ol>
-      <li>Preserve Daybook as private; no data move and no public config.</li>
-      <li>Add Daybook-local <code>.exocortex/config.yaml</code> for QMD, vault
-      roots, traces, Monologue, clippings, MOCs, and evidence destination.</li>
-      <li>Replace selected context-gathering calls with
-      <code>exo packet --profile personal_context</code>.</li>
-      <li>Write receipts under Daybook-owned evidence or trace paths.</li>
-      <li>Normalize firehoses through transcript/event JSONL ingest.</li>
-      <li>Register MCP only after CLI parity and fetchable citations.</li>
-      <li>Keep Daybook skills private; ship generic Exocortex skills publicly.</li>
-      <li>Test Adminifi-style overlays after the first read-only migration.</li>
-    </ol>
+    <h2>Experiment gate</h2>
+    <p>The repo stays frozen until <code>docs/experiments/retrieval-validation.md</code>
+    is run on private data and reports an accepted result. The experiment
+    compares an incumbent private retrieval path, <code>exo search</code>, and
+    <code>exo packet</code> with deterministic citation checks plus a Crucible
+    relevance/completeness jury.</p>
   </div>
 
   <div class="section panel">
@@ -308,17 +311,17 @@
           <td class="warn">Baseline to beat</td>
         </tr>
         <tr>
-          <td>Rename Daybook into Exocortex</td>
-          <td>Publishes private assumptions and makes personal policy look generic.</td>
+          <td>Publish a private workspace as the product</td>
+          <td>Leaks private assumptions and makes personal policy look generic.</td>
           <td class="warn">Reject</td>
         </tr>
         <tr>
           <td>Full RAG/vector platform</td>
-          <td>Bloats into commodity infrastructure and loses the command-center core.</td>
+          <td>Bloats into commodity infrastructure and loses the evidence core.</td>
           <td class="warn">Reject</td>
         </tr>
         <tr>
-          <td>MCP wrapper over QMD/files</td>
+          <td>MCP wrapper over files and private commands</td>
           <td>Fast but shallow: no evidence governance, parity, or packet contract.</td>
           <td class="warn">Reject</td>
         </tr>
@@ -334,22 +337,17 @@
   <div class="section grid two">
     <div class="cell">
       <h2>First build oracle</h2>
-      <p>Fixture repo runs <code>exo init</code>, ingests Markdown/URL/stdin,
-      searches with <code>repo_grounded</code>, writes
-      <code>packet.json</code> plus <code>evidence.jsonl</code>, replays the
-      same packet through MCP, and proves <code>public_safe</code> excludes
-      private-only sources.</p>
+      <p>Only after the experiment clears: fixture repo runs
+      <code>exo init</code>, ingests files/URLs/stdin, searches with
+      <code>repo_grounded</code>, writes <code>packet.json</code> plus
+      <code>evidence.jsonl</code>, replays packet/search/fetch through MCP, and
+      proves <code>public_safe</code> excludes private-only sources.</p>
     </div>
     <div class="cell">
-      <h2>Open design questions</h2>
-      <ul>
-        <li>Which embedded vector backend becomes the default?</li>
-        <li>Does QMD ship in first public slice or stay Daybook-private first?</li>
-        <li>How stable is <code>ContextPacket</code> JSON in v0?</li>
-        <li>Are Adminifi-style overlays v0 or post-Daybook-migration?</li>
-        <li>Does MCP include ingest on day one?</li>
-        <li>Is the thin evidence UI worth v0 scope?</li>
-      </ul>
+      <h2>Frozen stop rule</h2>
+      <p>This packet authorizes boundary scrub, question closure, and experiment
+      definition only. Runtime code, fixtures, build files, and sample private
+      config wait for the accepted eval result.</p>
     </div>
   </div>
 </div>
