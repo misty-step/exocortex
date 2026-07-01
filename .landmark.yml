@@ -1,0 +1,14 @@
+product:
+  name: Exocortex
+  description: Public context engine that builds cited, inspectable context packets for agent-first work.
+audience: developer
+voice: Clear, concrete, and citation-disciplined.
+changelog:
+  source: auto
+release:
+  profile: synthesis-only
+model:
+  policy: balanced
+budget:
+  max_input_tokens: 12000
+  max_output_tokens: 1200
