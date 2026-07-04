@@ -33,19 +33,19 @@
 
 The learning is tagged and dated as a same-day static-serving bug track for slashless URLs, relative links, redirect handling, dot paths, generated HTML, and published sites.
 
-Citations: `../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md:2-13`; `../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md:48-51`.
+Citations: `../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md:2-13` checksum `sha256:730edaa9444b`; `../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md:48-51` checksum `sha256:3232ef6999b4`.
 
 ### E2 — learnings-corpus (same-day)
 
 Browser relative-link resolution treats a slashless directory URL as a file path, so serving index content there moves child links one level too high. The remedy is to redirect directory URLs to the trailing-slash form before serving index content, keep traversal checks strict, allow normal dot-prefixed components, and verify both slash forms plus child or dot paths.
 
-Citations: `../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md:18-23`; `../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md:27-35`.
+Citations: `../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md:18-23` checksum `sha256:3c143ae2bc2c`; `../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md:27-35` checksum `sha256:b837ac6671b1`.
 
 ### E3 — learnings-corpus (same-day)
 
 The linked fix and regressions show the concrete expected proof shape: permanent slashless-directory redirect, explicit redirect regression, and dot-prefixed path round trip.
 
-Citations: `../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md:39-46`.
+Citations: `../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md:39-46` checksum `sha256:f3d5ccdbb1f3`.
 
 ### E4 — operator-trace-corpus (same-day)
 
@@ -73,7 +73,7 @@ Citations: docid `9f3128` `meta/bridge-reimagining-2026-07-03.md:95-98`; docid `
 
 ## Gaps
 
-- The prototype records docid/path/line handles but does not yet emit citation/v1 checksums.
+- Public file-tree anchors now carry citation/v1-style checksums; private docid trace handles remain fetch handles without content checksums because the private collection is declared outside this public repo.
 - The configured-command source is represented as harvested evidence records, not as a reusable adapter.
 - The packet does not replay browser navigation; it cites traces and the learning record that describe those verifications.
 - The private trace index reported incomplete embeddings, so lexical and targeted fetches were required for confidence.

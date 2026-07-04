@@ -9,6 +9,7 @@ that are available from the local checkout.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,30 @@ def load_json(path: Path) -> dict[str, Any]:
 def resolve_repo_path(path_text: str) -> Path:
     candidate = (REPO_ROOT / path_text).resolve()
     return candidate
+
+
+def parse_line_range(line_range: str) -> tuple[int, int]:
+    start_text, end_text = line_range.split("-", 1)
+    return int(start_text), int(end_text)
+
+
+def line_range_bytes(path: Path, start: int, end: int) -> tuple[bytes, int]:
+    lines = path.read_bytes().splitlines(keepends=True)
+    line_count = len(lines)
+    if start < 1 or end < start or end > line_count:
+        return b"", line_count
+    return b"".join(lines[start - 1 : end]), line_count
+
+
+def checksum_bytes(content: bytes) -> str:
+    return "sha256:" + hashlib.sha256(content).hexdigest()
+
+
+def checksum_fingerprint(checksum: str) -> str:
+    if ":" not in checksum:
+        return checksum[:12]
+    algorithm, digest = checksum.split(":", 1)
+    return f"{algorithm}:{digest[:12]}"
 
 
 def frontmatter_fields(path: Path) -> dict[str, str]:
@@ -56,22 +81,37 @@ def check_file_anchor(anchor: dict[str, str]) -> str:
     if not path.exists():
         return f"missing local file anchor: {path_text}"
 
-    start_text, end_text = anchor["lines"].split("-", 1)
-    start = int(start_text)
-    end = int(end_text)
-    line_count = len(path.read_text(encoding="utf-8").splitlines())
+    start, end = parse_line_range(anchor["lines"])
+    content, line_count = line_range_bytes(path, start, end)
     if start < 1 or end < start or end > line_count:
         return f"invalid line range for {path_text}: {anchor['lines']}"
+
+    expected_checksum = anchor.get("checksum", "")
+    if not expected_checksum:
+        return f"missing checksum for local file anchor: {path_text}:{anchor['lines']}"
+
+    actual_checksum = checksum_bytes(content)
+    if actual_checksum != expected_checksum:
+        return (
+            f"checksum mismatch for {path_text}:{anchor['lines']}: "
+            f"expected {expected_checksum}, actual {actual_checksum}"
+        )
     return ""
 
 
 def anchor_label(anchor: dict[str, str]) -> str:
+    checksum = anchor.get("checksum", "")
+    checksum_text = ""
+    if checksum:
+        checksum_text = f" checksum `{checksum_fingerprint(checksum)}`"
+
     if "docid" in anchor:
         return (
             f"docid `{anchor['docid']}` "
             f"`{anchor['path']}:{anchor['lines']}`"
+            f"{checksum_text}"
         )
-    return f"`{anchor['path']}:{anchor['lines']}`"
+    return f"`{anchor['path']}:{anchor['lines']}`{checksum_text}"
 
 
 def bullet_list(items: list[str]) -> list[str]:
