@@ -26,6 +26,9 @@ fi
 echo "==> first-packet fixture regeneration"
 python3 scripts/build-first-packet.py
 
+echo "==> first-packet fixture idempotence regeneration"
+python3 scripts/build-first-packet.py
+
 echo "==> first-packet fixture diff"
 git diff --exit-code -- tests/fixtures/first-packet/evidence-packet.md
 

@@ -32,11 +32,13 @@
       "anchors": [
         {
           "path": "../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md",
-          "lines": "2-13"
+          "lines": "2-13",
+          "checksum": "sha256:730edaa9444bcde1057310f39c90986b6ad56f1a60487d4dfb23dd4ce00d915b"
         },
         {
           "path": "../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md",
-          "lines": "48-51"
+          "lines": "48-51",
+          "checksum": "sha256:3232ef6999b4b29677abfa90b84a57f275fee8125dc4551b3e186ffad3ddeea1"
         }
       ],
       "claim": "The learning is tagged and dated as a same-day static-serving bug track for slashless URLs, relative links, redirect handling, dot paths, generated HTML, and published sites."
@@ -48,11 +50,13 @@
       "anchors": [
         {
           "path": "../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md",
-          "lines": "18-23"
+          "lines": "18-23",
+          "checksum": "sha256:3c143ae2bc2c45039346403dd35dc22ae1b805265f97742e02ec9de2e72acfb3"
         },
         {
           "path": "../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md",
-          "lines": "27-35"
+          "lines": "27-35",
+          "checksum": "sha256:b837ac6671b1227fdc5cd81144a8741c944fb1502e023748844139ce4e364af2"
         }
       ],
       "claim": "Browser relative-link resolution treats a slashless directory URL as a file path, so serving index content there moves child links one level too high. The remedy is to redirect directory URLs to the trailing-slash form before serving index content, keep traversal checks strict, allow normal dot-prefixed components, and verify both slash forms plus child or dot paths."
@@ -64,7 +68,8 @@
       "anchors": [
         {
           "path": "../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md",
-          "lines": "39-46"
+          "lines": "39-46",
+          "checksum": "sha256:f3d5ccdbb1f37f61fe0fdd2da3b9a0d84b229321d94cbdfbb33a291eec1a1a94"
         }
       ],
       "claim": "The linked fix and regressions show the concrete expected proof shape: permanent slashless-directory redirect, explicit redirect regression, and dot-prefixed path round trip."
@@ -129,7 +134,7 @@
     }
   ],
   "gaps": [
-    "The prototype records docid/path/line handles but does not yet emit citation/v1 checksums.",
+    "Public file-tree anchors now carry citation/v1-style checksums; private docid trace handles remain fetch handles without content checksums because the private collection is declared outside this public repo.",
     "The configured-command source is represented as harvested evidence records, not as a reusable adapter.",
     "The packet does not replay browser navigation; it cites traces and the learning record that describe those verifications.",
     "The private trace index reported incomplete embeddings, so lexical and targeted fetches were required for confidence."
