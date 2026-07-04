@@ -25,5 +25,7 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y ripgrep
           fi
+      - name: Checkout first-packet learning source
+        run: git clone --depth 1 --branch master https://github.com/misty-step/harness-kit.git ../harness-kit
       - name: Run repo verification gate
         run: ./scripts/verify.sh
