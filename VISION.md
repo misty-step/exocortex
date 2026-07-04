@@ -11,10 +11,13 @@ Exocortex wins only if the better path is nearly as easy: initialize a workspace
 declare sources, search, fetch, and compile a cited packet through the same core
 from CLI, MCP, API, SDK, and a shipped skill.
 
-The repo is frozen-experimental until the retrieval experiment proves the
-premise on real private data. Before runtime code lands, the public boundary
-must be clean, the shape decisions must be closed, and the validation contract
-must be concrete enough for Crucible to grade.
+The repo is experimentation-open and productization-gated. Small prototypes,
+fixtures, and private-data experiments may land when they directly prove or
+falsify the evidence contract. Product runtime, stable public APIs, SDK/MCP
+commitments, and broad scaffolding remain gated until the retrieval experiment
+proves the premise on real private data. The public boundary must stay clean,
+the shape decisions must stay explicit, and the validation contract must be
+concrete enough for Crucible to grade.
 
 ## What It Is For
 
@@ -111,7 +114,8 @@ this repo.
 ## v0 Excellence
 
 v0 is excellent only after the retrieval experiment says the premise is worth
-building. The target loop is:
+productizing. Prototype packets may exercise the contract before that promotion
+bar, but the target product loop remains:
 
 ```sh
 exo init
