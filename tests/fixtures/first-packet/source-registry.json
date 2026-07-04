@@ -1,0 +1,144 @@
+{
+  "packet_id": "first-packet-html-relative-links",
+  "question": "What does the fleet know about serving generated HTML sites without breaking relative links?",
+  "observed_at": "2026-07-04T19:32:56Z",
+  "sources": [
+    {
+      "id": "learnings-corpus",
+      "kind": "file-tree",
+      "declared_root": "../harness-kit/docs/solutions/",
+      "retrieval": "grep-first frontmatter and targeted body terms",
+      "freshness": "same-day learning; source frontmatter date is 2026-07-04",
+      "fetch_contract": "path plus line range",
+      "included": true,
+      "decision_reason": "The frontmatter and retrieval terms directly match static serving, generated HTML, slashless directory URLs, relative links, redirects, and dot-prefixed paths."
+    },
+    {
+      "id": "operator-trace-corpus",
+      "kind": "configured-command-collection",
+      "declared_root": "private trace collection configured outside this repo",
+      "retrieval": "targeted query followed by docid/path line fetches",
+      "freshness": "same-day and previous-day traces fetched on 2026-07-04",
+      "fetch_contract": "docid plus collection path plus line range",
+      "included": true,
+      "decision_reason": "The trace corpus confirmed the live incident outcome and added prior prefix and fallback failures that the learning document alone did not fully cover."
+    }
+  ],
+  "evidence": [
+    {
+      "id": "E1",
+      "source_id": "learnings-corpus",
+      "freshness": "same-day",
+      "anchors": [
+        {
+          "path": "../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md",
+          "lines": "2-13"
+        },
+        {
+          "path": "../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md",
+          "lines": "48-51"
+        }
+      ],
+      "claim": "The learning is tagged and dated as a same-day static-serving bug track for slashless URLs, relative links, redirect handling, dot paths, generated HTML, and published sites."
+    },
+    {
+      "id": "E2",
+      "source_id": "learnings-corpus",
+      "freshness": "same-day",
+      "anchors": [
+        {
+          "path": "../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md",
+          "lines": "18-23"
+        },
+        {
+          "path": "../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md",
+          "lines": "27-35"
+        }
+      ],
+      "claim": "Browser relative-link resolution treats a slashless directory URL as a file path, so serving index content there moves child links one level too high. The remedy is to redirect directory URLs to the trailing-slash form before serving index content, keep traversal checks strict, allow normal dot-prefixed components, and verify both slash forms plus child or dot paths."
+    },
+    {
+      "id": "E3",
+      "source_id": "learnings-corpus",
+      "freshness": "same-day",
+      "anchors": [
+        {
+          "path": "../harness-kit/docs/solutions/web-serving/artifact-shelf-slashless-directory-urls.md",
+          "lines": "39-46"
+        }
+      ],
+      "claim": "The linked fix and regressions show the concrete expected proof shape: permanent slashless-directory redirect, explicit redirect regression, and dot-prefixed path round trip."
+    },
+    {
+      "id": "E4",
+      "source_id": "operator-trace-corpus",
+      "freshness": "same-day",
+      "anchors": [
+        {
+          "docid": "e1f295",
+          "path": "meta/conversations/2026-07-04.md",
+          "lines": "88-99"
+        }
+      ],
+      "claim": "The same-day trace says the fleet saw directory artifacts served at slashless URLs, every relative link broke, and the fix was a 308 redirect plus dot-path support, followed by a full republish with all navigation returning 200s."
+    },
+    {
+      "id": "E5",
+      "source_id": "operator-trace-corpus",
+      "freshness": "previous-day",
+      "anchors": [
+        {
+          "docid": "c9bcb1",
+          "path": "meta/conversations/2026-07-03.md",
+          "lines": "1-5"
+        }
+      ],
+      "claim": "The previous-day trace adds a second failure mode: internal route stripping leaked into rendered hrefs, dropping the public prefix and making links fall through to the root mount. The fix was to feed the public prefix into rendered URLs, make root fallback fail loudly, and resweep links by content rather than status code alone."
+    },
+    {
+      "id": "E6",
+      "source_id": "operator-trace-corpus",
+      "freshness": "previous-day",
+      "anchors": [
+        {
+          "docid": "9f3128",
+          "path": "meta/bridge-reimagining-2026-07-03.md",
+          "lines": "95-98"
+        },
+        {
+          "docid": "c9bcb1",
+          "path": "meta/conversations/2026-07-03.md",
+          "lines": "432-439"
+        }
+      ],
+      "claim": "Earlier traces show legacy artifact trees without root index files were not lost; serving needed deterministic directory fallback: redirect a single HTML file, otherwise produce an auto-index, while empty directories remain 404s."
+    }
+  ],
+  "exclusions": [
+    {
+      "source_id": "operator-trace-corpus",
+      "reason": "A broad initial query returned unrelated books and clippings. They were excluded because they did not explain generated-site serving or relative-link failures."
+    },
+    {
+      "source_id": "operator-trace-corpus",
+      "reason": "Raw private snippets, source bodies, personal context strings, and collection names are not committed in this public fixture; only docid/path/line handles and paraphrased claims are included."
+    },
+    {
+      "source_id": "learnings-corpus",
+      "reason": "The packet does not fetch or embed the downstream application source files referenced by the learning document; it cites the learning record as the bounded experiment source."
+    }
+  ],
+  "gaps": [
+    "The prototype records docid/path/line handles but does not yet emit citation/v1 checksums.",
+    "The configured-command source is represented as harvested evidence records, not as a reusable adapter.",
+    "The packet does not replay browser navigation; it cites traces and the learning record that describe those verifications.",
+    "The private trace index reported incomplete embeddings, so lexical and targeted fetches were required for confidence."
+  ],
+  "answer_points": [
+    "Canonicalize generated-site directory URLs to trailing-slash URLs before serving index content; use a permanent redirect for slashless directory requests.",
+    "Preserve the external/public mount prefix when rendering links. Internal route stripping must not leak into hrefs.",
+    "Allow normal dot-prefixed components such as .github while still rejecting traversal components.",
+    "For legacy artifact trees without a root index, serve a deterministic fallback: single HTML redirects, multi-file trees get an auto-index, and empty directories stay 404.",
+    "Verify by exercising slashless redirect, slash URL content, relative child paths, dot-prefixed paths, rendered href content, and route-misroute failures. Status-only sweeps are insufficient."
+  ]
+}
