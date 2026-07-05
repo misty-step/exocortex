@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en" data-ae-theme="ultramarine">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Exocortex - Misty Step product site</title>
+    <meta
+      name="description"
+      content="Exocortex is the local-first evidence core that lets an agent ask for context and a human audit exactly what it saw, skipped, and can fetch again."
+    />
+    <script>
+      try {
+        var m = localStorage.getItem('ae-mode');
+        if (m === 'dark' || m === 'light') {
+          document.documentElement.classList.add(m);
+          document.documentElement.style.colorScheme = m;
+        }
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="aesthetic.css" />
+    <link rel="stylesheet" href="marketing.css" />
+  </head>
+  <body>
+    <svg aria-hidden="true" width="0" height="0" style="position: absolute">
+      <symbol id="i-search-check" viewBox="0 0 24 24">
+        <path d="m8 11 2 2 4-4" />
+        <circle cx="11" cy="11" r="8" />
+        <path d="m21 21-4.3-4.3" />
+      </symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2" />
+        <path d="M12 20v2" />
+        <path d="m4.93 4.93 1.41 1.41" />
+        <path d="m17.66 17.66 1.41 1.41" />
+        <path d="M2 12h2" />
+        <path d="M20 12h2" />
+        <path d="m6.34 17.66-1.41 1.41" />
+        <path d="m19.07 4.93-1.41 1.41" />
+      </symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24">
+        <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+      </symbol>
+      <symbol id="i-circle-check" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="10" />
+        <path d="m9 12 2 2 4-4" />
+      </symbol>
+      <symbol id="i-x" viewBox="0 0 24 24">
+        <path d="M18 6 6 18" />
+        <path d="m6 6 12 12" />
+      </symbol>
+    </svg>
+
+    <div class="ae-screen ae-wide">
+      <header class="ae-bar msk-bar">
+        <a class="ae-logo" href="./" aria-label="Exocortex home">
+          <span class="ae-app-mark" aria-hidden="true">
+            <svg class="ae-icon" data-lucide="search-check">
+              <use href="#i-search-check" />
+            </svg>
+          </span>
+          <span class="ae-name">Exocortex</span>
+        </a>
+        <span class="msk-actions">
+          <nav class="ae-chrome msk-nav" aria-label="Site">
+            <a href="#features">features</a>
+            <a href="#screens">screens</a>
+            <a href="changelog.html">release notes</a>
+          </nav>
+          <button class="ae-mode" aria-label="toggle color mode">
+            <svg class="ae-icon ae-sun"><use href="#i-sun" /></svg>
+            <svg class="ae-icon ae-moon"><use href="#i-moon" /></svg>
+          </button>
+        </span>
+      </header>
+
+      <main class="ae-stage ae-stage-scroll" id="content">
+        <div class="msk-page">
+          <section class="msk-hero" aria-labelledby="hero-title">
+            <p class="ae-chrome">EXPERIMENTATION-OPEN, PRODUCTIZATION-GATED</p>
+            <h1 class="ae-h" id="hero-title">
+              Exocortex is the local-first evidence core that lets an agent
+              ask for context and a human audit exactly what it saw.
+            </h1>
+            <p class="msk-pitch">
+              Agents need smaller, safer context than "search everything and
+              hope." Exocortex compiles policy-filtered, replayable context
+              packets with fetchable citations, freshness labels, source
+              decisions, exclusions, and gaps — so a human can inspect exactly
+              what an agent read, what it skipped, and why, without trusting a
+              prompt convention. There is no working <code>exo</code> binary
+              yet: this site shows the real proof-of-shape fixture and the
+              gate that keeps it honest, not a shipped product.
+            </p>
+            <p class="ae-status">
+              <svg class="ae-icon ae-ok" data-lucide="circle-check">
+                <use href="#i-circle-check" />
+              </svg>
+              <span class="ae-status-label"
+                >Built from Aesthetic tokens, local assets, and GitHub
+                Pages.</span
+              >
+            </p>
+          </section>
+
+          <section
+            class="msk-section"
+            id="features"
+            aria-labelledby="features-title"
+          >
+            <h2 class="ae-h" id="features-title">Why it matters</h2>
+            <div class="ae-list-rows">
+              <div class="ae-list-row">
+                <span class="ae-list-cell">
+                  <span class="ae-list-label">job</span>
+                  <span class="ae-list-value"
+                    >Compile a context packet an agent trusts and a human can
+                    audit.</span
+                  >
+                </span>
+                <span class="ae-list-cell">
+                  <span class="ae-list-label">proof</span>
+                  <span class="ae-list-value"
+                    >Every claim carries a fetchable citation and a
+                    checksum.</span
+                  >
+                </span>
+              </div>
+              <div class="ae-list-row">
+                <span class="ae-list-cell">
+                  <span class="ae-list-label">shape</span>
+                  <span class="ae-list-value"
+                    >One core, projected through CLI, MCP, HTTP API, and
+                    SDKs.</span
+                  >
+                </span>
+                <span class="ae-list-cell">
+                  <span class="ae-list-label">trust</span>
+                  <span class="ae-list-value"
+                    >Local-first. Deterministic code owns privacy and source
+                    decisions.</span
+                  >
+                </span>
+              </div>
+              <div class="ae-list-row">
+                <span class="ae-list-cell">
+                  <span class="ae-list-label">status</span>
+                  <span class="ae-list-value"
+                    >Experimentation-open, productization-gated — no `exo`
+                    binary yet.</span
+                  >
+                </span>
+                <span class="ae-list-cell">
+                  <span class="ae-list-label">fit</span>
+                  <span class="ae-list-value"
+                    >Public core; private consumers own their own commands and
+                    secrets.</span
+                  >
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section
+            class="msk-section"
+            id="screens"
+            aria-labelledby="screens-title"
+          >
+            <div class="msk-section-head">
+              <h2 class="ae-h" id="screens-title">The evidence, not a mockup</h2>
+              <p class="ae-dim">
+                There is no product UI yet. Every frame below is real: a
+                terminal capture of the repo-owned gate, and the two real
+                generated fixtures that prove the evidence contract shape.
+                Click a frame to inspect it.
+              </p>
+            </div>
+            <div class="msk-gallery" aria-label="Product screenshots">
+              <button
+                class="msk-shot"
+                type="button"
+                data-full="assets/screenshots/01-verify-gate.png"
+                data-title="The repo-owned gate"
+              >
+                <img
+                  src="assets/screenshots/01-verify-gate.png"
+                  alt="Terminal output of ./scripts/verify.sh passing: public boundary grep, first-packet fixture regeneration, idempotence check, verify: ok"
+                />
+                <span class="ae-chrome">./scripts/verify.sh</span>
+              </button>
+              <button
+                class="msk-shot"
+                type="button"
+                data-full="assets/screenshots/02-evidence-packet.png"
+                data-title="A cited answer"
+              >
+                <img
+                  src="assets/screenshots/02-evidence-packet.png"
+                  alt="Real generated evidence-packet.md showing declared sources, an answer, and per-claim evidence with checksummed citations"
+                />
+                <span class="ae-chrome">evidence-packet.md</span>
+              </button>
+              <button
+                class="msk-shot"
+                type="button"
+                data-full="assets/screenshots/03-source-registry.png"
+                data-title="The decision receipt"
+              >
+                <img
+                  src="assets/screenshots/03-source-registry.png"
+                  alt="Real source-registry.json summary showing declared sources, freshness labels, inclusion decisions, and citation/exclusion/gap counts"
+                />
+                <span class="ae-chrome">source-registry.json</span>
+              </button>
+            </div>
+          </section>
+
+          <section
+            class="msk-section msk-release-slot"
+            aria-labelledby="release-title"
+          >
+            <h2 class="ae-h" id="release-title">Where this stands</h2>
+            <p>
+              Read <a href="changelog.html">release notes</a> for what's
+              actually shipped so far — there is no tagged release yet, so the
+              page points at real commits instead of inventing one.
+            </p>
+          </section>
+        </div>
+      </main>
+
+      <footer class="ae-bar msk-footer">
+        <p class="ae-chrome">Exocortex is part of the Misty Step fleet.</p>
+        <nav class="ae-foot-links ae-chrome" aria-label="Footer">
+          <a
+            data-footer-link="github"
+            href="https://github.com/misty-step/exocortex"
+            >GitHub</a
+          >
+          <a data-footer-link="misty-step" href="https://mistystep.io"
+            >Misty Step</a
+          >
+        </nav>
+      </footer>
+    </div>
+
+    <dialog class="ae-dialog msk-zoom" aria-labelledby="zoom-title">
+      <div class="msk-zoom-head">
+        <h2 class="ae-dialog-title" id="zoom-title">Screenshot</h2>
+        <button
+          class="ae-button"
+          type="button"
+          data-zoom-close
+          aria-label="Close screenshot"
+        >
+          <svg class="ae-icon" aria-hidden="true"><use href="#i-x" /></svg>
+        </button>
+      </div>
+      <img class="msk-zoom-img" alt="" />
+    </dialog>
+
+    <script src="mode.js"></script>
+    <script src="theme.js"></script>
+    <script src="marketing.js"></script>
+  </body>
+</html>
