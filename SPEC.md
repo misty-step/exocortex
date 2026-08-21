@@ -98,9 +98,14 @@ policy:
   1. lock `flock <cortex>/.git/exocortex.driver.lock` (`index.lock` alone
      does not cover multi-command sequences);
   2. refresh: `git pull --rebase --autostash`;
-  3. pre-flight: if the index holds staged paths outside this operation's
-     touched set, abort with conflict-as-data — never commit, stash away, or
-     discard another worker's staged state;
+  3. pre-flight, two aborts, both conflict-as-data:
+     - if the index holds staged paths outside this operation's touched set
+       (`foreign_staged_state`) — never commit, stash away, or discard
+       another worker's staged state;
+     - if the destination itself is staged or unstaged-dirty vs HEAD
+       (`git status --porcelain -- <path>` non-empty → `dirty_destination`)
+       — that is someone's in-flight work; hashing it as "stored" and
+       overwriting would destroy it.
   4. CAS: re-read the stored destination revision; evaluate `--expects` or
      create-absence against fresh state;
   5. validate payload, stamp provenance, atomic write (temp file + rename);
@@ -111,6 +116,59 @@ policy:
 - `caller` policy: kernel writes files; the caller commits (default for
   non-vault repos).
 - `none` policy: plain directory writes.
+
+### Pinned interfaces
+
+- **Revision** — lowercase hex sha256 of the note's exact file bytes, read
+  inside the critical section after refresh. `get` reports it as
+  `revision`; `--expects` and MCP `expectedRevision` carry the same string.
+- **`get` output** (`--json`, default): `{"cortex", "path", "revision",
+  "frontmatter", "content"}` — `content` is the full file text including
+  frontmatter.
+- **Provenance stamp** — appended to frontmatter on every successful put:
+
+  ```yaml
+  provenance:
+    agent: <id from --agent or EXOCORTEX_AGENT, else "unknown">
+    at: <RFC3339 UTC timestamp of the write>
+    via: cli | mcp
+  ```
+
+- **Cortex registry** — `${XDG_CONFIG_HOME:-~/.config}/exocortex/cortices.json`:
+  `[{"name","path","vcs":"daybook"|"caller"|"none"}]`; `register` is the only
+  writer.
+- **Conflict payloads** — nonzero exit + JSON body:
+
+  ```json
+  {"error":"missing_expects","operation":"update","path":"…"}
+  {"error":"exists","operation":"create","path":"…"}
+  {"error":"revision_conflict","operation":"update","path":"…","expected":"…","actual":"…"}
+  {"error":"dirty_destination","path":"…","state":"staged"|"unstaged"}
+  {"error":"foreign_staged_state","paths":["…"]}
+  ```
+
+  Every body ends with `"hint"` naming the recovery (re-read with `get`,
+  re-apply, retry; or commit/unstage your own staged work).
+- **Frontmatter floor (lint + put)** — fail: any of `type`, `status`,
+  `created`, `description`, `tags` missing or empty; `created` not RFC3339.
+  Warn: unknown `type`/`status` vocabulary (vocabulary stays owned by the
+  daybook `/wiki` skill).
+
+### v0 acceptance proofs
+
+1. Update without `--expects`: exit nonzero, `missing_expects`.
+2. Bare put on existing path: `exists`. Create race under concurrency:
+   exactly one winner, loser gets `revision_conflict`.
+3. `--expects` mismatch: `revision_conflict` carrying actual revision.
+4. Two scripted concurrent puts on one path: one commit each attempt, no
+   interleaving; unrelated staged path survives untouched.
+5. Dirty destination: with an unstaged local edit to the target file, put
+   aborts `dirty_destination` and the edit survives byte-for-byte; same for
+   a staged-only change.
+6. Daybook driver put: exactly one new commit touching only the target path,
+   pushed; second run is a clean no-op only when content and revision match.
+7. MCP face round-trip: get → put(expectedRevision) → get bumps revision and
+   preserves payload byte-for-byte apart from the provenance stamp.
 
 ## Fleet delivery
 
