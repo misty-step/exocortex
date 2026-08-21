@@ -37,7 +37,9 @@ Write rules enforced by `put` (do not pre-satisfy by hand):
 - Frontmatter: the cortex's validation profile decides. Daybook cortex
   follows the `/wiki` floor — parseable YAML with non-empty `type` required;
   `description` strongly recommended; everything else warned, never failed.
-  `created` is never modified; unknown keys and `type` values are tolerated.
+  `created` is immutable — an update that changes or drops it fails
+  `created_immutable` (resubmit with the stored value); unknown keys and
+  `type` values are tolerated.
 - Provenance stamped automatically (agent, time, source); never fake it.
 - Payload and destination are separate: `--from <file|->` supplies the
   content; `<path>` is where it lands in the cortex. Concurrency is

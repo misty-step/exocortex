@@ -62,6 +62,30 @@ func TestValidateDaybook(t *testing.T) {
 	if !sawCreatedFormat {
 		t.Fatal("non-RFC3339 created should warn")
 	}
+
+	// Date-only created is non-empty but NOT RFC3339: the lexical read
+	// must catch it in both profiles despite yaml.v3 decoding it to
+	// time.Time.
+	dateOnly := Split([]byte("---\ntype: x\ncreated: 2026-08-21\n---\n"))
+	fs, err = Validate("daybook", dateOnly)
+	if err != nil {
+		t.Fatalf("date-only created must warn, not fail, under daybook: %v", err)
+	}
+	if !hasRule(fs, "created_format") {
+		t.Fatalf("daybook missed date-only created: %+v", fs)
+	}
+	if _, err := Validate("strict", dateOnly); err == nil {
+		t.Fatal("strict must reject date-only created")
+	}
+}
+
+func hasRule(fs []Finding, rule string) bool {
+	for _, f := range fs {
+		if f.Rule == rule {
+			return true
+		}
+	}
+	return false
 }
 
 func TestValidateStrict(t *testing.T) {
@@ -76,6 +100,16 @@ func TestValidateStrict(t *testing.T) {
 	badDate := Split([]byte("---\ntype: a\nstatus: b\ncreated: yesterday\ndescription: d\ntags: [x]\n---\n"))
 	if _, err := Validate("strict", badDate); err == nil {
 		t.Fatal("strict requires RFC3339 created")
+	}
+	// Date-only created fails strict; unquoted full RFC3339 passes —
+	// both resolve to time.Time, so only the lexical check distinguishes.
+	dateOnly := Split([]byte("---\ntype: a\nstatus: b\ncreated: 2026-08-21\ndescription: d\ntags: [x]\n---\n"))
+	if _, err := Validate("strict", dateOnly); err == nil {
+		t.Fatal("strict must reject date-only created")
+	}
+	unq := Split([]byte("---\ntype: a\nstatus: b\ncreated: 2019-03-04T05:06:07Z\ndescription: d\ntags: [x]\n---\n"))
+	if _, err := Validate("strict", unq); err != nil {
+		t.Fatalf("unquoted RFC3339 must pass strict: %v", err)
 	}
 }
 

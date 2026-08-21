@@ -150,6 +150,22 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 		}
 	}
 
+	// created is immutable (SPEC): an update that changes or drops an
+	// existing non-empty created aborts as data; filling a MISSING
+	// created is legal. Comparison uses the lexical scalar text —
+	// yaml.v3 would decode unquoted timestamps to time.Time and hide
+	// the common case from map assertions.
+	if op == "update" {
+		storedNote := fm.Split(stored)
+		if storedCreated, ok := fm.TopLevelScalar(storedNote, "created"); ok && strings.TrimSpace(storedCreated) != "" {
+			submitted, pok := fm.TopLevelScalar(fm.Split(in.Payload), "created")
+			if !pok || submitted != storedCreated {
+				return nil, conflict("created_immutable", op, rel,
+					"created never changes; resubmit with created: "+storedCreated,
+					map[string]any{"stored": storedCreated, "submitted": submitted})
+			}
+		}
+	}
 	// No-op short-circuit: identical retries are free. Two forms
 	// qualify: the PINNED byte-equality against stored content (the
 	// get → put-unchanged round trip carries the stamp back), and

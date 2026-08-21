@@ -201,7 +201,14 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
   {"error":"dirty_destination","path":"…","state":"staged"|"unstaged"}
   {"error":"foreign_staged_state","paths":["…"]}
   {"error":"foreign_unstaged_state","paths":["…"]}
+  {"error":"created_immutable","operation":"update","path":"…","stored":"…","submitted":"…"}
   ```
+
+  Input-class failures (`invalid_input`, `unknown_command`,
+  `registration_failed`, `payload_unreadable`, `internal_error`) emit the
+  same JSON shape on stdout for EVERY CLI exit path — flag errors,
+  missing arguments, bare invocation included — and exit 2; operation
+  conflicts exit 1.
 
   Every body ends with `"hint"` naming the recovery (re-read with `get`,
   re-apply, retry; or commit/unstage your own staged work).
@@ -213,7 +220,11 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
     `status`/`description`/`tags`/`created`, unknown keys, unknown `type`
     vocabulary — is a WARNING, never an error. `put` never strips keys,
     never modifies existing frontmatter values except adding/updating its
-    own `provenance` block, and treats `created` as immutable.
+    own `provenance` block. `created` is IMMUTABLE: an update whose
+    payload changes or drops an existing non-empty `created` aborts
+    `created_immutable` (stored and submitted values returned in the
+    body; compared as lexical scalar text, so unquoted timestamps are
+    covered); filling a missing `created` is legal gap-fill.
   - `strict` — the five-key floor (`type`, `status`, `created`,
     `description`, `tags` all present and non-empty; RFC3339 `created`);
     opt-in for future cortices that want it.
@@ -245,6 +256,10 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
 8. Profile conformance: a note whose frontmatter is parseable YAML with a
    non-empty `type` and no other keys passes `daybook`-profile put and lint
    (warnings permitted); `created` in an updated note survives unchanged.
+   Immutability probes: an update CHANGING or DROPPING an existing
+   non-empty `created` aborts `created_immutable` with zero file effect —
+   including the unquoted-RFC3339 form yaml.v3 decodes to time.Time —
+   while filling a missing `created` succeeds.
 9. Cross-host race, two clones of one repo simulating two hosts: both clone
    at revision R1; put via clone A succeeds and pushes; put via clone B with
    the same `--expects` commits locally, gets its push rejected, and must

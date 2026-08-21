@@ -20,8 +20,8 @@ import (
 // Main runs one command and returns the process exit code.
 func Main(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(argv) == 0 {
-		usage(stderr)
-		return 2
+		return emit(stdout, nil, inputErr("", "no command given",
+			"run `exocortex help` for the command list"))
 	}
 	cmd, rest := argv[0], argv[1:]
 	var payload any
@@ -46,25 +46,55 @@ func Main(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		usage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "exocortex: unknown command %q\n\n", cmd)
-		usage(stderr)
-		return 2
+		conf = &kernel.Conflict{
+			Code:      "unknown_command",
+			Operation: cmd,
+			Hint:      "run `exocortex help` for the command list",
+		}
+		return emit(stdout, nil, conf) // input error: exit 2
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "exocortex: %v\n", err)
-		return 2
+		// Residual internal failures also speak JSON (CR-04).
+		conf = &kernel.Conflict{
+			Code:      "internal_error",
+			Operation: cmd,
+			Hint:      "retry; if persistent, inspect the exocortex installation",
+			Detail:    map[string]any{"detail": err.Error()},
+		}
 	}
+	return emit(stdout, payload, conf)
+}
+
+// emit writes the JSON document and returns the exit code: 0 success,
+// 1 operation conflict, 2 invalid input / internal failure.
+func emit(stdout io.Writer, payload any, conf *kernel.Conflict) int {
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	if conf != nil {
+		code := 1
+		switch conf.Code {
+		case "unknown_command", "invalid_input", "registration_failed",
+			"payload_unreadable", "internal_error":
+			code = 2
+		}
 		_ = enc.Encode(conflictBody(conf))
-		return 1
+		return code
 	}
 	if err := enc.Encode(payload); err != nil {
-		fmt.Fprintf(stderr, "exocortex: encoding output: %v\n", err)
+		fmt.Fprintf(os.Stderr, "exocortex: encoding output: %v\n", err)
 		return 2
 	}
 	return 0
+}
+
+// inputErr builds an invalid_input conflict for usage-level failures.
+func inputErr(cmd, detail, hint string) *kernel.Conflict {
+	return &kernel.Conflict{
+		Code:      "invalid_input",
+		Operation: cmd,
+		Hint:      hint,
+		Detail:    map[string]any{"detail": detail},
+	}
 }
 
 func usage(w io.Writer) {
@@ -156,18 +186,34 @@ func loadRegistry() ([]kernel.Cortex, error) {
 func cmdRegister(args []string) (any, *kernel.Conflict, error) {
 	fs := flag.NewFlagSet("register", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.Bool("json", true, "JSON output (always on)")
 	vcs := fs.String("vcs", "", "vcs policy: daybook | caller | none (default: auto-detect)")
 	profile := fs.String("profile", "", "validation profile: daybook | strict (default daybook)")
 	flags, pos := splitArgs(args, map[string]bool{"vcs": true, "profile": true})
 	if err := fs.Parse(flags); err != nil {
-		return nil, nil, err
+		return nil, inputErr("register", err.Error(), "run `exocortex help` for register usage"), nil
 	}
 	if len(pos) != 2 {
-		return nil, nil, fmt.Errorf("register requires <name> <path>")
+		return nil, inputErr("register", "register requires <name> <path>",
+			"exocortex register <name> <path> [--vcs daybook|caller|none]"), nil
+	}
+	// Duplicate detection as data, before the domain error.
+	cs, err := loadRegistry()
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range cs {
+		if cs[i].Name == pos[0] {
+			return nil, &kernel.Conflict{Code: "duplicate_cortex", Operation: "register",
+				Path: pos[0], Hint: "pick a new name or inspect the existing cortex with get/search",
+				Detail: map[string]any{"path": cs[i].Path}}, nil
+		}
 	}
 	c, err := kernel.Register(pos[0], pos[1], *vcs, *profile)
 	if err != nil {
-		return nil, nil, err
+		return nil, &kernel.Conflict{Code: "registration_failed", Operation: "register",
+			Path: pos[1], Hint: "fix the name (lowercase slug), path, vcs, or profile and retry",
+			Detail: map[string]any{"detail": err.Error()}}, nil
 	}
 	return map[string]any{"registered": c}, nil, nil
 }
@@ -182,13 +228,15 @@ func cmdPut(args []string, stdin io.Reader) (any, *kernel.Conflict, error) {
 		"from": true, "expects": true, "cortex": true, "agent": true, "json": false,
 	})
 	if err := fs.Parse(flags); err != nil {
-		return nil, nil, err
+		return nil, inputErr("put", err.Error(), "run `exocortex help` for put usage"), nil
 	}
 	if len(pos) != 1 {
-		return nil, nil, fmt.Errorf("put requires exactly one <path>")
+		return nil, inputErr("put", "put requires exactly one <path>",
+			"exocortex put <path> --from <file|->"), nil
 	}
 	if *from == "" {
-		return nil, nil, fmt.Errorf("put requires --from <file|-> (payload and destination are separate)")
+		return nil, inputErr("put", "put requires --from <file|-> (payload and destination are separate)",
+			"exocortex put <path> --from <file|->"), nil
 	}
 	var payload []byte
 	var err error
@@ -198,7 +246,9 @@ func cmdPut(args []string, stdin io.Reader) (any, *kernel.Conflict, error) {
 		payload, err = os.ReadFile(*from)
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading payload: %w", err)
+		return nil, &kernel.Conflict{Code: "payload_unreadable", Operation: "put",
+			Path: *from, Hint: "check the --from path; use - to read the payload from stdin",
+			Detail: map[string]any{"detail": err.Error()}}, nil
 	}
 	cs, err := loadRegistry()
 	if err != nil {
@@ -222,10 +272,10 @@ func cmdGet(args []string) (any, *kernel.Conflict, error) {
 	cortex := commonFlags(fs)
 	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
 	if err := fs.Parse(flags); err != nil {
-		return nil, nil, err
+		return nil, inputErr("get", err.Error(), "run `exocortex help` for get usage"), nil
 	}
 	if len(pos) != 1 {
-		return nil, nil, fmt.Errorf("get requires <path>")
+		return nil, inputErr("get", "get requires <path>", "exocortex get <path> [--cortex <name>]"), nil
 	}
 	cs, err := loadRegistry()
 	if err != nil {
@@ -243,10 +293,10 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 	mode := fs.String("mode", "hybrid", "retrieval mode: hybrid | bm25 | vector")
 	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "limit": true, "mode": true, "agent": true})
 	if err := fs.Parse(flags); err != nil {
-		return nil, nil, err
+		return nil, inputErr("search", err.Error(), "run `exocortex help` for search usage"), nil
 	}
 	if len(pos) != 1 {
-		return nil, nil, fmt.Errorf(`search requires one "<query>"`)
+		return nil, inputErr("search", `search requires one "<query>"`, `exocortex search "<query>"`), nil
 	}
 	hits, err := qmd.Search(context.Background(), pos[0], *cortex, *mode, *limit)
 	if err != nil {
@@ -284,10 +334,10 @@ func cmdLog(args []string) (any, *kernel.Conflict, error) {
 	limit := fs.Int("limit", 50, "max entries")
 	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "limit": true, "agent": true})
 	if err := fs.Parse(flags); err != nil {
-		return nil, nil, err
+		return nil, inputErr("log", err.Error(), "run `exocortex help` for log usage"), nil
 	}
 	if len(pos) != 1 {
-		return nil, nil, fmt.Errorf("log requires <path>")
+		return nil, inputErr("log", "log requires <path>", "exocortex log <path> [--cortex <name>]"), nil
 	}
 	cs, err := loadRegistry()
 	if err != nil {
@@ -315,10 +365,10 @@ func cmdLint(args []string) (any, *kernel.Conflict, error) {
 	cortex := commonFlags(fs)
 	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
 	if err := fs.Parse(flags); err != nil {
-		return nil, nil, err
+		return nil, inputErr("lint", err.Error(), "run `exocortex help` for lint usage"), nil
 	}
 	if len(pos) > 1 {
-		return nil, nil, fmt.Errorf("lint takes at most one <path>")
+		return nil, inputErr("lint", "lint takes at most one <path>", "exocortex lint [<path>]"), nil
 	}
 	path := ""
 	if len(pos) == 1 {

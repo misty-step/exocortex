@@ -366,7 +366,7 @@ func TestProof8ProfileConformance(t *testing.T) {
 		t.Fatal("expected warnings for missing optional keys")
 	}
 
-	// created survives an update untouched.
+	// created survives an update untouched when resubmitted verbatim.
 	rev := f.rev("hosta", "notes/minimal.md")
 	updated := "---\ntype: fleeting\ncreated: 2019-03-04T05:06:07Z\n---\n\nchanged body\n"
 	res, conf := Put(nil, f.cs, PutInput{
@@ -381,8 +381,67 @@ func TestProof8ProfileConformance(t *testing.T) {
 	if !strings.Contains(string(disk), "created: 2019-03-04T05:06:07Z") {
 		t.Fatal("created was modified")
 	}
-	if !strings.Contains(res.Revision, "") || res.Revision == "" {
+	if res.Revision == "" {
 		t.Fatal("missing new revision")
+	}
+
+	// Changing created aborts created_immutable and writes nothing.
+	rev = f.rev("hosta", "notes/minimal.md")
+	before, _ := os.ReadFile(filepath.Join(f.a, "notes/minimal.md"))
+	tampered := "---\ntype: fleeting\ncreated: 2026-01-01T00:00:00Z\n---\n\nchanged body\n"
+	_, conf = Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/minimal.md",
+		Payload: []byte(tampered), Expects: rev,
+		Agent: "u", Via: "cli", OwnPayload: true,
+	})
+	if conf == nil || conf.Code != "created_immutable" {
+		t.Fatalf("want created_immutable, got %#v", conf)
+	}
+	if conf.Detail["stored"] != "2019-03-04T05:06:07Z" || conf.Detail["submitted"] != "2026-01-01T00:00:00Z" {
+		t.Fatalf("detail = %v", conf.Detail)
+	}
+	if after, _ := os.ReadFile(filepath.Join(f.a, "notes/minimal.md")); string(after) != string(before) {
+		t.Fatal("rejected update touched the file")
+	}
+
+	// Dropping created also aborts.
+	dropped := "---\ntype: fleeting\n---\n\nno created at all\n"
+	_, conf = Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/minimal.md",
+		Payload: []byte(dropped), Expects: rev,
+		Agent: "u", Via: "cli", OwnPayload: true,
+	})
+	wantCode(t, conf, "created_immutable")
+
+	// Unquoted RFC3339 is the common form; a changed unquoted value must
+	// be caught (yaml.v3 decodes it to time.Time — lexical comparison).
+	unq := "---\ntype: fleeting\ncreated: 2019-03-04T05:06:07Z\n---\n\nunquoted stored\n"
+	if _, conf := f.put("hosta", "notes/unquoted.md", unq); conf != nil {
+		t.Fatal(conf.Code)
+	}
+	revUQ := f.rev("hosta", "notes/unquoted.md")
+	unqChanged := "---\ntype: fleeting\ncreated: 2030-06-06T06:06:06Z\n---\n\nsneaky\n"
+	_, conf = Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/unquoted.md",
+		Payload: []byte(unqChanged), Expects: revUQ,
+		Agent: "u", Via: "cli", OwnPayload: true,
+	})
+	wantCode(t, conf, "created_immutable")
+
+	// Filling a MISSING created is legal gap-fill.
+	noCreated := "---\ntype: fleeting\n---\n\nnever dated\n"
+	if _, conf := f.put("hosta", "notes/gapfill.md", noCreated); conf != nil {
+		t.Fatal(conf.Code)
+	}
+	revGF := f.rev("hosta", "notes/gapfill.md")
+	gapFilled := "---\ntype: fleeting\ncreated: 2024-02-02T02:02:02Z\n---\n\nnow dated\n"
+	resGF, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/gapfill.md",
+		Payload: []byte(gapFilled), Expects: revGF,
+		Agent: "u", Via: "cli", OwnPayload: true,
+	})
+	if conf != nil || resGF == nil {
+		t.Fatalf("gap-fill must succeed: %v", conf)
 	}
 }
 

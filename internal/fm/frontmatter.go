@@ -101,7 +101,7 @@ func Validate(profile string, n Note) ([]Finding, error) {
 		if t, ok := fmMap["type"].(string); !ok || strings.TrimSpace(t) == "" {
 			return nil, contract(errf("type_missing", "frontmatter has no non-empty \"type\""))
 		}
-		return daybookWarnings(fmMap), nil
+		return daybookWarnings(n, fmMap), nil
 	case "strict":
 		if !n.HasFM {
 			return nil, contract(errf("fm_missing", "frontmatter missing"))
@@ -115,7 +115,9 @@ func Validate(profile string, n Note) ([]Finding, error) {
 				fs = append(fs, errf("key_missing", "strict profile requires non-empty %q", k))
 			}
 		}
-		if c, ok := fmMap["created"].(string); ok && c != "" {
+		// Lexical read: yaml.v3 decodes unquoted timestamps (including
+		// date-only values) to time.Time, hiding them from map assertions.
+		if c, ok := TopLevelScalar(n, "created"); ok && strings.TrimSpace(c) != "" {
 			if _, perr := time.Parse(time.RFC3339, c); perr != nil {
 				fs = append(fs, errf("created_format", "created %q is not RFC3339", c))
 			}
@@ -144,14 +146,14 @@ func ContractFinding(err error) (Finding, bool) {
 	return ce.f, ok
 }
 
-func daybookWarnings(m map[string]any) []Finding {
+func daybookWarnings(n Note, m map[string]any) []Finding {
 	var fs []Finding
 	for _, k := range []string{"status", "description", "tags", "created"} {
 		if empty(m[k]) {
 			fs = append(fs, warnf("key_missing", "%q missing or empty", k))
 		}
 	}
-	if c, ok := m["created"].(string); ok && c != "" {
+	if c, ok := TopLevelScalar(n, "created"); ok && c != "" {
 		if _, perr := time.Parse(time.RFC3339, c); perr != nil {
 			fs = append(fs, warnf("created_format", "created %q is not RFC3339", c))
 		}
@@ -211,6 +213,35 @@ func SpliceProvenance(raw []byte, p Provenance) []byte {
 	// one so the closing delimiter never fuses with the last value line.
 	head := openDelim + strings.TrimRight(fmText, "\n") + "\n---\n"
 	return append([]byte(head), n.Body...)
+}
+
+// TopLevelScalar returns the lexical text of a top-level scalar key,
+// independent of the resolved Go type: yaml.v3 decodes unquoted
+// timestamps (the normal created form) into time.Time, so map-based
+// string assertions miss them. ok is false when the key is absent or
+// its value is not a scalar.
+func TopLevelScalar(n Note, key string) (string, bool) {
+	if !n.HasFM {
+		return "", false
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(n.FMText), &root); err != nil {
+		return "", false
+	}
+	if len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
+		return "", false
+	}
+	mapping := root.Content[0]
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			v := mapping.Content[i+1]
+			if v.Kind != yaml.ScalarNode || v.Tag == "!!null" {
+				return "", false
+			}
+			return v.Value, true
+		}
+	}
+	return "", false
 }
 
 // StripProvenance removes the kernel-owned provenance block from a
