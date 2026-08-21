@@ -206,9 +206,11 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
 
   Input-class failures (`invalid_input`, `unknown_command`,
   `registration_failed`, `payload_unreadable`, `internal_error`) emit the
-  same JSON shape on stdout for EVERY CLI exit path — flag errors,
-  missing arguments, bare invocation included — and exit 2; operation
-  conflicts exit 1.
+  same JSON shape on stdout for every COMMAND EXECUTION path — flag
+  errors, missing arguments, bare invocation included — and exit 2;
+  operation conflicts exit 1. The single exception is the human-facing
+  `help` / `-h` / `--help` form, which prints usage text to stdout and
+  exits 0; it is documentation, not command output.
 
   Every body ends with `"hint"` naming the recovery (re-read with `get`,
   re-apply, retry; or commit/unstage your own staged work).

@@ -55,7 +55,16 @@ func TestUniformJSONContract(t *testing.T) {
 		t.Fatalf("no command: exit=%d body=%v", code, body)
 	}
 
-	// Malformed flag on register -> JSON invalid_input, exit 2.
+	// help is the documented human exception: usage text, exit 0, never
+	// JSON — probed through the raw Main path, bypassing runMain's
+	// strict JSON unmarshal.
+	for _, form := range []string{"help", "-h", "--help"} {
+		var out, errb bytes.Buffer
+		code := Main([]string{form}, strings.NewReader(""), &out, &errb)
+		if code != 0 || !strings.Contains(out.String(), "Usage:") {
+			t.Fatalf("%s: exit=%d out=%q", form, code, out.String())
+		}
+	}
 	code, body, _ = runMain(t, "", "register", "smoke", repo, "--vcs")
 	if code != 2 || body["error"] != "invalid_input" {
 		t.Fatalf("flag error: exit=%d body=%v", code, body)
