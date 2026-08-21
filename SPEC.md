@@ -77,49 +77,62 @@ Single Go or Rust binary (CR-01), two faces:
 
 Write path mechanics:
 
-- Frontmatter floor validation (type, status, created, description, tags).
-- Provenance stamping: agent identity, timestamp, source.
+- Validation: the payload is validated under the cortex's profile BEFORE
+  any no-op comparison or write; an invalid payload always fails, even when
+  byte-identical to stored content.
+- Provenance stamping: agent identity, timestamp, source — non-noop writes
+  only.
 - Payload separation: `<path>` is only ever the destination; the payload
-  arrives via `--from`/`content`. Concurrency stays structural: every update
-  requires `--expects` naming the stored revision (`get` reports it; missing
-  flag = hard error); bare `put` creates only. The check-then-write is one
-  atomic step inside the cortex critical section — never check-before-lock,
-  which lets two passers serialize into a silent replacement.
-  Idempotence: a validated payload byte-equal to stored content exits
+  arrives via `--from`/`content`. Concurrency stays structural for EVERY
+  cortex: the CAS lock lives in the generic put pipeline, not in any VCS
+  driver — `caller` and `none` cortices promise the same expected-revision
+  guarantees as `daybook`.
+- Idempotence: a validated payload byte-equal to stored content exits
   success as a NO-OP before provenance stamping — no write, no commit — so
   identical retries are free. Conflicts return as data: create finding an
   existing path → `exists`; revision mismatch → `revision_conflict` (CR-04).
 
+### The put pipeline (one critical section, all cortices)
+
+Every `put` runs this sequence under one exclusive per-cortex lock
+(`flock` on `${XDG_CONFIG_HOME:-~/.config}/exocortex/locks/<name>.lock`),
+acquired BEFORE any state is read and released only at the end. The VCS
+policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
+
+1. lock;
+2. refresh — `daybook`: `git pull --rebase --autostash`; `caller`/`none`:
+   nothing;
+3. pre-flight — `daybook` only, both aborts conflict-as-data:
+   - staged paths outside this operation's touched set
+     (`foreign_staged_state`) — never commit, stash away, or discard
+     another worker's staged state;
+   - destination staged or unstaged-dirty vs HEAD
+     (`git status --porcelain -- <path>` → `dirty_destination`) — that is
+     someone's in-flight work; hashing it as "stored" and overwriting
+     would destroy it;
+4. CAS: re-read the stored destination revision; evaluate `--expects` or
+   create-absence against fresh state;
+5. validate the payload under the cortex profile — invalid payloads fail
+   here, before any comparison or write, even when byte-identical to
+   stored content;
+6. no-op short-circuit: if the now-validated payload equals the stored
+   bytes, release the lock and exit success — no stamp, no write, no
+   commit;
+7. stamp provenance, atomic write (temp file + rename);
+8. VCS tail — `daybook`: stage touched paths, path-limited commit
+   (`git commit -- <touched paths>`), push; `caller`/`none`: nothing;
+9. release lock.
+
+`index.lock` never covers this sequence; the cortex lock does. A racing
+stager cannot enter the path-limited commit even if the lock is bypassed.
+Cross-host races on git cortices are arbitrated by pull/push; `none` and
+`caller` cortices are single-host by contract.
+
 ### VCS lifecycle (per-cortex policy)
 
-Generic `put` never hard-codes version control. Each cortex declares a
-policy:
-
-- `daybook` driver — one critical section per operation; the cortex lock is
-  acquired BEFORE any state is read and held through push:
-  1. lock `flock <cortex>/.git/exocortex.driver.lock` (`index.lock` alone
-     does not cover multi-command sequences);
-  2. refresh: `git pull --rebase --autostash`;
-  3. pre-flight, two aborts, both conflict-as-data:
-     - if the index holds staged paths outside this operation's touched set
-       (`foreign_staged_state`) — never commit, stash away, or discard
-       another worker's staged state;
-     - if the destination itself is staged or unstaged-dirty vs HEAD
-       (`git status --porcelain -- <path>` non-empty → `dirty_destination`)
-       — that is someone's in-flight work; hashing it as "stored" and
-       overwriting would destroy it.
-  4. CAS: re-read the stored destination revision; evaluate `--expects` or
-     create-absence against fresh state;
-  5. no-op short-circuit: if the validated payload equals the stored bytes,
-     release the lock and exit success — no stamp, no write, no commit;
-  6. validate payload, stamp provenance, atomic write (temp file + rename);
-  7. stage touched paths, path-limited commit
-     (`git commit -- <touched paths>`), push;
-  8. release lock. A racing stager cannot enter the path-limited commit even
-     if the lock is bypassed.
-- `caller` policy: kernel writes files; the caller commits (default for
-  non-vault repos).
-- `none` policy: plain directory writes.
+Generic `put` never hard-codes version control. The registry entry's `vcs`
+policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
+`caller` (kernel writes; caller commits), `none` (plain directory writes).
 
 ### Pinned interfaces
 
