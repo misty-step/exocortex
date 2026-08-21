@@ -1,60 +1,44 @@
 # Exocortex
 
-Exocortex is a public, local-first evidence core for agents that need smaller,
-safer context than "search everything and hope": it is meant to compile
-policy-filtered, replayable context packets with fetchable citations,
-freshness labels, source decisions, exclusions, and gaps. It is not another
-vector database, not a chat app, and not a hosted agent framework; the product
-is the auditable evidence contract around what context was included, excluded,
-and can be fetched again.
+Foundation-shaped memory kernel for the Misty Step agent fleet: one binary
+that gives every agent a uniform read/write/search interface over registered
+knowledge corpora.
 
-## Current Status
+**Status: spec-seeded, unbuilt.** The v0 build is Powder card `exocortex-v0`.
+Everything below describes the agreed contract, not shipped code.
 
-This repository is experimentation-open and productization-gated. Small
-fixtures and bounded prototypes may land when they prove the evidence contract,
-but product runtime, stable public APIs, SDK/MCP commitments, and broad
-scaffolding are blocked on the retrieval-validation experiment in
-[docs/experiments/retrieval-validation.md](docs/experiments/retrieval-validation.md).
+## Model
 
-The concrete proof-of-shape artifact today is
-[tests/fixtures/first-packet/](tests/fixtures/first-packet/):
+- **Cortex** — a writable markdown+git corpus registered with the kernel.
+  Daybook is the first. Full read/write/search/lint/lineage over plain files
+  humans can still read and diff.
+- **Feed** — an adapter that ingests a foreign source (Notion, Google Drive,
+  harness session logs) into a cortex as compiled, provenance-stamped notes
+  with `source:` lineage. Raw sources stay where they are.
 
-- [source-registry.json](tests/fixtures/first-packet/source-registry.json)
-  declares the sources, evidence, exclusions, gaps, and citation anchors.
-- [evidence-packet.md](tests/fixtures/first-packet/evidence-packet.md) is the
-  generated packet.
-- [scripts/build-first-packet.py](scripts/build-first-packet.py) regenerates
-  the packet and validates local file-line anchors plus citation checksums.
-
-Run the current repository gate with
-[scripts/verify.sh](scripts/verify.sh):
+## Planned surface (v0)
 
 ```sh
-./scripts/verify.sh
+exocortex register daybook ~/Development/misty-step/daybook
+exocortex put <file> [--expects <sha>]   # validates, stamps, applies cortex VCS policy
+exocortex get <path>
+exocortex search "<query>" --json        # shells qmd
+exocortex log <path>                     # git lineage
+exocortex lint [<path>]                  # frontmatter floor gate
+exocortex mcp                            # stdio MCP server, same operations
 ```
 
-## Aspirational v0
+## Docs
 
-The target product loop below is not implemented yet. There is no working
-`exo` binary in this repository. This shape is tracked in
-[backlog.d/003-build-contract-first-kernel-after-eval.md](backlog.d/003-build-contract-first-kernel-after-eval.md)
-and remains blocked on the retrieval-validation experiment.
+- [SPEC.md](SPEC.md) — full design: decisions, contracts, delivery plan
+- [VISION.md](VISION.md) — why this exists
+- [ADR-0001](docs/adr/0001-exocortex-kernel.md) — accepted kernel decision
+- [skills/exocortex/SKILL.md](skills/exocortex/SKILL.md) — bundled agent skill
+  (canonical copy; omp-config installs it in slice 2)
 
-```sh
-exo init
-exo ingest ./notes --source notes
-exo search "what matters for this task?" --profile repo_grounded
-exo packet "prepare an implementation plan" --profile repo_grounded --out evidence/
-exo explain --html evidence/packet.json
-```
+## Provenance
 
-## Where To Read Next
-
-- [VISION.md](VISION.md) explains the product thesis, public/private boundary,
-  and frozen/open shape decisions.
-- [AGENTS.md](AGENTS.md) records the repo contract, CI checks, and agent
-  guardrails.
-- [backlog.d/](backlog.d/) holds the current backlog and blocked
-  productization work.
-- [docs/experiments/retrieval-validation.md](docs/experiments/retrieval-validation.md)
-  defines the experiment that decides whether implementation unfreezes.
+This repo previously hosted an earlier, unrelated "evidence core" concept
+(citable context packets, 2026-07). On 2026-08-21 the operator repurposed the
+repository for the memory kernel. The prior tree remains recoverable from git
+history; `LICENSE` was retained.

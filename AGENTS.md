@@ -1,40 +1,54 @@
-# AGENTS.md — Exocortex
+# AGENTS.md — Exocortex kernel
 
-Exocortex is the public, local-first evidence core for agent-readable
-context: source registry, adapters, indexes, retrieval, packet assembly,
-receipts, and policy behind one core, projected through CLI, MCP, HTTP API,
-SDKs, and a skill. See `VISION.md` for the full product shape and the
-evidence-contract thesis (fetchable citations, source-decision receipts,
-exclusions, freshness labels).
+One binary (`exocortex`) giving every Misty Step agent a uniform
+read/write/search interface over registered knowledge corpora. Spec-seeded
+2026-08-21; nothing is implemented yet. The v0 build job is Powder card
+`exocortex-v0`.
 
-Status: **experimentation-open, productization-gated**. Bounded prototypes,
-fixtures, and private-data experiments may land when tied to an explicit
-evidence oracle. Product runtime, stable public APIs, SDK/MCP commitments, and
-broad scaffolding remain gated until the retrieval experiment validates the
-premise on real private data — see `backlog.d/002` for the validation contract.
+## Operator-set decisions (2026-08-21)
 
-## Build / verify
+Source artifact: daybook `misty-step/exocortex-kernel.md`.
 
-- No product build tooling exists yet (no package manifest). Prototype scripts
-  are allowed only as experiment drivers and must stay out of product-runtime
-  shape.
-- The repo-owned verification gate is `./scripts/verify.sh`.
-- The standing gate for this phase includes the public-boundary grep oracle in
-  `backlog.d/001-public-boundary-and-frozen-shape-closure.md`: no private
-  paths, hostnames, or tool names may leak into public docs.
-- The gate also regenerates `tests/fixtures/first-packet/evidence-packet.md`
-  with `python3 scripts/build-first-packet.py` and fails if the committed
-  fixture drifts. That fixture currently validates public learning-source
-  anchors in a sibling `../harness-kit` checkout; CI materializes the sibling
-  from `misty-step/harness-kit`.
-- CI: `.github/workflows/ci.yml` runs the repo-owned gate on pull requests and
-  pushes to `master`. `.github/workflows/landmark-release.yml` only synthesizes
-  release notes on GitHub release publish; it is not a code gate.
+- Small CLI that carries its own agent skill; two faces from one binary:
+  CLI (`--json`) and stdio MCP server.
+- Pluggable at the edge, never in the store. **Cortices** are writable
+  markdown+git corpora with full read/write; **feeds** are adapters that
+  ingest foreign sources into a cortex as compiled, provenance-stamped notes
+  with `source:` lineage. No content port; no storage backends.
+- Daybook is cortex #1. Skeleton first: `register/put/get/search/log/lint`.
+- VCS lifecycle is a per-cortex policy; generic `put` never hard-codes
+  commits. The daybook driver runs `pull --rebase --autostash`, stages
+  touched paths only, commits, pushes (daybook's own repo contract). Other
+  cortices declare caller-owned commits or no VCS.
+- Fleet delivery: the CLI is the universal baseline (any harness can exec a
+  shell command). MCP is registered per harness; slice 2 owns the omp /
+  Claude Code / Codex / opencode / goose / pi install targets.
 
-## Layout
+## Open decisions
 
-- `VISION.md` — product shape and closed/open shape decisions.
-- `backlog.d/` — numbered backlog items; current front is retrieval
-  validation before any product runtime scaffold.
+- Language: Go recommended (velocity, single-binary fleet distribution);
+  Rust equally acceptable (canon CR-01). Decide at scaffold.
+- Claim/lease semantics when concurrency mechanization lands.
+- Feed priority order (harness session logs proposed first).
+- Optional `exo` binary alias.
 
-No repo-local `.agents/skills/` present.
+## Contracts
+
+- Write path: frontmatter floor validation, provenance stamping
+  (agent/time/source), expected-hash precondition on put, conflicts returned
+  as data — never swallowed.
+- Search shells out to `qmd --format json`; the kernel never re-implements
+  retrieval.
+- `--json` everywhere (CR-02); errors name operation, input, expected state
+  (CR-04).
+
+## Working rules
+
+- Trunk-based on `master`; semantic commits (`type(scope): subject`).
+- Never force-push. Stage only files you touched; concurrent agents work in
+  this repo.
+- Org defaults apply: Go or Rust (CR-01), minimal docs surface (DC-01), ADRs
+  immutable once accepted (DC-02).
+- History note: this repo previously hosted an "evidence core" concept
+  (replaced 2026-08-21 by operator decision). Old tree is recoverable from
+  git history; do not restore it without operator instruction.
