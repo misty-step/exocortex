@@ -100,27 +100,34 @@ acquired BEFORE any state is read and released only at the end. The VCS
 policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
 
 1. lock;
-2. refresh — `daybook`: `git pull --rebase --autostash`; `caller`/`none`:
-   nothing;
-3. pre-flight — `daybook` only, all three aborts conflict-as-data:
+2. pre-flight — `daybook` only, all three aborts conflict-as-data, run
+   BEFORE refresh: with the tree already clean, the mandated
+   `pull --rebase --autostash` has no in-flight work to cycle through a
+   stash/pop conflict window;
    - staged paths outside this operation's touched set
      (`foreign_staged_state`) — never commit, stash away, or discard
      another worker's staged state;
-   - destination staged or unstaged-dirty vs HEAD
-     (`git status --porcelain -- <path>` → `dirty_destination`) — that is
-     someone's in-flight work; hashing it as "stored" and overwriting
-     would destroy it;
+   - destination staged or unstaged-dirty vs HEAD (updates only; a
+     create overwrites nothing, so CAS existence answers it) →
+     `dirty_destination`;
    - unstaged modifications outside the touched set
-     (`foreign_unstaged_state`) — untracked files are allowed; modified or
-     deleted tracked files belong to another worker, and the step-8 unwind
-     must never be able to reach them;
+     (`foreign_unstaged_state`) — untracked files are allowed; modified
+     or deleted tracked files belong to another worker, and the step-8
+     unwind must never be able to reach them;
+3. refresh — `daybook`: `git pull --rebase --autostash` (per the
+   operator decision record; normally inert behind step 2's clean-scan),
+   then REPEAT step 2's scan against post-refresh state (the pull window
+   may have changed things); `caller`/`none`: nothing;
 4. CAS: re-read the stored destination revision; evaluate `--expects` or
    create-absence against fresh state;
 5. validate the payload under the cortex profile — invalid payloads fail
    here, before any comparison or write, even when byte-identical to
    stored content;
-6. no-op short-circuit: if the now-validated payload equals the stored
-   bytes, release the lock and exit success — no stamp, no write, no
+6. no-op short-circuit: identical retries are free. Two forms qualify —
+   the payload byte-equals the stored bytes (the get → put-unchanged
+   round trip), or the payload byte-equals the stored bytes with the
+   kernel-owned `provenance` block stripped (a raw-draft retry). Either
+   match releases the lock and exits success — no stamp, no write, no
    commit;
 7. stamp provenance, atomic write (temp file + rename);
 8. VCS tail — `daybook`: record `base` = HEAD sha (post-refresh), stage
@@ -128,24 +135,33 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
    then push. On push rejection (non-fast-forward or any failure): NO
    retry, NO rebase, NO force. Unwind path-scoped, so nothing outside this
    operation can be destroyed even under a pre-flight race:
-   `git reset <base>` (branch and index back, working tree kept), then
-   `git checkout <base> -- <touched paths>`. Then converge on the winner:
+   `git reset --soft <base>` — HEAD moves back, the index is NEVER swept
+   repo-wide, so even a foreign path staged after pre-flight keeps its
+   index entry. Restore only the touched path by its mode: an UPDATED
+   path (present in base) via `git restore --source=<base> --staged
+   --worktree -- <path>`; a CREATED path does not exist in base and is
+   dropped via `git rm --cached` plus file removal — a leftover would
+   block the ff merge. Then converge on the winner:
    `git fetch` + `git merge --ff-only @{u}` — a lost race must not leave
    stale bytes that make `get` lie and retries spin; if the ff-only merge
    fails (rare race), stay at base with hint "refresh failed; next put's
    refresh heals". Payload preserved (CLI `--from` file is the caller's;
    MCP/stdin payloads are written to a temp file whose path is returned
-   in the conflict body); exit `revision_conflict` with hint "remote
-   moved; re-read with get and retry". `caller`/`none`: nothing;
+   in the conflict body). Exit code: a losing UPDATE exits
+   `revision_conflict` ("remote moved; re-read with get and retry"); a
+   losing CREATE exits `exists` — the winner's note now occupies the
+   path (operator decision 2026-08-21: existing path → `exists`).
+   `caller`/`none`: nothing;
 9. release lock.
 
 `index.lock` never covers this sequence; the cortex lock does. A racing
 stager cannot enter the path-limited commit even if the lock is bypassed.
 Cross-host: per-host locks cannot see each other, so the CAS guarantee on
 git cortices is enforced by push — a rejected push IS the cross-host
-`revision_conflict`; the failed put leaves ZERO trace of itself (its own
-commit unwound, touched bytes restored to base) and the clone converges to
-the remote tip via the ff-only restore. `none` and `caller`
+`revision_conflict` for updates and `exists` for creates; the failed put
+leaves ZERO trace of itself (its own commit unwound, touched bytes
+restored to base or created file removed) and the clone converges to the
+remote tip via the ff-only restore. `none` and `caller`
 cortices are single-host by contract.
 
 
@@ -180,7 +196,6 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
 - **Conflict payloads** — nonzero exit + JSON body:
 
   ```json
-  {"error":"missing_expects","operation":"update","path":"…"}
   {"error":"exists","operation":"create","path":"…"}
   {"error":"revision_conflict","operation":"update","path":"…","expected":"…","actual":"…"}
   {"error":"dirty_destination","path":"…","state":"staged"|"unstaged"}
@@ -207,7 +222,12 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
 
 ### v0 acceptance proofs
 
-1. Update without `--expects`: exit nonzero, `missing_expects`.
+1. Bare put on any existing path — tracked, staged, or untracked — exits
+   nonzero with `exists` and a hint directing get → `--expects`. There is
+   no intent inference and no `missing_expects` code (operator decision
+   2026-08-21): overwriting without a stored-revision hash is impossible
+   in every mode, and a stale or malformed hash falls out as an ordinary
+   `revision_conflict`.
 2. Bare put on existing path: `exists`. Create race under concurrency:
    exactly one creator wins; the loser gets `exists` and leaves no trace.
 3. `--expects` mismatch: `revision_conflict` carrying actual revision.
@@ -238,6 +258,10 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
     clone's branch equals the remote tip and `get` returns the winner's
     bytes. Pre-flight alone: an unrelated unstaged tracked edit present up
     front aborts `foreign_unstaged_state` with the edit untouched.
+11. Cross-host CREATE race: two clones create the same new path; clone A
+    pushes; clone B's push is rejected, exits `exists`, B's own file is
+    gone from disk, and B's branch and target bytes equal the remote
+    (A's content).
 
 ## Fleet delivery
 

@@ -41,11 +41,12 @@ Write rules enforced by `put` (do not pre-satisfy by hand):
 - Provenance stamped automatically (agent, time, source); never fake it.
 - Payload and destination are separate: `--from <file|->` supplies the
   content; `<path>` is where it lands in the cortex. Concurrency is
-  structural: updating an existing note REQUIRES
-  `--expects <sha>` naming the STORED revision (`get` reports it) — missing
-  flag = hard error, never a silent overwrite; bare `put` creates only.
-  On mismatch, re-read with `get`, re-apply your change on top, retry. Never
-  overwrite a conflict.
+  structural: bare `put` creates only — on ANY existing path it fails
+  `exists` with a hint; updating REQUIRES `--expects <sha>` naming the
+  STORED revision (`get` reports it). A stale or malformed hash fails
+  `revision_conflict`. There is no way to overwrite without the hash.
+  On mismatch, re-read with `get`, re-apply your change on top, retry.
+  Never overwrite a conflict.
 
 ## VCS policy is per-cortex
 
