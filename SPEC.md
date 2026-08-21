@@ -84,9 +84,11 @@ Write path mechanics:
   requires `--expects` naming the stored revision (`get` reports it; missing
   flag = hard error); bare `put` creates only. The check-then-write is one
   atomic step inside the cortex critical section — never check-before-lock,
-  which lets two passers serialize into a silent replacement. Mismatch or
-  create race returns a conflict as data (operation, input, expected vs
-  actual state, CR-04).
+  which lets two passers serialize into a silent replacement.
+  Idempotence: a validated payload byte-equal to stored content exits
+  success as a NO-OP before provenance stamping — no write, no commit — so
+  identical retries are free. Conflicts return as data: create finding an
+  existing path → `exists`; revision mismatch → `revision_conflict` (CR-04).
 
 ### VCS lifecycle (per-cortex policy)
 
@@ -108,10 +110,12 @@ policy:
        overwriting would destroy it.
   4. CAS: re-read the stored destination revision; evaluate `--expects` or
      create-absence against fresh state;
-  5. validate payload, stamp provenance, atomic write (temp file + rename);
-  6. stage touched paths, path-limited commit
+  5. no-op short-circuit: if the validated payload equals the stored bytes,
+     release the lock and exit success — no stamp, no write, no commit;
+  6. validate payload, stamp provenance, atomic write (temp file + rename);
+  7. stage touched paths, path-limited commit
      (`git commit -- <touched paths>`), push;
-  7. release lock. A racing stager cannot enter the path-limited commit even
+  8. release lock. A racing stager cannot enter the path-limited commit even
      if the lock is bypassed.
 - `caller` policy: kernel writes files; the caller commits (default for
   non-vault repos).
@@ -125,7 +129,9 @@ policy:
 - **`get` output** (`--json`, default): `{"cortex", "path", "revision",
   "frontmatter", "content"}` — `content` is the full file text including
   frontmatter.
-- **Provenance stamp** — appended to frontmatter on every successful put:
+- **Provenance stamp** — appended to frontmatter on every successful
+  WRITE; a byte-identical retry short-circuits as a successful no-op and
+  stamps nothing:
 
   ```yaml
   provenance:
@@ -168,10 +174,12 @@ policy:
 
 1. Update without `--expects`: exit nonzero, `missing_expects`.
 2. Bare put on existing path: `exists`. Create race under concurrency:
-   exactly one winner, loser gets `revision_conflict`.
+   exactly one creator wins; the loser gets `exists` and leaves no trace.
 3. `--expects` mismatch: `revision_conflict` carrying actual revision.
-4. Two scripted concurrent puts on one path: one commit each attempt, no
-   interleaving; unrelated staged path survives untouched.
+4. Two concurrent updates carrying the same expected revision: exactly one
+   commits; the loser aborts `revision_conflict` with zero filesystem and
+   git effect. A foreign staged path makes put ABORT `foreign_staged_state`
+   before any write; afterward that path remains staged and byte-identical.
 5. Dirty destination: with an unstaged local edit to the target file, put
    aborts `dirty_destination` and the edit survives byte-for-byte; same for
    a staged-only change.
