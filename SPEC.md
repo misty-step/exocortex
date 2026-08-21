@@ -149,10 +149,20 @@ policy:
 
   Every body ends with `"hint"` naming the recovery (re-read with `get`,
   re-apply, retry; or commit/unstage your own staged work).
-- **Frontmatter floor (lint + put)** — fail: any of `type`, `status`,
-  `created`, `description`, `tags` missing or empty; `created` not RFC3339.
-  Warn: unknown `type`/`status` vocabulary (vocabulary stays owned by the
-  daybook `/wiki` skill).
+- **Validation profiles** — each cortex declares a named profile in its
+  registry entry (`profile`, default `daybook`). Built-ins:
+  - `daybook` — mirrors the canonical `/wiki` contract exactly: FAIL only
+    when frontmatter is missing/unparseable or `type` is absent/empty
+    (`type` is free-form; tolerate every value). Everything else — missing
+    `status`/`description`/`tags`/`created`, unknown keys, unknown `type`
+    vocabulary — is a WARNING, never an error. `put` never strips keys,
+    never modifies existing frontmatter values except adding/updating its
+    own `provenance` block, and treats `created` as immutable.
+  - `strict` — the five-key floor (`type`, `status`, `created`,
+    `description`, `tags` all present and non-empty; RFC3339 `created`);
+    opt-in for future cortices that want it.
+  `lint` reports failures and warnings tiered; consumers of `daybook`
+  cortices MUST NOT hard-fail on warnings.
 
 ### v0 acceptance proofs
 
@@ -169,6 +179,9 @@ policy:
    pushed; second run is a clean no-op only when content and revision match.
 7. MCP face round-trip: get → put(expectedRevision) → get bumps revision and
    preserves payload byte-for-byte apart from the provenance stamp.
+8. Profile conformance: a note whose frontmatter is parseable YAML with a
+   non-empty `type` and no other keys passes `daybook`-profile put and lint
+   (warnings permitted); `created` in an updated note survives unchanged.
 
 ## Fleet delivery
 

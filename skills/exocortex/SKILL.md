@@ -34,7 +34,10 @@ exocortex lint misty-step/new-decision.md               # frontmatter floor gate
 
 Write rules enforced by `put` (do not pre-satisfy by hand):
 
-- Frontmatter floor: `type`, `status`, `created`, `description`, `tags`.
+- Frontmatter: the cortex's validation profile decides. Daybook cortex
+  follows the `/wiki` floor — parseable YAML with non-empty `type` required;
+  `description` strongly recommended; everything else warned, never failed.
+  `created` is never modified; unknown keys and `type` values are tolerated.
 - Provenance stamped automatically (agent, time, source); never fake it.
 - Payload and destination are separate: `--from <file|->` supplies the
   content; `<path>` is where it lands in the cortex. Concurrency is
