@@ -54,7 +54,7 @@ Rejected extremes:
 
 ## v0 contract
 
-Single Go or Rust binary (CR-01), two faces:
+Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
 
 - **CLI** (`--json` everywhere, CR-02):
   - `register <name> <path>` — bind a cortex.
@@ -102,7 +102,7 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
 1. lock;
 2. refresh — `daybook`: `git pull --rebase --autostash`; `caller`/`none`:
    nothing;
-3. pre-flight — `daybook` only, both aborts conflict-as-data:
+3. pre-flight — `daybook` only, all three aborts conflict-as-data:
    - staged paths outside this operation's touched set
      (`foreign_staged_state`) — never commit, stash away, or discard
      another worker's staged state;
@@ -110,6 +110,10 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
      (`git status --porcelain -- <path>` → `dirty_destination`) — that is
      someone's in-flight work; hashing it as "stored" and overwriting
      would destroy it;
+   - unstaged modifications outside the touched set
+     (`foreign_unstaged_state`) — untracked files are allowed; modified or
+     deleted tracked files belong to another worker, and the step-8 unwind
+     must never be able to reach them;
 4. CAS: re-read the stored destination revision; evaluate `--expects` or
    create-absence against fresh state;
 5. validate the payload under the cortex profile — invalid payloads fail
@@ -122,20 +126,26 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
 8. VCS tail — `daybook`: record `base` = HEAD sha (post-refresh), stage
    touched paths, path-limited commit (`git commit -- <touched paths>`),
    then push. On push rejection (non-fast-forward or any failure): NO
-   retry, NO pull, NO rebase, NO force — `git reset --hard <base>` restores
-   branch and working tree to the pre-put state (safe: pre-flight guaranteed
-   nothing else staged or dirty), payload preserved (CLI `--from` file is
-   the caller's; MCP/stdin payloads are written to a temp file whose path is
-   returned in the conflict body), exit `revision_conflict` with hint
-   "remote moved; re-read with get and retry". `caller`/`none`: nothing;
+   retry, NO rebase, NO force. Unwind path-scoped, so nothing outside this
+   operation can be destroyed even under a pre-flight race:
+   `git reset <base>` (branch and index back, working tree kept), then
+   `git checkout <base> -- <touched paths>`. Then converge on the winner:
+   `git fetch` + `git merge --ff-only @{u}` — a lost race must not leave
+   stale bytes that make `get` lie and retries spin; if the ff-only merge
+   fails (rare race), stay at base with hint "refresh failed; next put's
+   refresh heals". Payload preserved (CLI `--from` file is the caller's;
+   MCP/stdin payloads are written to a temp file whose path is returned
+   in the conflict body); exit `revision_conflict` with hint "remote
+   moved; re-read with get and retry". `caller`/`none`: nothing;
 9. release lock.
 
 `index.lock` never covers this sequence; the cortex lock does. A racing
 stager cannot enter the path-limited commit even if the lock is bypassed.
 Cross-host: per-host locks cannot see each other, so the CAS guarantee on
 git cortices is enforced by push — a rejected push IS the cross-host
-`revision_conflict`, and the failed put leaves ZERO local git or filesystem
-effect (checkout and branch identical to remote). `none` and `caller`
+`revision_conflict`; the failed put leaves ZERO trace of itself (its own
+commit unwound, touched bytes restored to base) and the clone converges to
+the remote tip via the ff-only restore. `none` and `caller`
 cortices are single-host by contract.
 
 
@@ -175,6 +185,7 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
   {"error":"revision_conflict","operation":"update","path":"…","expected":"…","actual":"…"}
   {"error":"dirty_destination","path":"…","state":"staged"|"unstaged"}
   {"error":"foreign_staged_state","paths":["…"]}
+  {"error":"foreign_unstaged_state","paths":["…"]}
   ```
 
   Every body ends with `"hint"` naming the recovery (re-read with `get`,
@@ -221,6 +232,12 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
    B's branch and target-file bytes are identical to the remote (A's
    content), B's commit is gone, and no rebase, merge, or force-push
    occurred at any point.
+10. Unwind safety: a foreign unstaged edit appearing after pre-flight
+    (constructed directly before the tail runs) survives push rejection
+    byte-for-byte while the touched path is restored; afterward the losing
+    clone's branch equals the remote tip and `get` returns the winner's
+    bytes. Pre-flight alone: an unrelated unstaged tracked edit present up
+    front aborts `foreign_unstaged_state` with the edit untouched.
 
 ## Fleet delivery
 
@@ -252,8 +269,6 @@ repo's canonical copy, and the one-line pointer in omp-config
 - **Name `foundation`** — collides with the omp-config baseline skill.
 
 ## Open questions
-
-- Language: Go recommended; Rust acceptable (CR-01). Decide at scaffold.
 - Claim/lease semantics for concurrency mechanization.
 - Feed priority order (harness session logs proposed first — highest tacit
   value per Huber). Coverage caveat: QMD collections cover omp, Claude Code,
