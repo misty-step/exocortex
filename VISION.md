@@ -6,9 +6,11 @@ proven fix is unglamorous: agents write things down, then find them later —
 in a versioned, structured wiki.
 
 We already own that substrate. Daybook is a git-versioned markdown wiki. QMD
-indexes it and every raw agent session. What the fleet lacks is the product
-surface: one deep module that makes writing correct, finding reliable, and
-lineage automatic — on every harness, without trusting prose conventions.
+indexes it plus the omp/Claude/pi raw session collections — Hermes/Amos
+SQLite and Codex/opencode/goose sessions are not covered yet. What the fleet
+lacks is the product surface: one deep module that makes writing correct,
+finding reliable, and lineage automatic — on every harness, without trusting
+prose conventions.
 
 Exocortex is that surface. It is private-first and boring by design:
 

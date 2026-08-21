@@ -26,7 +26,8 @@ this repo; until it is installed (omp-config slice 2), fall back to
 ```sh
 exocortex search "who owns powder credentials" --json   # shells qmd; hits with paths + scores
 exocortex get areas/work-philosophy.md                  # read one note
-exocortex put misty-step/new-decision.md --expects <sha># validate, stamp provenance, apply VCS policy
+exocortex put misty-step/new-decision.md --from draft.md              # create-only: fails if it exists
+exocortex put misty-step/decision.md --from draft.md --expects <sha>  # update: stored-revision hash REQUIRED
 exocortex log misty-step/new-decision.md                # lineage
 exocortex lint misty-step/new-decision.md               # frontmatter floor gate
 ```
@@ -35,9 +36,13 @@ Write rules enforced by `put` (do not pre-satisfy by hand):
 
 - Frontmatter floor: `type`, `status`, `created`, `description`, `tags`.
 - Provenance stamped automatically (agent, time, source); never fake it.
-- `--expects <sha>` is the optimistic-concurrency precondition; on mismatch
-  `put` returns a conflict as JSON data. Re-read, re-apply your change on
-  top, retry. Never overwrite a conflict.
+- Payload and destination are separate: `--from <file|->` supplies the
+  content; `<path>` is where it lands in the cortex. Concurrency is
+  structural: updating an existing note REQUIRES
+  `--expects <sha>` naming the STORED revision (`get` reports it) — missing
+  flag = hard error, never a silent overwrite; bare `put` creates only.
+  On mismatch, re-read with `get`, re-apply your change on top, retry. Never
+  overwrite a conflict.
 
 ## VCS policy is per-cortex
 

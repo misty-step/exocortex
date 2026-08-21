@@ -58,28 +58,56 @@ Single Go or Rust binary (CR-01), two faces:
 
 - **CLI** (`--json` everywhere, CR-02):
   - `register <name> <path>` — bind a cortex.
-  - `put <file> [--expects <sha>]` — validate, stamp, apply cortex VCS policy.
+  - `put <path> --from <file|->` — write payload (`-` = stdin) to cortex
+    destination `<path>`. Bare form is create-only: fails if `<path>`
+    already exists (atomic create).
+  - `put <path> --from <file|-> --expects <sha>` — update: REQUIRED
+    precondition; `<sha>` must match the STORED revision of `<path>` (the
+    hash `get` reports), never the payload file. Update without
+    `--expects` is a hard error, never a silent overwrite.
   - `get <path>` — read a note.
   - `search "<query>"` — shells `qmd --format json`; never re-implements
     retrieval.
   - `log <path>` — git lineage.
   - `lint [<path>]` — frontmatter floor gate.
-- **MCP stdio server** — same operations as tools.
+- **MCP stdio server** — same operations; `put` is
+  `{path, content, expectedRevision?}` — content supplied in the call.
+  Preconditions are evaluated inside the cortex critical section (see VCS
+  lifecycle), after refresh and immediately before the atomic write.
 
 Write path mechanics:
 
 - Frontmatter floor validation (type, status, created, description, tags).
 - Provenance stamping: agent identity, timestamp, source.
-- Optimistic concurrency: expected-hash precondition on put; conflicts
-  returned as data (operation, input, expected vs actual state, CR-04).
+- Payload separation: `<path>` is only ever the destination; the payload
+  arrives via `--from`/`content`. Concurrency stays structural: every update
+  requires `--expects` naming the stored revision (`get` reports it; missing
+  flag = hard error); bare `put` creates only. The check-then-write is one
+  atomic step inside the cortex critical section — never check-before-lock,
+  which lets two passers serialize into a silent replacement. Mismatch or
+  create race returns a conflict as data (operation, input, expected vs
+  actual state, CR-04).
 
 ### VCS lifecycle (per-cortex policy)
 
 Generic `put` never hard-codes version control. Each cortex declares a
 policy:
 
-- `daybook` driver: `git pull --rebase --autostash`, stage touched paths
-  only, commit, push — daybook's own repo contract, mechanized.
+- `daybook` driver — one critical section per operation; the cortex lock is
+  acquired BEFORE any state is read and held through push:
+  1. lock `flock <cortex>/.git/exocortex.driver.lock` (`index.lock` alone
+     does not cover multi-command sequences);
+  2. refresh: `git pull --rebase --autostash`;
+  3. pre-flight: if the index holds staged paths outside this operation's
+     touched set, abort with conflict-as-data — never commit, stash away, or
+     discard another worker's staged state;
+  4. CAS: re-read the stored destination revision; evaluate `--expects` or
+     create-absence against fresh state;
+  5. validate payload, stamp provenance, atomic write (temp file + rename);
+  6. stage touched paths, path-limited commit
+     (`git commit -- <touched paths>`), push;
+  7. release lock. A racing stager cannot enter the path-limited commit even
+     if the lock is bypassed.
 - `caller` policy: kernel writes files; the caller commits (default for
   non-vault repos).
 - `none` policy: plain directory writes.
@@ -118,13 +146,17 @@ repo's canonical copy, and the one-line pointer in omp-config
 - Language: Go recommended; Rust acceptable (CR-01). Decide at scaffold.
 - Claim/lease semantics for concurrency mechanization.
 - Feed priority order (harness session logs proposed first — highest tacit
-  value per Huber, and QMD already indexes them).
+  value per Huber). Coverage caveat: QMD collections cover omp, Claude Code,
+  and pi raw sessions only; Hermes/Amos live in SQLite outside QMD, and
+  Codex/opencode/goose session storage is unverified. Inventory every fleet
+  session source before any completeness claim or feed work starts.
 - QMD embedding backfill and freshness ownership (35% of daybook docs lack
   embeddings as of 2026-08-21).
 
 ## References
 
-- Daybook artifact: `misty-step/exocortex-kernel.md` (commit `e2f5a5e1`)
+- Daybook artifact: `misty-step/exocortex-kernel.md` (daybook commit
+  `4502bc43`)
 - TBPN interview with Jeff Huber, 2026-08-12 (Foundation announcement)
 - chroma-core/chroma PRs #6999, #7005, #7007 (foundation-cli)
 - omp-config `CANON.md`: RS-05, DE-01–DE-08, CR-01–CR-04, TH-01–TH-04

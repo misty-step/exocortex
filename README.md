@@ -20,7 +20,8 @@ Everything below describes the agreed contract, not shipped code.
 
 ```sh
 exocortex register daybook ~/Development/misty-step/daybook
-exocortex put <file> [--expects <sha>]   # validates, stamps, applies cortex VCS policy
+exocortex put <path> --from draft.md                  # create-only (fails if path exists)
+exocortex put <path> --from draft.md --expects <sha>  # update: stored-revision hash REQUIRED
 exocortex get <path>
 exocortex search "<query>" --json        # shells qmd
 exocortex log <path>                     # git lineage
