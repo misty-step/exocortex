@@ -119,14 +119,25 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
    bytes, release the lock and exit success — no stamp, no write, no
    commit;
 7. stamp provenance, atomic write (temp file + rename);
-8. VCS tail — `daybook`: stage touched paths, path-limited commit
-   (`git commit -- <touched paths>`), push; `caller`/`none`: nothing;
+8. VCS tail — `daybook`: record `base` = HEAD sha (post-refresh), stage
+   touched paths, path-limited commit (`git commit -- <touched paths>`),
+   then push. On push rejection (non-fast-forward or any failure): NO
+   retry, NO pull, NO rebase, NO force — `git reset --hard <base>` restores
+   branch and working tree to the pre-put state (safe: pre-flight guaranteed
+   nothing else staged or dirty), payload preserved (CLI `--from` file is
+   the caller's; MCP/stdin payloads are written to a temp file whose path is
+   returned in the conflict body), exit `revision_conflict` with hint
+   "remote moved; re-read with get and retry". `caller`/`none`: nothing;
 9. release lock.
 
 `index.lock` never covers this sequence; the cortex lock does. A racing
 stager cannot enter the path-limited commit even if the lock is bypassed.
-Cross-host races on git cortices are arbitrated by pull/push; `none` and
-`caller` cortices are single-host by contract.
+Cross-host: per-host locks cannot see each other, so the CAS guarantee on
+git cortices is enforced by push — a rejected push IS the cross-host
+`revision_conflict`, and the failed put leaves ZERO local git or filesystem
+effect (checkout and branch identical to remote). `none` and `caller`
+cortices are single-host by contract.
+
 
 ### VCS lifecycle (per-cortex policy)
 
@@ -203,6 +214,13 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
 8. Profile conformance: a note whose frontmatter is parseable YAML with a
    non-empty `type` and no other keys passes `daybook`-profile put and lint
    (warnings permitted); `created` in an updated note survives unchanged.
+9. Cross-host race, two clones of one repo simulating two hosts: both clone
+   at revision R1; put via clone A succeeds and pushes; put via clone B with
+   the same `--expects` commits locally, gets its push rejected, and must
+   exit `revision_conflict` with the payload preserved — after which clone
+   B's branch and target-file bytes are identical to the remote (A's
+   content), B's commit is gone, and no rebase, merge, or force-push
+   occurred at any point.
 
 ## Fleet delivery
 
