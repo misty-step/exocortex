@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // g runs git in dir and fails the test on error.
@@ -442,6 +443,91 @@ func TestProof8ProfileConformance(t *testing.T) {
 	})
 	if conf != nil || resGF == nil {
 		t.Fatalf("gap-fill must succeed: %v", conf)
+	}
+}
+
+// Proof 12: the create fast-path reads under the lock. While host A's
+// put sits paused after its write (lock held), a concurrent create on
+// the SAME cortex must block — never answer `exists` off A's transient
+// bytes, which the unwind then removes. After A loses its push and
+// converges, B's answer reflects the settled state (the winner's note).
+func TestProof12CreateFastPathWaitsForLock(t *testing.T) {
+	f := newFixture(t)
+	aWritten := make(chan struct{})
+	advanceRemote := make(chan struct{})
+	releaseA := make(chan struct{})
+	var once sync.Once
+
+	aPayload := mkNote("note", "A transient create")
+	beforePushHook = func() {
+		once.Do(func() {
+			close(aWritten) // A's file exists transiently, lock held
+			<-advanceRemote // test lands the winner on the remote
+			<-releaseA      // test lets A resume into push rejection
+		})
+	}
+
+	doneA := make(chan string, 1)
+	go func() {
+		_, conf := Put(nil, f.cs, PutInput{
+			CortexName: "hosta", Path: "notes/pause.md",
+			Payload: []byte(aPayload),
+			Agent:   "agent-a", Via: "cli", OwnPayload: true,
+		})
+		if conf != nil {
+			doneA <- conf.Code
+			return
+		}
+		doneA <- "pushed"
+	}()
+	<-aWritten
+
+	// Same cortex, concurrent create: must NOT resolve while A holds
+	// the lock — the pre-fix stat would answer `exists` instantly.
+	doneB := make(chan string, 1)
+	go func() {
+		_, conf := Put(nil, f.cs, PutInput{
+			CortexName: "hosta", Path: "notes/pause.md",
+			Payload: []byte(mkNote("note", "B must wait")),
+			Agent:   "agent-b", Via: "cli", OwnPayload: true,
+		})
+		if conf != nil {
+			doneB <- conf.Code
+			return
+		}
+		doneB <- "pushed"
+	}()
+	select {
+	case code := <-doneB:
+		t.Fatalf("B resolved while A held the lock: %s", code)
+	case <-time.After(200 * time.Millisecond):
+		// blocked on flock, as pinned
+	}
+
+	// Winner lands on the remote while A is still paused (plain git on
+	// the other clone), then A resumes into a rejected push.
+	winnerPayload := mkNote("note", "winner landed mid-race")
+	os.MkdirAll(filepath.Join(f.b, "notes"), 0o755)
+	os.WriteFile(filepath.Join(f.b, "notes/pause.md"), []byte(winnerPayload), 0o644)
+	g(t, f.b, "add", "notes/pause.md")
+	g(t, f.b, "commit", "-m", "vault(test): winner create")
+	g(t, f.b, "push")
+	close(advanceRemote)
+	close(releaseA)
+
+	if code := <-doneA; code != "exists" {
+		t.Fatalf("A (loser create) = %s, want exists", code)
+	}
+	if code := <-doneB; code != "exists" {
+		t.Fatalf("B = %s, want exists against the settled winner", code)
+	}
+	beforePushHook = nil
+	if f.head(f.a) != g(t, f.origin, "rev-parse", "master") {
+		t.Fatal("clone A did not converge onto the winner")
+	}
+	disk, _ := os.ReadFile(filepath.Join(f.a, "notes/pause.md"))
+	if !strings.Contains(string(disk), "winner landed mid-race") {
+		t.Fatalf("disk = %q, want winner bytes", disk)
 	}
 }
 

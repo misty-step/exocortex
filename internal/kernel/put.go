@@ -67,17 +67,6 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 	// conflicts `exists`; updates simply require --expects. A malformed
 	// or stale hash falls out as an ordinary CAS revision_conflict.
 
-	// Create fast path: a locally existing destination answers `exists`
-	// without touching git — a pull refusal over that file's staged or
-	// dirty state must not mask the answer. The post-refresh CAS below
-	// re-checks absence against fresh state.
-	if op == "create" {
-		if _, serr := os.Stat(abs); serr == nil {
-			return nil, conflict("exists", op, rel,
-				"bare put creates only; read the note with get and update it with --expects", nil)
-		}
-	}
-
 	lock, lerr := acquireLock(c.Name)
 	if lerr != nil {
 		return nil, conflict("lock_failed", op, rel, "fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
@@ -85,6 +74,18 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 	defer lock.release()
 
 	res := &PutResult{Operation: op, Cortex: c.Name, Path: rel}
+
+	// Create fast path — INSIDE the lock (pinned: no state is read
+	// before flock; a peer's transient file mid-put must not answer).
+	// It sits before pre-flight so staged or untracked destinations
+	// return `exists` instead of tripping a pull refusal. The
+	// post-refresh CAS below re-checks absence against fresh state.
+	if op == "create" {
+		if _, serr := os.Stat(abs); serr == nil {
+			return nil, conflict("exists", op, rel,
+				"bare put creates only; read the note with get and update it with --expects", nil)
+		}
+	}
 
 	var base string
 	if c.VCS == "daybook" {

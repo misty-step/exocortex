@@ -103,7 +103,10 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
 2. pre-flight — `daybook` only, all three aborts conflict-as-data, run
    BEFORE refresh: with the tree already clean, the mandated
    `pull --rebase --autostash` has no in-flight work to cycle through a
-   stash/pop conflict window;
+   stash/pop conflict window. The create-mode existence fast-path also
+   reads here — under the lock (step 1), never before it, so a peer's
+   transient file mid-put cannot answer `exists` and then vanish with
+   its unwind;
    - staged paths outside this operation's touched set
      (`foreign_staged_state`) — never commit, stash away, or discard
      another worker's staged state;
