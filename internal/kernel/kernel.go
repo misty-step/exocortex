@@ -71,6 +71,10 @@ func LoadRegistry() ([]Cortex, error) {
 	return cs, nil
 }
 
+// saveRegistry atomically replaces cortices.json via a UNIQUE
+// same-directory temp (a shared fixed name collides between concurrent
+// writers). Callers must hold the registry lock: this is the write
+// half of a load-modify-write transaction.
 func saveRegistry(cs []Cortex) error {
 	p, err := registryPath()
 	if err != nil {
@@ -84,11 +88,25 @@ func saveRegistry(cs []Cortex) error {
 		return err
 	}
 	raw = append(raw, '\n')
-	tmp := p + dupSuffix
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(p), ".cortices-*.json")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, p)
+	name := tmp.Name()
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return err
+	}
+	if err := os.Chmod(name, 0o644); err != nil {
+		os.Remove(name)
+		return err
+	}
+	return os.Rename(name, p)
 }
 
 // Register binds a cortex into the registry.
@@ -125,6 +143,13 @@ func Register(name, path, vcs, profile string) (*Cortex, error) {
 	if !profiles[profile] {
 		return nil, fmt.Errorf("profile %q must be daybook or strict", profile)
 	}
+	// The whole load/check/save transaction runs under one registry
+	// lock: concurrent CLI/MCP registrations must never lose entries.
+	regLock, lerr := acquireLock("registry")
+	if lerr != nil {
+		return nil, lerr
+	}
+	defer regLock.release()
 	cs, err := LoadRegistry()
 	if err != nil {
 		return nil, err

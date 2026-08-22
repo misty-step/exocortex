@@ -531,6 +531,44 @@ func TestProof12CreateFastPathWaitsForLock(t *testing.T) {
 	}
 }
 
+// Proof 13: concurrent registration from TWO PROCESSES must not lose
+// entries — the registry load/check/save transaction is serialized
+// under its own lock, and each save uses a unique temp file.
+func TestProof13ConcurrentRegistrationTwoProcesses(t *testing.T) {
+	testConfigEnv(t)
+	if binPath == "" {
+		t.Fatal("binary missing")
+	}
+	dirA, dirB := t.TempDir(), t.TempDir()
+	os.MkdirAll(dirA, 0o755)
+	os.MkdirAll(dirB, 0o755)
+
+	run := func(name, path string) chan error {
+		done := make(chan error, 1)
+		cmd := exec.Command(binPath, "register", name, path, "--vcs", "none")
+		go func() { done <- cmd.Run() }()
+		return done
+	}
+	a, b := run("proc-a", dirA), run("proc-b", dirB)
+	if err := <-a; err != nil {
+		t.Fatalf("process A register failed: %v", err)
+	}
+	if err := <-b; err != nil {
+		t.Fatalf("process B register failed: %v", err)
+	}
+	cs, err := LoadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, c := range cs {
+		names[c.Name] = true
+	}
+	if !names["proc-a"] || !names["proc-b"] {
+		t.Fatalf("lost a concurrent registration; registry holds %v", names)
+	}
+}
+
 // Proof 9: cross-host update race — loser converges onto the winner.
 func TestProof9CrossHostUpdateRace(t *testing.T) {
 	f := newFixture(t)
