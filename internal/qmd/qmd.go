@@ -30,16 +30,26 @@ var subcommand = map[string]string{
 	"vector": "vsearch",
 }
 
-// Search runs one qmd retrieval and returns raw hits. The default mode
-// is bm25: a kernel primitive must be deterministic and must not depend
-// on LLM availability (qmd's hybrid expansion is disabled under CI=true).
-func Search(ctx context.Context, query, collection, mode string, limit int) ([]Hit, error) {
+// subcommandFor maps a retrieval mode onto its qmd subcommand. Empty
+// mode selects bm25: a kernel primitive must be deterministic and must
+// not depend on LLM availability (qmd's hybrid expansion is disabled
+// under CI=true).
+func subcommandFor(mode string) (string, error) {
 	if mode == "" {
 		mode = "bm25"
 	}
 	sub, ok := subcommand[mode]
 	if !ok {
-		return nil, fmt.Errorf("mode %q must be hybrid, bm25, or vector", mode)
+		return "", fmt.Errorf("mode %q must be hybrid, bm25, or vector", mode)
+	}
+	return sub, nil
+}
+
+// Search runs one qmd retrieval and returns raw hits.
+func Search(ctx context.Context, query, collection, mode string, limit int) ([]Hit, error) {
+	sub, err := subcommandFor(mode)
+	if err != nil {
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 20
