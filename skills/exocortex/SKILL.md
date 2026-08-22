@@ -10,12 +10,14 @@ corpora (**cortices**). Daybook is cortex `daybook`. Foreign sources (Notion,
 Drive, harness session logs) enter through **feeds** as provenance-stamped
 notes — never by editing raw sources.
 
-Status: this file is the binding v0 interface contract. Install the
-binary from this repo: `go build -o ~/.local/bin/exocortex ./cmd/exocortex`.
-Harness MCP registration (omp-config and other configs) is slice 2; until
-a harness registers the server, its agents use the CLI above. If the
-binary is unavailable, fall back to `qmd search "<query>" -c daybook` and
-direct git per the daybook AGENTS.md.
+Status: this file is the binding v0 interface contract. The binary is
+NOT fleet-installed: per-harness registration is slice 2. Today it is
+built from source, per host, by whoever needs it:
+`go build -o ~/.local/bin/exocortex ./cmd/exocortex` (known install:
+this workstation only). Until a harness registers the MCP server, its
+agents use the CLI above; if the binary is unavailable on a host, fall
+back to `qmd search "<query>" -c daybook` and direct git per the
+daybook AGENTS.md.
 
 ## When to use
 
