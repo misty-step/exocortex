@@ -72,7 +72,7 @@ type searchArgs struct {
 	Query  string `json:"query" jsonschema:"search text"`
 	Cortex string `json:"cortex,omitempty" jsonschema:"restrict to one cortex (qmd collection of the same name)"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"max hits (default 20)"`
-	Mode   string `json:"mode,omitempty" jsonschema:"hybrid | bm25 | vector (default hybrid)"`
+	Mode   string `json:"mode,omitempty" jsonschema:"bm25 (deterministic default) | hybrid | vector"`
 }
 
 type logArgs struct {

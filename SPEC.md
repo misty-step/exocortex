@@ -67,7 +67,9 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     `--expects` is a hard error, never a silent overwrite.
   - `get <path>` — read a note.
   - `search "<query>"` — shells `qmd --format json`; never re-implements
-    retrieval.
+    retrieval. Default mode is deterministic BM25 (`qmd search`);
+    `--mode hybrid|vector` opts into qmd's LLM-backed retrieval, which
+    is environment-dependent (disabled under `CI=true`).
   - `log <path>` — git lineage.
   - `lint [<path>]` — frontmatter floor gate.
 - **MCP stdio server** — same operations; `put` is

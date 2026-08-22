@@ -104,7 +104,7 @@ Usage:
   exocortex register <name> <path> [--vcs daybook|caller|none] [--profile daybook|strict]
   exocortex put <path> --from <file|-> [--expects <sha>] [--cortex <name>] [--agent <id>]
   exocortex get <path> [--cortex <name>]
-  exocortex search "<query>" [--cortex <name>] [--limit N] [--mode hybrid|bm25|vector]
+  exocortex search "<query>" [--cortex <name>] [--limit N] [--mode bm25|hybrid|vector]
   exocortex log <path> [--cortex <name>] [--limit N]
   exocortex lint [<path>] [--cortex <name>]
   exocortex mcp
@@ -290,7 +290,7 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
 	limit := fs.Int("limit", 20, "max hits")
-	mode := fs.String("mode", "hybrid", "retrieval mode: hybrid | bm25 | vector")
+	mode := fs.String("mode", "bm25", "retrieval mode: bm25 (deterministic default) | hybrid | vector")
 	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "limit": true, "mode": true, "agent": true})
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("search", err.Error(), "run `exocortex help` for search usage"), nil
