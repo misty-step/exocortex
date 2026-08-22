@@ -192,7 +192,7 @@ func cmdRegister(args []string) (any, *kernel.Conflict, error) {
 	vcs := fs.String("vcs", "", "vcs policy: daybook | caller | none (default: auto-detect)")
 	profile := fs.String("profile", "", "validation profile: daybook | strict (default daybook)")
 	jprefix := fs.String("journal-prefix", "", "where note files land inside the cortex (default journal)")
-	flags, pos := splitArgs(args, map[string]bool{"vcs": true, "profile": true})
+	flags, pos := splitArgs(args, map[string]bool{"vcs": true, "profile": true, "journal-prefix": true})
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("register", err.Error(), "run `exocortex help` for register usage"), nil
 	}

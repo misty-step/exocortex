@@ -24,8 +24,8 @@ type NoteInput struct {
 // journal later; the journal itself is append-only.
 func Note(ctx context.Context, cs []Cortex, in NoteInput) (*PutResult, *Conflict) {
 	prefix := "journal"
-	if i := cortexByName(cs, in.CortexName); i != nil {
-		prefix = i.JournalPrefix
+	if i := cortexByName(cs, in.CortexName); i != nil && i.JournalPrefix != "" {
+		prefix = i.JournalPrefix // legacy registry entries default to journal/
 	}
 	text := strings.TrimSpace(in.Text)
 	if text == "" {
