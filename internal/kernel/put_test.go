@@ -688,20 +688,20 @@ func TestProof10UnwindSparesForeignUnstaged(t *testing.T) {
 		t.Fatalf("tail file = %q, want winner's stamped payload", disk)
 	}
 
-	// Pre-flight alone: an unrelated unstaged tracked edit present up
-	// front aborts cleanly. Run on a pristine slate — the race leftovers
-	// above are staged, which is a different (also correct) conflict.
-	g(t, f.b, "reset", "--hard", "HEAD")
+	// Pre-flight alone on a NO-ORIGIN cortex: an unrelated unstaged
+	// tracked edit aborts cleanly — no clean-writer fallback exists
+	// without a remote.
+	no := f.noOriginClone(t, "hostno") // fresh clone is already at the origin tip
 	scratchRel := "notes/scratch.md"
-	scratchAbs := filepath.Join(f.b, scratchRel)
+	scratchAbs := filepath.Join(no, scratchRel)
 	os.WriteFile(scratchAbs, []byte("---\ntype: x\n---\nseed\n"), 0o644)
-	g(t, f.b, "add", scratchRel)
-	g(t, f.b, "commit", "-m", "vault(test): seed scratch")
+	g(t, no, "add", scratchRel)
+	g(t, no, "commit", "-m", "vault(test): seed scratch")
 	os.WriteFile(scratchAbs, []byte("---\ntype: x\n---\ndirty\n"), 0o644) // unstaged
 
-	r2 := f.rev("hostb", "notes/tail.md")
+	r2 := f.rev("hostno", "notes/tail.md")
 	_, conf := Put(nil, f.cs, PutInput{
-		CortexName: "hostb", Path: "notes/tail.md",
+		CortexName: "hostno", Path: "notes/tail.md",
 		Payload: []byte(mkNote("note", "blocked")), Expects: r2,
 		Agent: "b", Via: "cli", OwnPayload: true,
 	})

@@ -99,27 +99,54 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 	}
 
 	var base string
+	dir := c.Path // write target: the registered checkout, or its clean-writer clone
 	if c.VCS == "daybook" {
-		// Cleanliness gate BEFORE refresh: with the tree already clean,
-		// the mandated `pull --rebase --autostash` has no in-flight work
-		// to cycle through a stash/pop conflict window.
-		if conf := preflight(c.Path, rel, op == "update"); conf != nil {
+		// Routing scan on the REGISTERED checkout (SPEC step 0): staged
+		// state, destination dirt, and foreign staged paths are terminal
+		// regardless of any writer. Only unrelated foreign UNSTAGED
+		// edits — the heartbeat pattern — route to the persistent
+		// clean-writer clone, because those bytes belong to another
+		// worker and must stay untouched while we write elsewhere.
+		routingConf := preflight(c.Path, rel, op == "update")
+		if routingConf != nil {
+			if routingConf.Code != "foreign_unstaged_state" {
+				return nil, routingConf
+			}
+			wdir, werr := ensureWriter(c.Name, c.Path)
+			if werr != nil {
+				routingConf.Detail["writer_error"] = werr.Error()
+				return nil, routingConf
+			}
+			dir = wdir
+			abs = filepath.Join(dir, filepath.FromSlash(rel))
+		} else if wd := writerDir(c); wd != "" {
+			// Root selection is sticky once a writer exists: writes land
+			// in the same clone Get reads from, clean checkout or not.
+			dir = wd
+			abs = filepath.Join(dir, filepath.FromSlash(rel))
+		}
+
+		// Step 2 scan on the SELECTED root before refresh — a dirty or
+		// leftover-warm writer must not be stash-cycled either.
+		if conf := preflight(dir, rel, op == "update"); conf != nil {
 			return nil, conf
 		}
-		if hasUpstream(c.Path) {
-			if _, gerr := git(c.Path, "pull", "--rebase", "--autostash"); gerr != nil {
+		if hasUpstream(dir) {
+			if _, gerr := git(dir, "pull", "--rebase", "--autostash"); gerr != nil {
 				return nil, conflict("refresh_failed", op, rel,
 					"resolve the pull failure and retry; nothing was written",
 					map[string]any{"detail": gerr.(*GitError).Stderr})
 			}
 		}
-		b, gerr := git(c.Path, "rev-parse", "HEAD")
+		b, gerr := git(dir, "rev-parse", "HEAD")
 		if gerr != nil {
 			return nil, conflict("refresh_failed", op, rel, "the cortex has no HEAD commit; make an initial commit", map[string]any{"detail": gerr.(*GitError).Stderr})
 		}
 		base = strings.TrimSpace(b)
-		// Recheck after refresh: the pull window may have changed state.
-		if conf := preflight(c.Path, rel, op == "update"); conf != nil {
+
+		// Step 3 recheck: the pull window may have changed state
+		// (SPEC — REPEAT step 2's scan post-refresh).
+		if conf := preflight(dir, rel, op == "update"); conf != nil {
 			return nil, conf
 		}
 	}
@@ -201,14 +228,14 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 
 	// VCS tail.
 	if c.VCS == "daybook" {
-		if _, gerr := git(c.Path, "add", "--", filepath.FromSlash(rel)); gerr != nil {
+		if _, gerr := git(dir, "add", "--", filepath.FromSlash(rel)); gerr != nil {
 			return nil, conflict("stage_failed", op, rel, "inspect the repository state; the file is written but uncommitted", map[string]any{"detail": gerr.(*GitError).Stderr})
 		}
 		msg := fmt.Sprintf("vault(%s): exocortex put %s via %s", commitScope(c, rel), rel, agentID(in.Agent))
-		if _, gerr := git(c.Path, "commit", "-m", msg, "--", filepath.FromSlash(rel)); gerr != nil {
+		if _, gerr := git(dir, "commit", "-m", msg, "--", filepath.FromSlash(rel)); gerr != nil {
 			return nil, conflict("commit_failed", op, rel, "inspect the repository state; the file is written but uncommitted", map[string]any{"detail": gerr.(*GitError).Stderr})
 		}
-		head, gerr := git(c.Path, "rev-parse", "HEAD")
+		head, gerr := git(dir, "rev-parse", "HEAD")
 		if gerr != nil {
 			return nil, conflict("commit_failed", op, rel, "the file is written and committed; revision lookup failed", map[string]any{"detail": gerr.(*GitError).Stderr})
 		}
@@ -222,9 +249,9 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 			// cross-host CAS. The next upstream-aware put refreshes.
 			return res, nil
 		}
-		if _, perr := git(c.Path, "push"); perr != nil {
+		if _, perr := git(dir, "push"); perr != nil {
 			ge := perr.(*GitError)
-			unwindErrs := unwindAndConverge(c.Path, base, rel)
+			unwindErrs := unwindAndConverge(dir, base, rel)
 			actual := Revision(mustRead(abs))
 			var conf *Conflict
 			if op == "create" {
@@ -254,6 +281,21 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 			return nil, conf
 		}
 		res.Pushed = true
+
+		// Post-push sync (best-effort): fast-forward the REGISTERED
+		// checkout along unrelated paths so its qmd-indexed tree stays
+		// current for search. Git permits an ff merge past unrelated
+		// dirty files; any failure is non-fatal because effectiveRoot
+		// prefers the synced writer for reads.
+		if dir != c.Path && hasUpstream(c.Path) {
+			if _, ferr := git(c.Path, "fetch"); ferr != nil {
+				res.Warnings = append(res.Warnings, fm.Finding{Level: "warning", Rule: "shared_sync_failed",
+					Message: "fetch: " + strings.TrimSpace(ferr.(*GitError).Stderr)})
+			} else if _, merr := git(c.Path, "merge", "--ff-only", "@{u}"); merr != nil {
+				res.Warnings = append(res.Warnings, fm.Finding{Level: "warning", Rule: "shared_sync_failed",
+					Message: strings.TrimSpace(merr.(*GitError).Stderr)})
+			}
+		}
 	}
 	return res, nil
 }
@@ -494,6 +536,34 @@ func commitScope(c *Cortex, rel string) string {
 	return c.Name
 }
 
+// writerDir returns the cortex's persistent clean-writer clone path,
+// or "" when none exists yet.
+func writerDir(c *Cortex) string {
+	if c.VCS != "daybook" {
+		return ""
+	}
+	cfg, err := ConfigDir()
+	if err != nil {
+		return ""
+	}
+	w := filepath.Join(cfg, "writers", c.Name)
+	if _, statErr := os.Stat(filepath.Join(w, ".git")); statErr != nil {
+		return ""
+	}
+	return w
+}
+
+// effectiveRoot is where this cortex's bytes live for ALL kernel
+// operations: once a clean-writer clone exists it is the root (the
+// shared checkout may be stale or dirty); otherwise the registered
+// checkout.
+func effectiveRoot(c *Cortex) string {
+	if w := writerDir(c); w != "" {
+		return w
+	}
+	return c.Path
+}
+
 // effectiveJournalPrefix is the cortex's note-file directory: the
 // registered field, or the plain default for legacy registry entries.
 func effectiveJournalPrefix(c *Cortex) string {
@@ -501,4 +571,44 @@ func effectiveJournalPrefix(c *Cortex) string {
 		return c.JournalPrefix
 	}
 	return "journal"
+}
+
+// ensureWriter returns this cortex's persistent clean-writer clone,
+// creating it on demand from the shared checkout's origin and
+// fast-forwarding it to the remote tip. The shared checkout keeps its
+// dirty working tree untouched.
+func ensureWriter(name, shared string) (string, error) {
+	cfg, err := ConfigDir()
+	if err != nil {
+		return "", err
+	}
+	w := filepath.Join(cfg, "writers", name)
+	if _, statErr := os.Stat(filepath.Join(w, ".git")); statErr == nil {
+		// Existing writers return AS-IS: Put preflights the selected
+		// root before any pull, so leftover dirt aborts instead of
+		// being stash-cycled by a sync that runs too early.
+		return w, nil
+	}
+	url, err := git(shared, "remote", "get-url", "origin")
+	if err != nil {
+		return "", fmt.Errorf("shared checkout has no origin to clone: %s", strings.TrimSpace(err.(*GitError).Stderr))
+	}
+	os.MkdirAll(filepath.Dir(w), 0o755)
+	if out, cerr := git("", "clone", strings.TrimSpace(url), w); cerr != nil {
+		return "", fmt.Errorf("writer clone failed: %s", strings.TrimSpace(cerr.(*GitError).Stderr+" "+out))
+	}
+	if err := ffToUpstream(w); err != nil {
+		return "", err
+	}
+	return w, nil
+}
+
+func ffToUpstream(w string) error {
+	if _, err := git(w, "fetch"); err != nil {
+		return err
+	}
+	if _, err := git(w, "merge", "--ff-only", "@{u}"); err != nil {
+		return fmt.Errorf("writer clone diverged from upstream: %s", strings.TrimSpace(err.(*GitError).Stderr))
+	}
+	return nil
 }
