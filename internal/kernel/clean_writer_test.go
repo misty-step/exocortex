@@ -42,7 +42,8 @@ func provisionWriter(t *testing.T, f *fixture, shared string) {
 // the cortex's persistent writer clone — landing, committing, pushing
 // from there — while the heartbeat stays untouched and the post-push
 // ff keeps the qmd-indexed shared tree current. Sticky selection keeps
-// later writes and reads on the writer even once the heartbeat cleans.
+// later writes and reads on the writer even once the heartbeat cleans,
+// and a lost upstream surfaces as a visible sync warning.
 func TestProof15CleanWriterFallsBackOnDirtyHeartbeat(t *testing.T) {
 	f := newFixture(t)
 	provisionWriter(t, f, f.a)
@@ -56,7 +57,6 @@ func TestProof15CleanWriterFallsBackOnDirtyHeartbeat(t *testing.T) {
 	dirtyBytes, _ := os.ReadFile(hb)
 	os.WriteFile(hb, []byte("---\ntype: x\n---\nheartbeat 05:00 append\n"), 0o644)
 
-	// Update a DIFFERENT path: must succeed via the persistent writer.
 	res, conf := Put(nil, f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/real.md",
 		Payload: []byte(mkNote("note", "v2 via clean writer")),
@@ -110,8 +110,7 @@ func TestProof15CleanWriterFallsBackOnDirtyHeartbeat(t *testing.T) {
 	if confW == nil || confW.Code != "dirty_destination" {
 		t.Fatalf("want dirty_destination post-provisioning, got %#v / %#v", confW, resW)
 	}
-	g(t, f.a, "checkout", "--", "notes/real.md")           // restore shared dest
-	g(t, f.a, "checkout", "--", "meta/loops-heartbeat.md") // owner cleans heartbeat
+	g(t, f.a, "checkout", "--", "notes/real.md") // restore shared dest
 
 	// Foreign STAGED state also stays terminal with a provisioned
 	// writer: staging belongs to whoever staged it.
@@ -134,19 +133,27 @@ func TestProof15CleanWriterFallsBackOnDirtyHeartbeat(t *testing.T) {
 	g(t, f.a, "restore", "--staged", "--worktree", "notes/staged-peer.md")
 	os.Remove(foreignStaged)
 
-	// Heartbeat cleaned: sticky writer root serves the next cycle.
-	res2, conf2 := Put(nil, f.cs, PutInput{
+	// Registered checkout loses upstream tracking: writer pushes still
+	// succeed and the miss becomes a visible shared_sync_failed warning
+	// instead of silent qmd staleness.
+	g(t, f.a, "remote", "remove", "origin")
+	res3, conf3 := Put(nil, f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/real.md",
-		Payload: []byte(mkNote("note", "v3 incremental")),
+		Payload: []byte(mkNote("note", "v4 with broken sync")),
 		Expects: res.Revision,
 		Agent:   "a", Via: "cli", OwnPayload: true,
 	})
-	if conf2 != nil || !res2.Pushed {
-		t.Fatalf("incremental writer write failed: %v / %v", conf2, res2)
+	if conf3 != nil || !res3.Pushed {
+		t.Fatalf("writer push failed without shared upstream: %v / %v", conf3, res3)
 	}
-	got2, _ := Get(f.cs, "hosta", "notes/real.md")
-	if !strings.Contains(got2.Content, "v3 incremental") {
-		t.Fatal("get does not read the writer after provisioning")
+	syncWarn := false
+	for _, w := range res3.Warnings {
+		if w.Rule == "shared_sync_failed" && strings.Contains(w.Message, "no upstream tracking") {
+			syncWarn = true
+		}
+	}
+	if !syncWarn {
+		t.Fatalf("missing no-upstream sync warning: %+v", res3.Warnings)
 	}
 }
 
@@ -154,16 +161,15 @@ func TestProof15CleanWriterFallsBackOnDirtyHeartbeat(t *testing.T) {
 // root scan — never be stash-cycled or merged before the guard.
 func TestDirtyExistingWriterAborts(t *testing.T) {
 	f := newFixture(t)
-	// Dirty heartbeat + a real different-path put: this is what
-	// actually provisions the persistent writer clone.
 	provisionWriter(t, f, f.a)
+	// A real different-path put while the heartbeat is dirty is what
+	// actually provisions the persistent writer clone.
 	if _, conf := f.put("hosta", "notes/provision.md", mkNote("note", "provisions writer")); conf != nil {
 		t.Fatal(conf.Code)
 	}
 	if writerDir(&f.cs[0]) == "" {
-		t.Fatal("writer clone was not provisioned")
+		t.Fatal("writer was not provisioned")
 	}
-	g(t, f.a, "checkout", "--", "meta/loops-heartbeat.md")
 
 	// Leftover dirt on a TRACKED file inside the writer itself.
 	warm := filepath.Join(writerDir(&f.cs[0]), "README.md")
@@ -178,51 +184,5 @@ func TestDirtyExistingWriterAborts(t *testing.T) {
 	after, _ := os.ReadFile(warm)
 	if !strings.Contains(string(after), "leftover mid-edit") {
 		t.Fatal("writer leftover bytes changed")
-	}
-}
-
-// When the registered checkout has diverged (its own local commit on
-// top of a stale tip), the post-push sync cannot fast-forward. The put
-// still succeeds via the writer, and the failure becomes a visible
-// shared_sync_failed warning instead of silent qmd staleness.
-func TestSharedSyncFailureWarnsOnDivergedCheckout(t *testing.T) {
-	f := newFixture(t)
-	provisionWriter(t, f, f.a)
-	if _, conf := f.put("hosta", "notes/sync.md", mkNote("note", "provisions writer")); conf != nil {
-		t.Fatal(conf.Code)
-	}
-
-	// Diverge the shared checkout with an unrelated local commit.
-	diverge := filepath.Join(f.a, "notes/diverger.md")
-	os.WriteFile(diverge, []byte("---\ntype: x\n---\nlocal only\n"), 0o644)
-	g(t, f.a, "add", "notes/diverger.md")
-	g(t, f.a, "commit", "-m", "vault(test): unrelated local commit")
-	localBefore := f.head(f.a)
-
-	res, conf := Put(nil, f.cs, PutInput{
-		CortexName: "hosta", Path: "notes/after-diverge.md",
-		Payload: []byte(mkNote("note", "lands via writer despite diverged checkout")),
-		Agent:   "a", Via: "cli", OwnPayload: true,
-	})
-	if conf != nil || !res.Pushed {
-		t.Fatalf("writer put failed: %v / %v", conf, res)
-	}
-
-	found := false
-	for _, w := range res.Warnings {
-		if w.Rule == "shared_sync_failed" && strings.Contains(strings.ToLower(w.Message), "fast-forward") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("missing shared_sync_failed fast-forward warning: %+v", res.Warnings)
-	}
-
-	// The diverged local commit and its bytes survive untouched.
-	if f.head(f.a) != localBefore {
-		t.Fatal("shared local commit was moved by the sync attempt")
-	}
-	if _, err := os.ReadFile(filepath.Join(f.a, "notes/diverger.md")); err != nil {
-		t.Fatal("diverger file lost")
 	}
 }

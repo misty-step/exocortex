@@ -244,8 +244,8 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 			beforePushHook = nil
 			h()
 		}
-		if !hasUpstream(c.Path) {
-			// Remoteless cortex: commit locally; nothing to push and no
+		if !hasUpstream(dir) {
+			// Remoteless target: commit locally; nothing to push and no
 			// cross-host CAS. The next upstream-aware put refreshes.
 			return res, nil
 		}
@@ -287,13 +287,18 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 		// current for search. Git permits an ff merge past unrelated
 		// dirty files; any failure is non-fatal because effectiveRoot
 		// prefers the synced writer for reads.
-		if dir != c.Path && hasUpstream(c.Path) {
-			if _, ferr := git(c.Path, "fetch"); ferr != nil {
+		if dir != c.Path {
+			if !hasUpstream(c.Path) {
 				res.Warnings = append(res.Warnings, fm.Finding{Level: "warning", Rule: "shared_sync_failed",
-					Message: "fetch: " + strings.TrimSpace(ferr.(*GitError).Stderr)})
-			} else if _, merr := git(c.Path, "merge", "--ff-only", "@{u}"); merr != nil {
-				res.Warnings = append(res.Warnings, fm.Finding{Level: "warning", Rule: "shared_sync_failed",
-					Message: strings.TrimSpace(merr.(*GitError).Stderr)})
+					Message: "registered checkout has no upstream tracking; its qmd-indexed tree was not synced"})
+			} else {
+				if _, ferr := git(c.Path, "fetch"); ferr != nil {
+					res.Warnings = append(res.Warnings, fm.Finding{Level: "warning", Rule: "shared_sync_failed",
+						Message: "fetch: " + strings.TrimSpace(ferr.(*GitError).Stderr)})
+				} else if _, merr := git(c.Path, "merge", "--ff-only", "@{u}"); merr != nil {
+					res.Warnings = append(res.Warnings, fm.Finding{Level: "warning", Rule: "shared_sync_failed",
+						Message: strings.TrimSpace(merr.(*GitError).Stderr)})
+				}
 			}
 		}
 	}
@@ -599,6 +604,15 @@ func ensureWriter(name, shared string) (string, error) {
 	}
 	if err := ffToUpstream(w); err != nil {
 		return "", err
+	}
+	// Carry repo-local identity into the writer: hosts that rely on
+	// per-repo user.name/user.email have none on a fresh clone, and
+	// the first commit would fail. Global/system config stays last
+	// resort for hosts that work that way.
+	for _, key := range []string{"user.name", "user.email"} {
+		if v, gerr := git(shared, "config", "--local", "--get", key); gerr == nil {
+			_, _ = git(w, "config", key, strings.TrimSpace(v))
+		}
 	}
 	return w, nil
 }
