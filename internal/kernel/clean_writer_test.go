@@ -180,3 +180,49 @@ func TestDirtyExistingWriterAborts(t *testing.T) {
 		t.Fatal("writer leftover bytes changed")
 	}
 }
+
+// When the registered checkout has diverged (its own local commit on
+// top of a stale tip), the post-push sync cannot fast-forward. The put
+// still succeeds via the writer, and the failure becomes a visible
+// shared_sync_failed warning instead of silent qmd staleness.
+func TestSharedSyncFailureWarnsOnDivergedCheckout(t *testing.T) {
+	f := newFixture(t)
+	provisionWriter(t, f, f.a)
+	if _, conf := f.put("hosta", "notes/sync.md", mkNote("note", "provisions writer")); conf != nil {
+		t.Fatal(conf.Code)
+	}
+
+	// Diverge the shared checkout with an unrelated local commit.
+	diverge := filepath.Join(f.a, "notes/diverger.md")
+	os.WriteFile(diverge, []byte("---\ntype: x\n---\nlocal only\n"), 0o644)
+	g(t, f.a, "add", "notes/diverger.md")
+	g(t, f.a, "commit", "-m", "vault(test): unrelated local commit")
+	localBefore := f.head(f.a)
+
+	res, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/after-diverge.md",
+		Payload: []byte(mkNote("note", "lands via writer despite diverged checkout")),
+		Agent:   "a", Via: "cli", OwnPayload: true,
+	})
+	if conf != nil || !res.Pushed {
+		t.Fatalf("writer put failed: %v / %v", conf, res)
+	}
+
+	found := false
+	for _, w := range res.Warnings {
+		if w.Rule == "shared_sync_failed" && strings.Contains(strings.ToLower(w.Message), "fast-forward") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing shared_sync_failed fast-forward warning: %+v", res.Warnings)
+	}
+
+	// The diverged local commit and its bytes survive untouched.
+	if f.head(f.a) != localBefore {
+		t.Fatal("shared local commit was moved by the sync attempt")
+	}
+	if _, err := os.ReadFile(filepath.Join(f.a, "notes/diverger.md")); err != nil {
+		t.Fatal("diverger file lost")
+	}
+}
