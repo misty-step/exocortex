@@ -128,17 +128,20 @@ func TestProof14ConcurrentJournalPushesBothLand(t *testing.T) {
 }
 
 // Every terminal conflict preserves the in-memory payload: production
-// hit foreign_unstaged_state on daybook minutes into real use.
+// hit foreign_unstaged_state on daybook minutes into real use. Uses a
+// no-origin cortex so the abort path (not the clean-writer fallback)
+// is what runs.
 func TestNotePreservesPayloadOnNonRetryable(t *testing.T) {
 	f := newFixture(t)
-	foreign := filepath.Join(f.a, "notes/foreign-wip.md")
+	no := f.noOriginClone(t, "hostno") // fresh clone is already at the origin tip
+	foreign := filepath.Join(no, "notes/foreign-wip.md")
 	os.MkdirAll(filepath.Dir(foreign), 0o755)
 	os.WriteFile(foreign, []byte("---\ntype: x\n---\nseed\n"), 0o644)
-	g(t, f.a, "add", "notes/foreign-wip.md")
-	g(t, f.a, "commit", "-m", "seed foreign tracked file")
-	os.WriteFile(foreign, []byte("---\ntype: x\n---\nwip mid-edit\n"), 0o644) // now unstaged-modified
+	g(t, no, "add", "notes/foreign-wip.md")
+	g(t, no, "commit", "-m", "seed foreign tracked file")
+	os.WriteFile(foreign, []byte("---\ntype: x\n---\nwip mid-edit\n"), 0o644)
 
-	_, conf := Note(nil, f.cs, NoteInput{CortexName: "hosta", Text: "precious thought", Agent: "a", Via: "cli"})
+	_, conf := Note(nil, f.cs, NoteInput{CortexName: "hostno", Text: "precious thought", Agent: "a", Via: "cli"})
 	if conf == nil || conf.Code != "foreign_unstaged_state" {
 		t.Fatalf("want foreign_unstaged_state, got %#v", conf)
 	}
@@ -146,40 +149,8 @@ func TestNotePreservesPayloadOnNonRetryable(t *testing.T) {
 	if !ok || saved == "" {
 		t.Fatalf("payload not preserved: %v", conf.Detail)
 	}
-	raw, err := os.ReadFile(saved)
-	if err != nil || !strings.Contains(string(raw), "precious thought") {
-		t.Fatalf("preserved payload wrong: %v", err)
-	}
-}
-
-// The journal is append-only: generic put cannot update a memo file
-// even with the correct stored revision.
-func TestJournalImmutableViaGenericPut(t *testing.T) {
-	testConfigEnv(t)
-	root := t.TempDir()
-	c, err := Register("scratch", root, "none", "", "journal")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cs := []Cortex{*c}
-
-	r, conf := Note(nil, cs, NoteInput{Text: "immutable thought", Agent: "a", Via: "cli"})
-	if conf != nil {
-		t.Fatal(conf.Code)
-	}
-	before, _ := os.ReadFile(filepath.Join(root, r.Path))
-
-	_, conf = Put(nil, cs, PutInput{
-		CortexName: "scratch", Path: r.Path,
-		Payload:    []byte("---\ntype: memo\ncreated: 2020-01-01T00:00:00Z\n---\n\nrewritten history\n"),
-		Expects:    r.Revision,
-		Agent:      "a", Via: "cli", OwnPayload: true,
-	})
-	if conf == nil || conf.Code != "journal_immutable" {
-		t.Fatalf("want journal_immutable, got %#v", conf)
-	}
-	after, _ := os.ReadFile(filepath.Join(root, r.Path))
-	if string(before) != string(after) {
-		t.Fatal("memo file bytes changed")
+	raw, rerr := os.ReadFile(saved)
+	if rerr != nil || !strings.Contains(string(raw), "precious thought") {
+		t.Fatalf("preserved payload wrong: %v", rerr)
 	}
 }

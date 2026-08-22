@@ -80,7 +80,17 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     payload on every terminal conflict. Memo notes are silent under the
     daybook profile. Journal files are
     append-only: generic `put` updates under the journal prefix abort
-    `journal_immutable` (ADR-0002/0003).
+    `journal_immutable` (ADR-0002/0003). When the registered checkout
+    carries unrelated foreign UNSTAGED dirt (the heartbeat pattern),
+    daybook-cortex writes fall back to a persistent per-cortex
+    CLEAN-WRITER clone under
+    `<config>/exocortex/writers/<name>` (created on demand from the
+    checkout's origin, ff-synced): the write lands there and pushes,
+    a best-effort post-push ff keeps the registered checkout's
+    qmd-indexed tree current (`shared_sync_failed` warning on
+    failure), reads prefer the writer once it exists, and staged /
+    destination / foreign-staged state on the registered checkout
+    remains terminal.
   - `log <path>` — git lineage.
 - **MCP stdio server** — same operations; `put` is
   `{path, content, expectedRevision?}` — content supplied in the call.

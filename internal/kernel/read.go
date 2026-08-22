@@ -47,7 +47,7 @@ func Get(cs []Cortex, nameFlag, p string) (*GetResult, *Conflict) {
 	if err != nil {
 		return nil, conflict("resolve_failed", "get", p, "use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
 	}
-	abs := filepath.Join(c.Path, rel)
+	abs := filepath.Join(effectiveRoot(c), rel)
 	raw, rerr := os.ReadFile(abs)
 	if errors.Is(rerr, fs.ErrNotExist) {
 		return nil, conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
@@ -86,7 +86,7 @@ func Log(cs []Cortex, nameFlag, p string, limit int) ([]LogEntry, *Conflict) {
 	if err != nil {
 		return nil, conflict("resolve_failed", "log", p, "use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
 	}
-	out, gerr := git(c.Path, "log", fmt.Sprintf("-n%d", limit),
+	out, gerr := git(effectiveRoot(c), "log", fmt.Sprintf("-n%d", limit),
 		"--format=%H%x1f%an%x1f%aI%x1f%s", "--", filepath.FromSlash(rel))
 	if gerr != nil {
 		return nil, conflict("log_unavailable", "log", rel,
@@ -148,10 +148,10 @@ func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 		res.Findings = append(res.Findings, findings...)
 	}
 	if rel != "" {
-		findings, verr := lintOne(c.Profile, filepath.Join(c.Path, rel))
+		findings, verr := lintOne(c.Profile, filepath.Join(effectiveRoot(c), rel))
 		add(rel, findings, verr)
 	} else {
-		root := c.Path
+		root := effectiveRoot(c)
 		werr := filepath.WalkDir(root, func(path string, d fs.DirEntry, werr error) error {
 			if werr != nil {
 				return werr
