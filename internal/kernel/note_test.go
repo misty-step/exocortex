@@ -151,3 +151,35 @@ func TestNotePreservesPayloadOnNonRetryable(t *testing.T) {
 		t.Fatalf("preserved payload wrong: %v", err)
 	}
 }
+
+// The journal is append-only: generic put cannot update a memo file
+// even with the correct stored revision.
+func TestJournalImmutableViaGenericPut(t *testing.T) {
+	testConfigEnv(t)
+	root := t.TempDir()
+	c, err := Register("scratch", root, "none", "", "journal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := []Cortex{*c}
+
+	r, conf := Note(nil, cs, NoteInput{Text: "immutable thought", Agent: "a", Via: "cli"})
+	if conf != nil {
+		t.Fatal(conf.Code)
+	}
+	before, _ := os.ReadFile(filepath.Join(root, r.Path))
+
+	_, conf = Put(nil, cs, PutInput{
+		CortexName: "scratch", Path: r.Path,
+		Payload:    []byte("---\ntype: memo\ncreated: 2020-01-01T00:00:00Z\n---\n\nrewritten history\n"),
+		Expects:    r.Revision,
+		Agent:      "a", Via: "cli", OwnPayload: true,
+	})
+	if conf == nil || conf.Code != "journal_immutable" {
+		t.Fatalf("want journal_immutable, got %#v", conf)
+	}
+	after, _ := os.ReadFile(filepath.Join(root, r.Path))
+	if string(before) != string(after) {
+		t.Fatal("memo file bytes changed")
+	}
+}

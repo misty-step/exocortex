@@ -62,6 +62,17 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 	rel = filepath.ToSlash(rel)
 	abs := filepath.Join(c.Path, filepath.FromSlash(rel))
 
+	// Journal files are an append-only raw stream (ADR-0002): once
+	// written they are never updated, by anyone, including instructed
+	// agents. Enforced structurally on the resolved cortex prefix.
+	if pfx := effectiveJournalPrefix(c); rel == pfx || strings.HasPrefix(rel, pfx+"/") {
+		if op == "update" {
+			return nil, conflict("journal_immutable", op, rel,
+				"journal micro-memories are append-only; supersede by writing a new note that links back to this one",
+				nil)
+		}
+	}
+
 	// Note: there is no intent inference and no separate missing_expects
 	// code (operator decision 2026-08-21): bare put on any existing path
 	// conflicts `exists`; updates simply require --expects. A malformed
@@ -481,4 +492,13 @@ func commitScope(c *Cortex, rel string) string {
 		return rel[:i]
 	}
 	return c.Name
+}
+
+// effectiveJournalPrefix is the cortex's note-file directory: the
+// registered field, or the plain default for legacy registry entries.
+func effectiveJournalPrefix(c *Cortex) string {
+	if c.JournalPrefix != "" {
+		return c.JournalPrefix
+	}
+	return "journal"
 }

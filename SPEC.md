@@ -78,7 +78,9 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     paths make cross-host push races benign, so `Note` retries race
     outcomes against converged state (bounded) and preserves the
     payload on every terminal conflict. Memo notes are silent under the
-    daybook profile.
+    daybook profile. Journal files are
+    append-only: generic `put` updates under the journal prefix abort
+    `journal_immutable` (ADR-0002/0003).
   - `log <path>` — git lineage.
 - **MCP stdio server** — same operations; `put` is
   `{path, content, expectedRevision?}` — content supplied in the call.
@@ -217,6 +219,7 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
   {"error":"foreign_staged_state","paths":["…"]}
   {"error":"foreign_unstaged_state","paths":["…"]}
   {"error":"created_immutable","operation":"update","path":"…","stored":"…","submitted":"…"}
+  {"error":"journal_immutable","operation":"update","path":"…"}
   ```
 
   Input-class failures (`invalid_input`, `unknown_command`,
