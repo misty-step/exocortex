@@ -11,13 +11,12 @@ Drive, harness session logs) enter through **feeds** as provenance-stamped
 notes — never by editing raw sources.
 
 Status: this file is the binding v0 interface contract. The binary is
-NOT fleet-installed: per-harness registration is slice 2. Today it is
-built from source, per host, by whoever needs it:
-`go build -o ~/.local/bin/exocortex ./cmd/exocortex` (known install:
-this workstation only). Until a harness registers the MCP server, its
-agents use the CLI above; if the binary is unavailable on a host, fall
-back to `qmd search "<query>" -c daybook` and direct git per the
-daybook AGENTS.md.
+NOT fleet-installed: per-harness registration is slice 2. Per-host
+source builds are possible today:
+`go build -o ~/.local/bin/exocortex ./cmd/exocortex`. Until a harness
+registers the MCP server, its agents use the CLI above; if the binary
+is unavailable on a host, fall back to `qmd search "<query>" -c
+daybook` and direct git per the daybook AGENTS.md.
 
 ## When to use
 
