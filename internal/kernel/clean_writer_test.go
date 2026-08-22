@@ -113,6 +113,27 @@ func TestProof15CleanWriterFallsBackOnDirtyHeartbeat(t *testing.T) {
 	g(t, f.a, "checkout", "--", "notes/real.md")           // restore shared dest
 	g(t, f.a, "checkout", "--", "meta/loops-heartbeat.md") // owner cleans heartbeat
 
+	// Foreign STAGED state also stays terminal with a provisioned
+	// writer: staging belongs to whoever staged it.
+	foreignStaged := filepath.Join(f.a, "notes/staged-peer.md")
+	os.WriteFile(foreignStaged, []byte("---\ntype: x\n---\npeer staged work\n"), 0o644)
+	g(t, f.a, "add", "notes/staged-peer.md")
+	resS, confS := Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/real.md",
+		Payload: []byte(mkNote("note", "must not touch staged peers")),
+		Expects: res.Revision,
+		Agent:   "a", Via: "cli", OwnPayload: true,
+	})
+	if confS == nil || confS.Code != "foreign_staged_state" {
+		t.Fatalf("want foreign_staged_state with provisioned writer, got %#v / %#v", confS, resS)
+	}
+	stagedBytes, _ := os.ReadFile(foreignStaged)
+	if !strings.Contains(string(stagedBytes), "peer staged work") {
+		t.Fatal("staged peer file changed")
+	}
+	g(t, f.a, "restore", "--staged", "--worktree", "notes/staged-peer.md")
+	os.Remove(foreignStaged)
+
 	// Heartbeat cleaned: sticky writer root serves the next cycle.
 	res2, conf2 := Put(nil, f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/real.md",
