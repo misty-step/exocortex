@@ -103,6 +103,7 @@ type registerArgs struct {
 func addTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_get", Description: "Read one note: revision (sha256), frontmatter, full content."}, get)
 	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_put", Description: "Create or CAS-update a note. Bare put creates only; updating REQUIRES expectedRevision from a prior get. Provenance is stamped automatically; the daybook cortex commits and pushes."}, put)
+	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_note", Description: "Record one journal micro-memory as an immutable file on the cortex's agent board. Cheap by design: use often for status updates, gotchas and fixes, decisions in flight."}, noteTool)
 	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_search", Description: "Search cortex content via QMD; hits carry cortex, path, score, snippet."}, search)
 	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_log", Description: "Git lineage of one note."}, logTool)
 	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_lint", Description: "Frontmatter floor gate; tiered findings, only errors block."}, lint)
@@ -163,6 +164,20 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 		out = append(out, entry)
 	}
 	return toolResult(out, nil)
+}
+
+func noteTool(ctx context.Context, req *mcp.CallToolRequest, a noteArgs) (*mcp.CallToolResult, any, error) {
+	cs, err := kernel.LoadRegistry()
+	if err != nil {
+		return nil, nil, err
+	}
+	res, conf := kernel.Note(ctx, cs, kernel.NoteInput{
+		CortexName: a.Cortex,
+		Text:       a.Text,
+		Agent:      a.Agent,
+		Via:        "mcp",
+	})
+	return toolResult(res, conf)
 }
 
 func logTool(ctx context.Context, req *mcp.CallToolRequest, a logArgs) (*mcp.CallToolResult, any, error) {
