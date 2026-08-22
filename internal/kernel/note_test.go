@@ -36,7 +36,7 @@ func TestNewULIDShape(t *testing.T) {
 func TestNoteCreatesImmutableJournalFiles(t *testing.T) {
 	testConfigEnv(t)
 	root := t.TempDir()
-	c, err := Register("scratch", root, "none", "")
+	c, err := Register("scratch", root, "none", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -191,6 +191,7 @@ func cmdRegister(args []string) (any, *kernel.Conflict, error) {
 	fs.Bool("json", true, "JSON output (always on)")
 	vcs := fs.String("vcs", "", "vcs policy: daybook | caller | none (default: auto-detect)")
 	profile := fs.String("profile", "", "validation profile: daybook | strict (default daybook)")
+	jprefix := fs.String("journal-prefix", "", "where note files land inside the cortex (default journal)")
 	flags, pos := splitArgs(args, map[string]bool{"vcs": true, "profile": true})
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("register", err.Error(), "run `exocortex help` for register usage"), nil
@@ -211,7 +212,7 @@ func cmdRegister(args []string) (any, *kernel.Conflict, error) {
 				Detail: map[string]any{"path": cs[i].Path}}, nil
 		}
 	}
-	c, err := kernel.Register(pos[0], pos[1], *vcs, *profile)
+	c, err := kernel.Register(pos[0], pos[1], *vcs, *profile, *jprefix)
 	if err != nil {
 		return nil, &kernel.Conflict{Code: "registration_failed", Operation: "register",
 			Path: pos[1], Hint: "fix the name (lowercase slug), path, vcs, or profile and retry",

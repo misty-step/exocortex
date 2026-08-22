@@ -66,7 +66,7 @@ func newFixture(t *testing.T) *fixture {
 	for _, r := range []struct {
 		name, path string
 	}{{"hosta", f.a}, {"hostb", f.b}} {
-		c, err := Register(r.name, r.path, "daybook", "")
+		c, err := Register(r.name, r.path, "daybook", "", "")
 		if err != nil {
 			t.Fatalf("register %s: %v", r.name, err)
 		}

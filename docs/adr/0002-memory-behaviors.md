@@ -21,8 +21,13 @@ convergence, no git-grade auditability).
 ## Decisions
 
 1. **Journal stream — immutable files, not an append log.**
-   `note "<thought>"` writes `journal/YYYY-MM-DD/<ulid>-<agent>.md`
-   through the standard create-only put pipeline. Unique paths make
+   `note "<thought>"` writes immutable per-memory files at
+   `<journal-prefix>/YYYY-MM-DD/<ulid>-<agent>.md` through the standard
+   create-only put pipeline. The prefix is a per-cortex registry field:
+   daybook sets `meta/agents-board/memo` because its namespace doctrine
+   reserves human `journal/` and designates the agent message board for
+   fleet knowledge (reflection folds notable memos into indexed board
+   threads). Unique paths make
    cross-host push races benign: the loser converges and retries with a
    fresh ULID (bounded), and every terminal conflict preserves the
    payload in its body. A single shared append file was REJECTED: it is

@@ -23,6 +23,10 @@ type NoteInput struct {
 // no two agents ever touch the same revision. Reflection compiles the
 // journal later; the journal itself is append-only.
 func Note(ctx context.Context, cs []Cortex, in NoteInput) (*PutResult, *Conflict) {
+	prefix := "journal"
+	if i := cortexByName(cs, in.CortexName); i != nil {
+		prefix = i.JournalPrefix
+	}
 	text := strings.TrimSpace(in.Text)
 	if text == "" {
 		return nil, conflict("empty_note", "note", "",
@@ -39,7 +43,7 @@ func Note(ctx context.Context, cs []Cortex, in NoteInput) (*PutResult, *Conflict
 	var payload []byte
 	for range 3 {
 		now := time.Now().UTC()
-		rel := fmt.Sprintf("journal/%s/%s-%s.md", now.Format("2006-01-02"), newULID(now), slug(agentID(in.Agent)))
+		rel := fmt.Sprintf("%s/%s/%s-%s.md", prefix, now.Format("2006-01-02"), newULID(now), slug(agentID(in.Agent)))
 		payload = []byte(fmt.Sprintf("---\ntype: memo\ncreated: %s\n---\n\n%s\n", now.Format(time.RFC3339), text))
 		res, conf := Put(ctx, cs, PutInput{
 			CortexName: in.CortexName,
@@ -97,6 +101,23 @@ func newULID(now time.Time) string {
 		out = append(out, enc[(acc<<(5-bits))&31])
 	}
 	return string(out)
+}
+
+// cortexByName finds a cortex without path resolution (Note needs the
+// journal prefix before the put pipeline resolves anything).
+func cortexByName(cs []Cortex, name string) *Cortex {
+	if name == "" {
+		if len(cs) == 1 {
+			return &cs[0]
+		}
+		return nil
+	}
+	for i := range cs {
+		if cs[i].Name == name {
+			return &cs[i]
+		}
+	}
+	return nil
 }
 
 // slug reduces an agent id to filename-safe characters.

@@ -27,7 +27,7 @@ func TestRegisterAndLoad(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	c, err := Register("daybook", sub, "", "")
+	c, err := Register("daybook", sub, "", "", "")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -38,13 +38,13 @@ func TestRegisterAndLoad(t *testing.T) {
 		t.Fatal("unexpected .git")
 	}
 	// Duplicate name and duplicate path both rejected.
-	if _, err := Register("daybook", root, "", ""); err == nil {
+	if _, err := Register("daybook", root, "", "", ""); err == nil {
 		t.Fatal("duplicate name must fail")
 	}
-	if _, err := Register("other", sub, "caller", ""); err == nil {
+	if _, err := Register("other", sub, "caller", "", ""); err == nil {
 		t.Fatal("duplicate path must fail")
 	}
-	if _, err := Register("Bad_Name", root, "", ""); err == nil {
+	if _, err := Register("Bad_Name", root, "", "", ""); err == nil {
 		t.Fatal("invalid slug must fail")
 	}
 	cs, err := LoadRegistry()

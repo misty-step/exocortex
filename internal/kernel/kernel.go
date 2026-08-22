@@ -18,10 +18,11 @@ import (
 
 // Cortex is a registered knowledge corpus.
 type Cortex struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"` // absolute filesystem root
-	VCS     string `json:"vcs"`  // "daybook" | "caller" | "none"
-	Profile string `json:"profile"`
+	Name          string `json:"name"`
+	Path          string `json:"path"` // absolute filesystem root
+	VCS           string `json:"vcs"`  // "daybook" | "caller" | "none"
+	Profile       string `json:"profile"`
+	JournalPrefix string `json:"journal_prefix,omitempty"` // where note files land, e.g. "meta/agents-board/memo"
 }
 
 var (
@@ -110,7 +111,7 @@ func saveRegistry(cs []Cortex) error {
 }
 
 // Register binds a cortex into the registry.
-func Register(name, path, vcs, profile string) (*Cortex, error) {
+func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 	if !nameRe.MatchString(name) {
 		return nil, fmt.Errorf("cortex name %q must match %s", name, nameRe)
 	}
@@ -162,7 +163,11 @@ func Register(name, path, vcs, profile string) (*Cortex, error) {
 			return nil, fmt.Errorf("path %s is already registered as cortex %q", abs, c.Name)
 		}
 	}
-	c := &Cortex{Name: name, Path: abs, VCS: vcs, Profile: profile}
+	jp := filepath.ToSlash(filepath.Clean(journalPrefix))
+	if jp == "." {
+		jp = "journal"
+	}
+	c := &Cortex{Name: name, Path: abs, VCS: vcs, Profile: profile, JournalPrefix: jp}
 	cs = append(cs, *c)
 	sort.Slice(cs, func(i, j int) bool { return cs[i].Name < cs[j].Name })
 	if err := saveRegistry(cs); err != nil {

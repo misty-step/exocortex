@@ -71,8 +71,10 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     `--mode hybrid|vector` opts into qmd's LLM-backed retrieval, which
     is environment-dependent (disabled under `CI=true`).
   - `note "<thought>"` — journal micro-memory as an IMMUTABLE file
-    (`journal/YYYY-MM-DD/<ulid>-<agent>.md`, ULID = ms timestamp +
-    crypto randomness). Create-only through the same pipeline; unique
+    (`<journal-prefix>/YYYY-MM-DD/<ulid>-<agent>.md`, ULID = ms
+    timestamp + crypto randomness; prefix is a per-cortex registry
+    field — daybook sets `meta/agents-board/memo` per its namespace
+    doctrine, human `journal/` is off-limits). Create-only through the same pipeline; unique
     paths make cross-host push races benign, so `Note` retries race
     outcomes against converged state (bounded) and preserves the
     payload on every terminal conflict. Memo notes are silent under the
@@ -202,8 +204,10 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
   ```
 
 - **Cortex registry** — `${XDG_CONFIG_HOME:-~/.config}/exocortex/cortices.json`:
-  `[{"name","path","vcs":"daybook"|"caller"|"none"}]`; `register` is the only
-  writer.
+  `[{"name","path","vcs":"daybook"|"caller"|"none",
+  "profile":"…","journal_prefix":"…"}]`; `register` is the only writer.
+  `journal_prefix` (optional, default `journal`) is where `note` files
+  land.
 - **Conflict payloads** — nonzero exit + JSON body:
 
   ```json
