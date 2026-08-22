@@ -25,16 +25,28 @@ daybook` and direct git per the daybook AGENTS.md.
 - **After work (write-back):** durable decisions, corrected facts, and
   reusable syntheses go into the cortex; raw session logs stay on disk.
 
-## Command contract (v0)
-
 ```sh
-exocortex search "who owns powder credentials" --json   # shells qmd; hits with paths + scores
+exocortex search "who owns powder credentials" --json   # qmd-backed; deterministic BM25 default
 exocortex get areas/work-philosophy.md                  # read one note
+exocortex note "qmd hybrid needs LLM access; CI=true forces bm25 fallback"  # one-line journal memory
 exocortex put misty-step/new-decision.md --from draft.md              # create-only: fails if it exists
 exocortex put misty-step/decision.md --from draft.md --expects <sha>  # update: stored-revision hash REQUIRED
 exocortex log misty-step/new-decision.md                # lineage
 exocortex lint misty-step/new-decision.md               # frontmatter floor gate
 ```
+
+## Write often, write small
+
+The journal (`note`) exists so capturing costs seconds: status updates,
+non-obvious things that bit you and how you fixed them, decisions in
+flight, facts a future agent would thank you for. One line each; the file
+naming makes collisions impossible, so just write. Full wiki notes remain
+the home for durable, linked decisions.
+
+If you are a SUBAGENT: do not run `note` or `put` against memory — you
+cannot judge what the fleet already knows, and duplicates erode trust.
+Report back to your parent instead.
+
 
 Write rules enforced by `put` (do not pre-satisfy by hand):
 

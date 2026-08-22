@@ -75,6 +75,12 @@ type searchArgs struct {
 	Mode   string `json:"mode,omitempty" jsonschema:"bm25 (deterministic default) | hybrid | vector"`
 }
 
+type noteArgs struct {
+	Text   string `json:"text" jsonschema:"one thought worth remembering (a line or three)"`
+	Cortex string `json:"cortex,omitempty" jsonschema:"explicit cortex name"`
+	Agent  string `json:"agent,omitempty" jsonschema:"agent id stamped into provenance"`
+}
+
 type logArgs struct {
 	Path   string `json:"path" jsonschema:"note path"`
 	Cortex string `json:"cortex,omitempty" jsonschema:"explicit cortex name"`

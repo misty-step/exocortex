@@ -147,6 +147,12 @@ func ContractFinding(err error) (Finding, bool) {
 }
 
 func daybookWarnings(n Note, m map[string]any) []Finding {
+	// Journal micro-notes (type: memo) are quiet under the daybook
+	// profile: they are not wiki notes, and constant key warnings would
+	// erode trust in one-line memories.
+	if t, _ := m["type"].(string); t == "memo" {
+		return nil
+	}
 	var fs []Finding
 	for _, k := range []string{"status", "description", "tags", "created"} {
 		if empty(m[k]) {

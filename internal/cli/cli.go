@@ -38,6 +38,8 @@ func Main(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		payload, conf, err = cmdSearch(rest)
 	case "log":
 		payload, conf, err = cmdLog(rest)
+	case "note":
+		payload, conf, err = cmdNote(rest, stdin)
 	case "lint":
 		payload, conf, err = cmdLint(rest)
 	case "mcp":
@@ -379,5 +381,30 @@ func cmdLint(args []string) (any, *kernel.Conflict, error) {
 		return nil, nil, err
 	}
 	res, conf := kernel.Lint(cs, *cortex, path)
+	return res, conf, nil
+}
+
+func cmdNote(args []string, stdin io.Reader) (any, *kernel.Conflict, error) {
+	fs := flag.NewFlagSet("note", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	cortex := commonFlags(fs)
+	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
+	if err := fs.Parse(flags); err != nil {
+		return nil, inputErr("note", err.Error(), "run `exocortex help` for note usage"), nil
+	}
+	if len(pos) != 1 {
+		return nil, inputErr("note", `note requires exactly one "<thought>"`,
+			`exocortex note "<one thought worth remembering>"`), nil
+	}
+	cs, err := loadRegistry()
+	if err != nil {
+		return nil, nil, err
+	}
+	res, conf := kernel.Note(context.Background(), cs, kernel.NoteInput{
+		CortexName: *cortex,
+		Text:       pos[0],
+		Agent:      agentFlag(fs),
+		Via:        "cli",
+	})
 	return res, conf, nil
 }

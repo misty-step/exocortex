@@ -70,8 +70,14 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     retrieval. Default mode is deterministic BM25 (`qmd search`);
     `--mode hybrid|vector` opts into qmd's LLM-backed retrieval, which
     is environment-dependent (disabled under `CI=true`).
+  - `note "<thought>"` — journal micro-memory as an IMMUTABLE file
+    (`journal/YYYY-MM-DD/<ulid>-<agent>.md`, ULID = ms timestamp +
+    crypto randomness). Create-only through the same pipeline; unique
+    paths make cross-host push races benign, so `Note` retries race
+    outcomes against converged state (bounded) and preserves the
+    payload on every terminal conflict. Memo notes are silent under the
+    daybook profile.
   - `log <path>` — git lineage.
-  - `lint [<path>]` — frontmatter floor gate.
 - **MCP stdio server** — same operations; `put` is
   `{path, content, expectedRevision?}` — content supplied in the call.
   Preconditions are evaluated inside the cortex critical section (see VCS
@@ -284,6 +290,12 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
     pushes; clone B's push is rejected, exits `exists`, B's own file is
     gone from disk, and B's branch and target bytes equal the remote
     (A's content).
+12. Two journal writers racing across clones both land: the loser's
+    push is rejected, its unique path is retried against converged
+    state, and BOTH notes exist on the winner's tip afterward. Every
+    terminal `note` conflict carries a preserved-payload path.
+13. Concurrent registration from two PROCESSES survives: both entries
+    exist afterward (registry transaction lock + unique save temp).
 
 ## Fleet delivery
 
