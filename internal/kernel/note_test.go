@@ -114,7 +114,7 @@ func TestProof14ConcurrentJournalPushesBothLand(t *testing.T) {
 	if !strings.HasPrefix(path, "journal/") {
 		t.Fatalf("A's note lost in cross-host race: %q", path)
 	}
-	rootA := effectiveRoot(&f.cs[0])
+	rootA := mustEffectiveRoot(&f.cs[0])
 	diskA, err := os.ReadFile(filepath.Join(rootA, path))
 	if err != nil {
 		t.Fatalf("A's own note missing after retry: %v", err)

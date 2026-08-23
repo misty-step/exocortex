@@ -526,11 +526,30 @@ func writerDir(c *Cortex) string {
 // operations: once a clean-writer clone exists it is the root (the
 // shared checkout may be stale or dirty); otherwise the registered
 // checkout.
-func effectiveRoot(c *Cortex) string {
-	if w := writerDir(c); w != "" {
-		return w
+// effectiveRoot returns the kernel-owned publisher tree for the cortex.
+// For daybook cortices with an origin remote, it ensures the publisher
+// clone is provisioned; if provisioning fails, it returns an error
+// failing closed to prevent reading uncommitted human dirt.
+func effectiveRoot(c *Cortex) (string, error) {
+	if c.VCS == "daybook" {
+		if _, err := git(c.Path, "remote", "get-url", "origin"); err == nil {
+			w, werr := ensureWriter(c.Name, c.Path)
+			if werr != nil {
+				return "", fmt.Errorf("failed to provision publisher clone for %s: %w", c.Name, werr)
+			}
+			return w, nil
+		}
 	}
-	return c.Path
+	return c.Path, nil
+}
+
+// mustEffectiveRoot returns effectiveRoot or panics on failure (test helper).
+func mustEffectiveRoot(c *Cortex) string {
+	root, err := effectiveRoot(c)
+	if err != nil {
+		panic(err)
+	}
+	return root
 }
 
 // effectiveJournalPrefix is the cortex's note-file directory: the
@@ -541,11 +560,6 @@ func effectiveJournalPrefix(c *Cortex) string {
 	}
 	return "journal"
 }
-
-// ensureWriter returns this cortex's persistent clean-writer clone,
-// creating it on demand from the shared checkout's origin and
-// fast-forwarding it to the remote tip. The shared checkout keeps its
-// dirty working tree untouched.
 func ensureWriter(name, shared string) (string, error) {
 	cfg, err := ConfigDir()
 	if err != nil {

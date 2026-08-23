@@ -110,7 +110,7 @@ func TestProof1ExistsOnAnyPreexistingDestination(t *testing.T) {
 	wantCode(t, conf, "exists")
 
 	// Existing in publisher tree.
-	rootA := effectiveRoot(&f.cs[0])
+	rootA := mustEffectiveRoot(&f.cs[0])
 	untracked := "notes/untracked.md"
 	os.WriteFile(filepath.Join(rootA, untracked), []byte(mkNote("note", "fresh")), 0o644)
 	_, conf = f.put("hosta", untracked, mkNote("note", "intruder"))
@@ -157,7 +157,7 @@ func TestProof2CreateRace(t *testing.T) {
 	if wins != 1 {
 		t.Fatalf("exactly one creator must win, got %d (%+v)", wins, results)
 	}
-	rootA := effectiveRoot(&f.cs[0])
+	rootA := mustEffectiveRoot(&f.cs[0])
 	commits := g(t, rootA, "log", "--format=%H", "--", "notes/race.md")
 	if len(strings.Fields(commits)) != 1 {
 		t.Fatalf("expected exactly one commit for raced note, got %q", commits)
@@ -236,7 +236,7 @@ func TestProof4ConcurrentUpdatesAndForeignStaged(t *testing.T) {
 	}
 
 	// Foreign staged path in publisher tree aborts before any write and stays intact.
-	rootA := effectiveRoot(&f.cs[0])
+	rootA := mustEffectiveRoot(&f.cs[0])
 	foreign := "notes/foreign.md"
 	foreignBody := mkNote("note", "another worker's staged work")
 	os.WriteFile(filepath.Join(rootA, foreign), []byte(foreignBody), 0o644)
@@ -263,7 +263,7 @@ func TestProof5DirtyDestination(t *testing.T) {
 		t.Fatal(conf.Code)
 	}
 	rev := f.rev("hosta", "notes/dirty.md")
-	rootA := effectiveRoot(&f.cs[0])
+	rootA := mustEffectiveRoot(&f.cs[0])
 
 	// Unstaged edit to destination in publisher tree.
 	localEdit := "---\ntype: note\n---\n\nhuman mid-edit\n"
@@ -301,7 +301,7 @@ func TestProof6SingleCommitPushedThenNoop(t *testing.T) {
 	if _, conf := f.put("hosta", "misty-step/pinned.md", payload); conf != nil {
 		t.Fatalf("create failed: %s detail=%v", conf.Code, conf.Detail)
 	}
-	rootA := effectiveRoot(&f.cs[0])
+	rootA := mustEffectiveRoot(&f.cs[0])
 	logA := g(t, rootA, "log", "--format=%H", "--", "misty-step/pinned.md")
 	if len(strings.Fields(logA)) != 1 {
 		t.Fatalf("want one commit, got %q", logA)
@@ -374,7 +374,7 @@ func TestProof8ProfileConformance(t *testing.T) {
 	if conf != nil {
 		t.Fatal(conf.Code)
 	}
-	rootA := effectiveRoot(&f.cs[0])
+	rootA := mustEffectiveRoot(&f.cs[0])
 	disk, _ := os.ReadFile(filepath.Join(rootA, "notes/minimal.md"))
 	if !strings.Contains(string(disk), "created: 2019-03-04T05:06:07Z") {
 		t.Fatal("created was modified")
@@ -519,7 +519,7 @@ func TestProof12CreateFastPathWaitsForLock(t *testing.T) {
 		t.Fatalf("B = %s, want exists against the settled winner", code)
 	}
 	beforePushHook = nil
-	rootA := effectiveRoot(&f.cs[0])
+	rootA := mustEffectiveRoot(&f.cs[0])
 	if f.head(rootA) != g(t, f.origin, "rev-parse", "master") {
 		t.Fatal("clone A did not converge onto the winner")
 	}
@@ -606,7 +606,7 @@ func TestProof9CrossHostUpdateRace(t *testing.T) {
 	}
 
 	// Zero trace of B's commit; branch equals remote tip; bytes equal A's.
-	rootB := effectiveRoot(&f.cs[1])
+	rootB := mustEffectiveRoot(&f.cs[1])
 	if bBranch, remote := f.head(rootB), g(t, f.origin, "rev-parse", "master"); bBranch != remote {
 		t.Fatalf("B branch %s != remote %s", short(bBranch), short(remote))
 	}
@@ -738,7 +738,7 @@ func TestProof11CrossHostCreateRace(t *testing.T) {
 		t.Fatal("conflict must carry push diagnostics (evidence of real rejection)")
 	}
 
-	rootB := effectiveRoot(&f.cs[1])
+	rootB := mustEffectiveRoot(&f.cs[1])
 	if f.head(rootB) != g(t, f.origin, "rev-parse", "master") {
 		t.Fatal("B did not converge onto remote tip")
 	}

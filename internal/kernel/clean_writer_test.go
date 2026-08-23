@@ -147,3 +147,84 @@ func TestPublisherPinsNonDefaultTrackedBranch(t *testing.T) {
 		t.Fatalf("remote feature-vault = %s, want %s", remoteCommit, res.Commit)
 	}
 }
+
+// Proof 17: Get on a freshly registered cortex provisions the publisher clone
+// and reads clean committed state, never uncommitted human dirt on c.Path.
+func TestProof17FreshRegistrationReadsCommittedStateNotHumanDirt(t *testing.T) {
+	testConfigEnv(t)
+	base := t.TempDir()
+	origin := filepath.Join(base, "origin.git")
+	human := filepath.Join(base, "human")
+
+	g(t, base, "init", "--bare", "-b", "master", origin)
+	g(t, base, "clone", origin, human)
+	os.MkdirAll(filepath.Join(human, "notes"), 0o755)
+	os.WriteFile(filepath.Join(human, "notes/committed.md"), []byte(mkNote("note", "committed seed")), 0o644)
+	g(t, human, "add", "notes/committed.md")
+	g(t, human, "commit", "-m", "seed")
+	g(t, human, "push", "-u", "origin", "master")
+
+	// Human now edits the file locally without committing.
+	os.WriteFile(filepath.Join(human, "notes/committed.md"), []byte(mkNote("note", "uncommitted human dirt")), 0o644)
+
+	// Register fresh cortex.
+	c, err := Register("fresh", human, "daybook", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get without any prior put must return the clean committed state.
+	got, conf := Get([]Cortex{*c}, "fresh", "notes/committed.md")
+	if conf != nil {
+		t.Fatalf("get failed on fresh registration: %v", conf)
+	}
+	if !strings.Contains(got.Content, "committed seed") {
+		t.Fatalf("got content = %q, want committed seed", got.Content)
+	}
+	if strings.Contains(got.Content, "uncommitted human dirt") {
+		t.Fatal("get read uncommitted human dirt on fresh registration")
+	}
+
+	// effectiveRoot returns the provisioned publisher clone, not human.
+	root, err := effectiveRoot(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root == human {
+		t.Fatal("effectiveRoot returned human checkout instead of publisher clone")
+	}
+}
+
+// Proof 18: provisioning failure fails closed — Get/Log/Lint return cortex_unavailable,
+// never silently falling back to uncommitted bytes on c.Path.
+func TestProof18ProvisioningFailureFailsClosed(t *testing.T) {
+	testConfigEnv(t)
+	base := t.TempDir()
+	human := filepath.Join(base, "human")
+	os.MkdirAll(filepath.Join(human, "notes"), 0o755)
+	os.WriteFile(filepath.Join(human, "notes/secret.md"), []byte("human uncommitted secret"), 0o644)
+	g(t, base, "init", "-b", "master", human)
+	g(t, human, "remote", "add", "origin", "file:///nonexistent/broken.git")
+
+	c, err := Register("broken", human, "daybook", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get must fail closed with cortex_unavailable, never returning the human file.
+	_, conf := Get([]Cortex{*c}, "broken", "notes/secret.md")
+	if conf == nil || conf.Code != "cortex_unavailable" {
+		t.Fatalf("want cortex_unavailable on get, got %#v", conf)
+	}
+
+	// Log and Lint must also fail closed.
+	_, conf = Log([]Cortex{*c}, "broken", "notes/secret.md", 10)
+	if conf == nil || conf.Code != "cortex_unavailable" {
+		t.Fatalf("want cortex_unavailable on log, got %#v", conf)
+	}
+
+	_, conf = Lint([]Cortex{*c}, "broken", "notes/secret.md")
+	if conf == nil || conf.Code != "cortex_unavailable" {
+		t.Fatalf("want cortex_unavailable on lint, got %#v", conf)
+	}
+}

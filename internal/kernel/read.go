@@ -41,19 +41,22 @@ type GetResult struct {
 	Content     string         `json:"content"`
 }
 
-// Get reads one note and its stored revision (sha256 of exact bytes).
 func Get(cs []Cortex, nameFlag, p string) (*GetResult, *Conflict) {
 	c, rel, err := Resolve(cs, nameFlag, p)
 	if err != nil {
 		return nil, conflict("resolve_failed", "get", p, "use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
 	}
-	abs := filepath.Join(effectiveRoot(c), rel)
-	raw, rerr := os.ReadFile(abs)
-	if errors.Is(rerr, fs.ErrNotExist) {
+	root, rerr := effectiveRoot(c)
+	if rerr != nil {
+		return nil, conflict("cortex_unavailable", "get", p, "publisher repository is unavailable; check remote access", map[string]any{"detail": rerr.Error()})
+	}
+	abs := filepath.Join(root, rel)
+	raw, serr := os.ReadFile(abs)
+	if errors.Is(serr, fs.ErrNotExist) {
 		return nil, conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
 	}
-	if rerr != nil {
-		return nil, conflict("read_failed", "get", rel, "fix filesystem access and retry", map[string]any{"detail": rerr.Error()})
+	if serr != nil {
+		return nil, conflict("read_failed", "get", rel, "fix filesystem access and retry", map[string]any{"detail": serr.Error()})
 	}
 	note := fm.Split(raw)
 	var fmm map[string]any
@@ -86,7 +89,11 @@ func Log(cs []Cortex, nameFlag, p string, limit int) ([]LogEntry, *Conflict) {
 	if err != nil {
 		return nil, conflict("resolve_failed", "log", p, "use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
 	}
-	out, gerr := git(effectiveRoot(c), "log", fmt.Sprintf("-n%d", limit),
+	root, rerr := effectiveRoot(c)
+	if rerr != nil {
+		return nil, conflict("cortex_unavailable", "log", p, "publisher repository is unavailable; check remote access", map[string]any{"detail": rerr.Error()})
+	}
+	out, gerr := git(root, "log", fmt.Sprintf("-n%d", limit),
 		"--format=%H%x1f%an%x1f%aI%x1f%s", "--", filepath.FromSlash(rel))
 	if gerr != nil {
 		return nil, conflict("log_unavailable", "log", rel,
@@ -147,11 +154,14 @@ func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 		}
 		res.Findings = append(res.Findings, findings...)
 	}
+	root, rerr := effectiveRoot(c)
+	if rerr != nil {
+		return nil, conflict("cortex_unavailable", "lint", p, "publisher repository is unavailable; check remote access", map[string]any{"detail": rerr.Error()})
+	}
 	if rel != "" {
-		findings, verr := lintOne(c.Profile, filepath.Join(effectiveRoot(c), rel))
+		findings, verr := lintOne(c.Profile, filepath.Join(root, rel))
 		add(rel, findings, verr)
 	} else {
-		root := effectiveRoot(c)
 		werr := filepath.WalkDir(root, func(path string, d fs.DirEntry, werr error) error {
 			if werr != nil {
 				return werr
