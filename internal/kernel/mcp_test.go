@@ -97,7 +97,7 @@ func TestProof7MCPRoundTrip(t *testing.T) {
 		t.Fatalf("revision must bump: %q -> %q", rev1, rev2)
 	}
 
-	disk, _ := os.ReadFile(filepath.Join(f.a, "notes/mcp.md"))
+	disk, _ := os.ReadFile(filepath.Join(effectiveRoot(&f.cs[0]), "notes/mcp.md"))
 	if !strings.Contains(string(disk), "mcp roundtrip v2") {
 		t.Fatal("payload bytes lost")
 	}

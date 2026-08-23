@@ -23,157 +23,87 @@ func (f *fixture) noOriginClone(t *testing.T, name string) string {
 	return dir
 }
 
-// provisionWriter dirties a tracked heartbeat-style file so the next
-// put falls back to (and thereby provisions) the persistent writer,
-// then restores the heartbeat to its committed state.
-func provisionWriter(t *testing.T, f *fixture, shared string) {
-	t.Helper()
-	hb := filepath.Join(shared, "meta/loops-heartbeat.md")
-	os.MkdirAll(filepath.Dir(hb), 0o755)
-	os.WriteFile(hb, []byte("---\ntype: x\n---\nseed\n"), 0o644)
-	g(t, shared, "add", "meta/loops-heartbeat.md")
-	g(t, shared, "commit", "-m", "seed heartbeat")
-	g(t, shared, "push")
-	os.WriteFile(hb, []byte("---\ntype: x\n---\nheartbeat 05:00 append\n"), 0o644)
-}
-
-// Proof 15 (clean writer): when the shared checkout carries unrelated
-// foreign UNSTAGED dirt (the heartbeat pattern), writes fall back to
-// the cortex's persistent writer clone — landing, committing, pushing
-// from there — while the heartbeat stays untouched and the post-push
-// ff keeps the qmd-indexed shared tree current. Sticky selection keeps
-// later writes and reads on the writer even once the heartbeat cleans,
-// and a lost upstream surfaces as a visible sync warning.
-func TestProof15CleanWriterFallsBackOnDirtyHeartbeat(t *testing.T) {
+// Proof 15 (sole publisher): the kernel-owned writer clone is the sole
+// publisher for daybook cortices. Writes land, commit, and push from
+// the writer clone without touching the registered human checkout,
+// even when the human checkout carries uncommitted edits, staged work,
+// or a dirty heartbeat. Reads immediately resolve from the publisher clone.
+func TestProof15SolePublisherIsolatesFromHumanCheckout(t *testing.T) {
 	f := newFixture(t)
-	provisionWriter(t, f, f.a)
-	if _, conf := f.put("hosta", "notes/real.md", mkNote("note", "v1")); conf != nil {
-		t.Fatal(conf.Code)
-	}
-	rev := f.rev("hosta", "notes/real.md")
 
-	// Heartbeat append: unrelated foreign UNSTAGED dirt.
+	// Dirty the human checkout with heartbeat, human edits, and staged work.
 	hb := filepath.Join(f.a, "meta/loops-heartbeat.md")
-	dirtyBytes, _ := os.ReadFile(hb)
+	os.MkdirAll(filepath.Dir(hb), 0o755)
 	os.WriteFile(hb, []byte("---\ntype: x\n---\nheartbeat 05:00 append\n"), 0o644)
+	dirtyHB, _ := os.ReadFile(hb)
 
+	humanEdit := filepath.Join(f.a, "notes/real.md")
+	os.MkdirAll(filepath.Dir(humanEdit), 0o755)
+	os.WriteFile(humanEdit, []byte("---\ntype: note\n---\n\nhuman working bytes\n"), 0o644)
+	dirtyHuman, _ := os.ReadFile(humanEdit)
+
+	stagedPeer := filepath.Join(f.a, "notes/staged-peer.md")
+	os.WriteFile(stagedPeer, []byte("---\ntype: note\n---\n\nstaged peer\n"), 0o644)
+	g(t, f.a, "add", "notes/staged-peer.md")
+
+	// Put succeeds independently through the publisher clone.
 	res, conf := Put(nil, f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/real.md",
-		Payload: []byte(mkNote("note", "v2 via clean writer")),
-		Expects: rev,
-		Agent:   "a", Via: "cli", OwnPayload: true,
+		Payload:    []byte(mkNote("note", "v1 via sole publisher")),
+		Agent:      "a", Via: "cli", OwnPayload: true,
 	})
 	if conf != nil {
-		t.Fatalf("clean-writer fallback failed: %s detail=%v", conf.Code, conf.Detail)
+		t.Fatalf("sole publisher put failed: %s detail=%v", conf.Code, conf.Detail)
 	}
 	if !res.Pushed {
-		t.Fatal("expected push from writer clone")
+		t.Fatal("expected push from publisher clone")
 	}
 
+	// Publisher clone holds the committed update.
 	cfgDir, _ := ConfigDir()
 	writer := filepath.Join(cfgDir, "writers", "hosta")
 	wDisk, err := os.ReadFile(filepath.Join(writer, "notes/real.md"))
-	if err != nil || !strings.Contains(string(wDisk), "v2 via clean writer") {
-		t.Fatalf("writer clone missing the update: %v", err)
+	if err != nil || !strings.Contains(string(wDisk), "v1 via sole publisher") {
+		t.Fatalf("publisher clone missing update: %v", err)
 	}
 
-	// Shared checkout untouched by the write: heartbeat byte-identical.
-	after, _ := os.ReadFile(hb)
-	if string(after) != string(dirtyBytes) {
-		t.Fatal("foreign dirty file was touched")
+	// Human checkout is completely untouched byte-for-byte.
+	afterHB, _ := os.ReadFile(hb)
+	if string(afterHB) != string(dirtyHB) {
+		t.Fatal("human heartbeat was mutated")
+	}
+	afterHuman, _ := os.ReadFile(humanEdit)
+	if string(afterHuman) != string(dirtyHuman) {
+		t.Fatal("human working file was overwritten")
 	}
 
-	// Post-push ff synced the REGISTERED checkout along unrelated
-	// paths — this keeps the qmd-indexed tree current for search.
-	diskSynced, _ := os.ReadFile(filepath.Join(f.a, "notes/real.md"))
-	if !strings.Contains(string(diskSynced), "v2 via clean writer") {
-		t.Fatalf("registered checkout not synced after push: %s", diskSynced)
-	}
-
-	// Reads use the sticky writer root: get returns the new revision
-	// immediately, so the normal get -> put retry cycle works.
+	// Reads resolve from the publisher clone.
 	got, conf := Get(f.cs, "hosta", "notes/real.md")
 	if conf != nil || got.Revision != res.Revision {
-		t.Fatalf("get stale after writer push: rev=%s want %s", got.Revision, res.Revision)
+		t.Fatalf("get failed or stale: rev=%s want %s", got.Revision, res.Revision)
 	}
-
-	// Destination dirtied on the shared checkout AFTER provisioning:
-	// still terminal dirty_destination — the registered checkout's own
-	// destination state is never silently bypassed.
-	os.WriteFile(filepath.Join(f.a, "notes/real.md"), []byte(mkNote("note", "human mid-edit on shared")), 0o644)
-	resW, confW := Put(nil, f.cs, PutInput{
-		CortexName: "hosta", Path: "notes/real.md",
-		Payload: []byte(mkNote("note", "should not land")),
-		Expects: res.Revision,
-		Agent:   "a", Via: "cli", OwnPayload: true,
-	})
-	if confW == nil || confW.Code != "dirty_destination" {
-		t.Fatalf("want dirty_destination post-provisioning, got %#v / %#v", confW, resW)
-	}
-	g(t, f.a, "checkout", "--", "notes/real.md") // restore shared dest
-
-	// Foreign STAGED state also stays terminal with a provisioned
-	// writer: staging belongs to whoever staged it.
-	foreignStaged := filepath.Join(f.a, "notes/staged-peer.md")
-	os.WriteFile(foreignStaged, []byte("---\ntype: x\n---\npeer staged work\n"), 0o644)
-	g(t, f.a, "add", "notes/staged-peer.md")
-	resS, confS := Put(nil, f.cs, PutInput{
-		CortexName: "hosta", Path: "notes/real.md",
-		Payload: []byte(mkNote("note", "must not touch staged peers")),
-		Expects: res.Revision,
-		Agent:   "a", Via: "cli", OwnPayload: true,
-	})
-	if confS == nil || confS.Code != "foreign_staged_state" {
-		t.Fatalf("want foreign_staged_state with provisioned writer, got %#v / %#v", confS, resS)
-	}
-	stagedBytes, _ := os.ReadFile(foreignStaged)
-	if !strings.Contains(string(stagedBytes), "peer staged work") {
-		t.Fatal("staged peer file changed")
-	}
-	g(t, f.a, "restore", "--staged", "--worktree", "notes/staged-peer.md")
-	os.Remove(foreignStaged)
-
-	// Registered checkout loses upstream tracking: writer pushes still
-	// succeed and the miss becomes a visible shared_sync_failed warning
-	// instead of silent qmd staleness.
-	g(t, f.a, "remote", "remove", "origin")
-	res3, conf3 := Put(nil, f.cs, PutInput{
-		CortexName: "hosta", Path: "notes/real.md",
-		Payload: []byte(mkNote("note", "v4 with broken sync")),
-		Expects: res.Revision,
-		Agent:   "a", Via: "cli", OwnPayload: true,
-	})
-	if conf3 != nil || !res3.Pushed {
-		t.Fatalf("writer push failed without shared upstream: %v / %v", conf3, res3)
-	}
-	syncWarn := false
-	for _, w := range res3.Warnings {
-		if w.Rule == "shared_sync_failed" && strings.Contains(w.Message, "no upstream tracking") {
-			syncWarn = true
-		}
-	}
-	if !syncWarn {
-		t.Fatalf("missing no-upstream sync warning: %+v", res3.Warnings)
+	if !strings.Contains(got.Content, "v1 via sole publisher") {
+		t.Fatalf("get content = %q, want publisher content", got.Content)
 	}
 }
 
-// A LEFTOVER-DIRTY WRITER clone must abort the write at the selected-
-// root scan — never be stash-cycled or merged before the guard.
-func TestDirtyExistingWriterAborts(t *testing.T) {
+// A LEFTOVER-DIRTY PUBLISHER clone must abort the write at the publisher-
+// root scan — the publisher repository must always be clean.
+func TestDirtyPublisherAborts(t *testing.T) {
 	f := newFixture(t)
-	provisionWriter(t, f, f.a)
-	// A real different-path put while the heartbeat is dirty is what
-	// actually provisions the persistent writer clone.
+
+	// Initial put provisions the publisher clone.
 	if _, conf := f.put("hosta", "notes/provision.md", mkNote("note", "provisions writer")); conf != nil {
 		t.Fatal(conf.Code)
 	}
-	if writerDir(&f.cs[0]) == "" {
-		t.Fatal("writer was not provisioned")
+	writer := writerDir(&f.cs[0])
+	if writer == "" {
+		t.Fatal("publisher was not provisioned")
 	}
 
-	// Leftover dirt on a TRACKED file inside the writer itself.
-	warm := filepath.Join(writerDir(&f.cs[0]), "README.md")
-	os.WriteFile(warm, []byte("# fixture\nleftover mid-edit\n"), 0o644)
+	// Dirty a tracked file inside the publisher clone.
+	warm := filepath.Join(writer, "README.md")
+	os.WriteFile(warm, []byte("# fixture\nleftover mid-edit in publisher\n"), 0o644)
 
 	_, conf := f.put("hosta", "notes/warm.md", mkNote("note", "second write"))
 	wantCode(t, conf, "foreign_unstaged_state")
@@ -182,7 +112,38 @@ func TestDirtyExistingWriterAborts(t *testing.T) {
 		t.Fatalf("paths = %#v", conf.Detail["paths"])
 	}
 	after, _ := os.ReadFile(warm)
-	if !strings.Contains(string(after), "leftover mid-edit") {
-		t.Fatal("writer leftover bytes changed")
+	if !strings.Contains(string(after), "leftover mid-edit in publisher") {
+		t.Fatal("publisher leftover bytes changed")
+	}
+}
+
+// Proof 16: publisher pins the registered checkout's actual tracked branch
+// (e.g. feature-vault), not the remote's default branch (master).
+func TestPublisherPinsNonDefaultTrackedBranch(t *testing.T) {
+	f := newFixture(t)
+	// Create and checkout non-default branch on hosta
+	g(t, f.a, "checkout", "-b", "feature-vault")
+	g(t, f.a, "push", "-u", "origin", "feature-vault")
+
+	res, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/branch-test.md",
+		Payload:    []byte(mkNote("note", "landed on feature-vault")),
+		Agent:      "a", Via: "cli", OwnPayload: true,
+	})
+	if conf != nil || !res.Pushed {
+		t.Fatalf("put failed on non-default branch: %v / %v", conf, res)
+	}
+
+	cfgDir, _ := ConfigDir()
+	writer := filepath.Join(cfgDir, "writers", "hosta")
+	branch := g(t, writer, "rev-parse", "--abbrev-ref", "HEAD")
+	if branch != "feature-vault" {
+		t.Fatalf("publisher branch = %q, want feature-vault", branch)
+	}
+
+	// Verify remote received the commit on feature-vault, not master
+	remoteCommit := g(t, f.origin, "rev-parse", "feature-vault")
+	if res.Commit != remoteCommit {
+		t.Fatalf("remote feature-vault = %s, want %s", remoteCommit, res.Commit)
 	}
 }

@@ -109,16 +109,10 @@ func TestProof1ExistsOnAnyPreexistingDestination(t *testing.T) {
 	_, conf := f.put("hosta", "notes/tracked.md", mkNote("note", "other"))
 	wantCode(t, conf, "exists")
 
-	// Staged destination.
-	stagedPath := "notes/staged.md"
-	os.WriteFile(filepath.Join(f.a, stagedPath), []byte(mkNote("note", "someone staged this")), 0o644)
-	g(t, f.a, "add", stagedPath)
-	_, conf = f.put("hosta", stagedPath, mkNote("note", "intruder"))
-	wantCode(t, conf, "exists")
-
-	// Untracked destination.
+	// Existing in publisher tree.
+	rootA := effectiveRoot(&f.cs[0])
 	untracked := "notes/untracked.md"
-	os.WriteFile(filepath.Join(f.a, untracked), []byte(mkNote("note", "fresh")), 0o644)
+	os.WriteFile(filepath.Join(rootA, untracked), []byte(mkNote("note", "fresh")), 0o644)
 	_, conf = f.put("hosta", untracked, mkNote("note", "intruder"))
 	wantCode(t, conf, "exists")
 }
@@ -163,7 +157,8 @@ func TestProof2CreateRace(t *testing.T) {
 	if wins != 1 {
 		t.Fatalf("exactly one creator must win, got %d (%+v)", wins, results)
 	}
-	commits := g(t, f.a, "log", "--format=%H", "--", "notes/race.md")
+	rootA := effectiveRoot(&f.cs[0])
+	commits := g(t, rootA, "log", "--format=%H", "--", "notes/race.md")
 	if len(strings.Fields(commits)) != 1 {
 		t.Fatalf("expected exactly one commit for raced note, got %q", commits)
 	}
@@ -240,11 +235,12 @@ func TestProof4ConcurrentUpdatesAndForeignStaged(t *testing.T) {
 		t.Fatalf("want 1 winner + 1 revision_conflict, got %+v", results)
 	}
 
-	// Foreign staged path aborts before any write and stays intact.
+	// Foreign staged path in publisher tree aborts before any write and stays intact.
+	rootA := effectiveRoot(&f.cs[0])
 	foreign := "notes/foreign.md"
 	foreignBody := mkNote("note", "another worker's staged work")
-	os.WriteFile(filepath.Join(f.a, foreign), []byte(foreignBody), 0o644)
-	g(t, f.a, "add", foreign)
+	os.WriteFile(filepath.Join(rootA, foreign), []byte(foreignBody), 0o644)
+	g(t, rootA, "add", foreign)
 	newRev := f.rev("hosta", "notes/cas.md")
 	_, conf := Put(nil, f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/cas.md",
@@ -252,15 +248,14 @@ func TestProof4ConcurrentUpdatesAndForeignStaged(t *testing.T) {
 		Agent: "t", Via: "cli", OwnPayload: true,
 	})
 	wantCode(t, conf, "foreign_staged_state")
-	if got, _ := os.ReadFile(filepath.Join(f.a, foreign)); string(got) != foreignBody {
+	if got, _ := os.ReadFile(filepath.Join(rootA, foreign)); string(got) != foreignBody {
 		t.Fatal("foreign staged file bytes changed")
 	}
-	status := g(t, f.a, "status", "--porcelain", "--", foreign)
+	status := g(t, rootA, "status", "--porcelain", "--", foreign)
 	if !strings.HasPrefix(status, "A ") && !strings.HasPrefix(status, "M ") {
 		t.Fatalf("foreign file no longer staged: %q", status)
 	}
 }
-
 // Proof 5: dirty destination aborts; local edits survive byte-for-byte.
 func TestProof5DirtyDestination(t *testing.T) {
 	f := newFixture(t)
@@ -268,10 +263,11 @@ func TestProof5DirtyDestination(t *testing.T) {
 		t.Fatal(conf.Code)
 	}
 	rev := f.rev("hosta", "notes/dirty.md")
+	rootA := effectiveRoot(&f.cs[0])
 
-	// Unstaged edit to destination.
+	// Unstaged edit to destination in publisher tree.
 	localEdit := "---\ntype: note\n---\n\nhuman mid-edit\n"
-	os.WriteFile(filepath.Join(f.a, "notes/dirty.md"), []byte(localEdit), 0o644)
+	os.WriteFile(filepath.Join(rootA, "notes/dirty.md"), []byte(localEdit), 0o644)
 	_, conf := Put(nil, f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/dirty.md",
 		Payload: []byte(mkNote("note", "clobber")), Expects: rev,
@@ -281,12 +277,12 @@ func TestProof5DirtyDestination(t *testing.T) {
 	if conf.Detail["state"] != "unstaged" {
 		t.Fatalf("state = %v, want unstaged", conf.Detail["state"])
 	}
-	if got, _ := os.ReadFile(filepath.Join(f.a, "notes/dirty.md")); string(got) != localEdit {
+	if got, _ := os.ReadFile(filepath.Join(rootA, "notes/dirty.md")); string(got) != localEdit {
 		t.Fatal("unstaged edit did not survive byte-for-byte")
 	}
 
-	// Staged-only change to destination.
-	g(t, f.a, "add", "notes/dirty.md")
+	// Staged-only change to destination in publisher tree.
+	g(t, rootA, "add", "notes/dirty.md")
 	_, conf = Put(nil, f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/dirty.md",
 		Payload: []byte(mkNote("note", "clobber")), Expects: rev,
@@ -305,16 +301,17 @@ func TestProof6SingleCommitPushedThenNoop(t *testing.T) {
 	if _, conf := f.put("hosta", "misty-step/pinned.md", payload); conf != nil {
 		t.Fatalf("create failed: %s detail=%v", conf.Code, conf.Detail)
 	}
-	logA := g(t, f.a, "log", "--format=%H", "--", "misty-step/pinned.md")
+	rootA := effectiveRoot(&f.cs[0])
+	logA := g(t, rootA, "log", "--format=%H", "--", "misty-step/pinned.md")
 	if len(strings.Fields(logA)) != 1 {
 		t.Fatalf("want one commit, got %q", logA)
 	}
 	remoteHead := g(t, f.origin, "rev-parse", "master")
-	if remoteHead != f.head(f.a) {
+	if remoteHead != f.head(rootA) {
 		t.Fatal("push did not advance remote to local HEAD")
 	}
 	// Commit touches only the target path.
-	stat := g(t, f.a, "show", "--name-only", "--format=", "HEAD")
+	stat := g(t, rootA, "show", "--name-only", "--format=", "HEAD")
 	if lines := nonEmpty(stat); len(lines) != 1 || lines[0] != "misty-step/pinned.md" {
 		t.Fatalf("commit touched %v", lines)
 	}
@@ -329,13 +326,13 @@ func TestProof6SingleCommitPushedThenNoop(t *testing.T) {
 	if conf != nil {
 		t.Fatalf("retry failed: %s detail=%v", conf.Code, conf.Detail)
 	}
-	if g(t, f.a, "log", "--format=%H", "--", "misty-step/pinned.md") != logA {
+	if g(t, rootA, "log", "--format=%H", "--", "misty-step/pinned.md") != logA {
 		t.Fatal("no-op created a commit")
 	}
 
 	// Second no-op form: get-content retry — the payload carries the
 	// stored provenance stamp back verbatim (pinned byte-equality).
-	disk, _ := os.ReadFile(filepath.Join(f.a, "misty-step/pinned.md"))
+	disk, _ := os.ReadFile(filepath.Join(rootA, "misty-step/pinned.md"))
 	res2, conf := Put(nil, f.cs, PutInput{
 		CortexName: "hosta", Path: "misty-step/pinned.md",
 		Payload: disk, Expects: rev,
@@ -348,7 +345,6 @@ func TestProof6SingleCommitPushedThenNoop(t *testing.T) {
 		t.Fatal("get-content retry must be a no-op")
 	}
 }
-
 // Proof 8: profile conformance — type-only frontmatter passes; created immutable.
 func TestProof8ProfileConformance(t *testing.T) {
 	f := newFixture(t)
@@ -378,7 +374,8 @@ func TestProof8ProfileConformance(t *testing.T) {
 	if conf != nil {
 		t.Fatal(conf.Code)
 	}
-	disk, _ := os.ReadFile(filepath.Join(f.a, "notes/minimal.md"))
+	rootA := effectiveRoot(&f.cs[0])
+	disk, _ := os.ReadFile(filepath.Join(rootA, "notes/minimal.md"))
 	if !strings.Contains(string(disk), "created: 2019-03-04T05:06:07Z") {
 		t.Fatal("created was modified")
 	}
@@ -388,7 +385,7 @@ func TestProof8ProfileConformance(t *testing.T) {
 
 	// Changing created aborts created_immutable and writes nothing.
 	rev = f.rev("hosta", "notes/minimal.md")
-	before, _ := os.ReadFile(filepath.Join(f.a, "notes/minimal.md"))
+	before, _ := os.ReadFile(filepath.Join(rootA, "notes/minimal.md"))
 	tampered := "---\ntype: fleeting\ncreated: 2026-01-01T00:00:00Z\n---\n\nchanged body\n"
 	_, conf = Put(nil, f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/minimal.md",
@@ -401,7 +398,7 @@ func TestProof8ProfileConformance(t *testing.T) {
 	if conf.Detail["stored"] != "2019-03-04T05:06:07Z" || conf.Detail["submitted"] != "2026-01-01T00:00:00Z" {
 		t.Fatalf("detail = %v", conf.Detail)
 	}
-	if after, _ := os.ReadFile(filepath.Join(f.a, "notes/minimal.md")); string(after) != string(before) {
+	if after, _ := os.ReadFile(filepath.Join(rootA, "notes/minimal.md")); string(after) != string(before) {
 		t.Fatal("rejected update touched the file")
 	}
 
@@ -522,10 +519,11 @@ func TestProof12CreateFastPathWaitsForLock(t *testing.T) {
 		t.Fatalf("B = %s, want exists against the settled winner", code)
 	}
 	beforePushHook = nil
-	if f.head(f.a) != g(t, f.origin, "rev-parse", "master") {
+	rootA := effectiveRoot(&f.cs[0])
+	if f.head(rootA) != g(t, f.origin, "rev-parse", "master") {
 		t.Fatal("clone A did not converge onto the winner")
 	}
-	disk, _ := os.ReadFile(filepath.Join(f.a, "notes/pause.md"))
+	disk, _ := os.ReadFile(filepath.Join(rootA, "notes/pause.md"))
 	if !strings.Contains(string(disk), "winner landed mid-race") {
 		t.Fatalf("disk = %q, want winner bytes", disk)
 	}
@@ -608,15 +606,16 @@ func TestProof9CrossHostUpdateRace(t *testing.T) {
 	}
 
 	// Zero trace of B's commit; branch equals remote tip; bytes equal A's.
-	if bBranch, remote := f.head(f.b), g(t, f.origin, "rev-parse", "master"); bBranch != remote {
+	rootB := effectiveRoot(&f.cs[1])
+	if bBranch, remote := f.head(rootB), g(t, f.origin, "rev-parse", "master"); bBranch != remote {
 		t.Fatalf("B branch %s != remote %s", short(bBranch), short(remote))
 	}
-	disk, _ := os.ReadFile(filepath.Join(f.b, "notes/shared.md"))
+	disk, _ := os.ReadFile(filepath.Join(rootB, "notes/shared.md"))
 	// Winner's committed bytes carry the winner's provenance stamp.
 	if !strings.Contains(string(disk), "A wins with this content") || !strings.Contains(string(disk), "agent: agent-a") {
 		t.Fatalf("B disk = %q, want A's stamped payload", disk)
 	}
-	bLog := g(t, f.b, "log", "--format=%s", "--", "notes/shared.md")
+	bLog := g(t, rootB, "log", "--format=%s", "--", "notes/shared.md")
 	if strings.Contains(bLog, "exocortex put notes/shared.md via agent-b") {
 		t.Fatalf("B's losing commit survived: %q", bLog)
 	}
@@ -739,10 +738,11 @@ func TestProof11CrossHostCreateRace(t *testing.T) {
 		t.Fatal("conflict must carry push diagnostics (evidence of real rejection)")
 	}
 
-	if f.head(f.b) != g(t, f.origin, "rev-parse", "master") {
+	rootB := effectiveRoot(&f.cs[1])
+	if f.head(rootB) != g(t, f.origin, "rev-parse", "master") {
 		t.Fatal("B did not converge onto remote tip")
 	}
-	disk, err := os.ReadFile(filepath.Join(f.b, "notes/new-hotness.md"))
+	disk, err := os.ReadFile(filepath.Join(rootB, "notes/new-hotness.md"))
 	if err != nil {
 		t.Fatalf("winner's note missing after restore-to-remote: %v", err)
 	}

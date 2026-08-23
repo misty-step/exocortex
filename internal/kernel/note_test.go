@@ -114,14 +114,15 @@ func TestProof14ConcurrentJournalPushesBothLand(t *testing.T) {
 	if !strings.HasPrefix(path, "journal/") {
 		t.Fatalf("A's note lost in cross-host race: %q", path)
 	}
-	diskA, err := os.ReadFile(filepath.Join(f.a, path))
+	rootA := effectiveRoot(&f.cs[0])
+	diskA, err := os.ReadFile(filepath.Join(rootA, path))
 	if err != nil {
 		t.Fatalf("A's own note missing after retry: %v", err)
 	}
 	if !strings.Contains(string(diskA), "A races B into the journal") {
 		t.Fatalf("A note content wrong: %s", diskA)
 	}
-	bDisk, err := os.ReadFile(filepath.Join(f.a, "journal/2026-08-22/B-note.md"))
+	bDisk, err := os.ReadFile(filepath.Join(rootA, "journal/2026-08-22/B-note.md"))
 	if err != nil || !strings.Contains(string(bDisk), "B landed first") {
 		t.Fatalf("B's note missing from converged clone: %v", err)
 	}

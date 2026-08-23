@@ -86,53 +86,36 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 
 	res := &PutResult{Operation: op, Cortex: c.Name, Path: rel}
 
-	// Create fast path — INSIDE the lock (pinned: no state is read
-	// before flock; a peer's transient file mid-put must not answer).
-	// It sits before pre-flight so staged or untracked destinations
-	// return `exists` instead of tripping a pull refusal. The
-	// post-refresh CAS below re-checks absence against fresh state.
-	if op == "create" {
-		if _, serr := os.Stat(abs); serr == nil {
-			return nil, conflict("exists", op, rel,
-				"bare put creates only; read the note with get and update it with --expects", nil)
-		}
-	}
+	// Publisher resolution — the persistent clean-writer clone is the
+	// sole publisher for daybook cortices. All existence and CAS
+	// checks run against the publisher tree, never the human checkout.
 
 	var base string
 	dir := c.Path // write target: the registered checkout, or its clean-writer clone
 	if c.VCS == "daybook" {
-		// Routing scan on the REGISTERED checkout (SPEC step 0): staged
-		// state, destination dirt, and foreign staged paths are terminal
-		// regardless of any writer. Only unrelated foreign UNSTAGED
-		// edits — the heartbeat pattern — route to the persistent
-		// clean-writer clone, because those bytes belong to another
-		// worker and must stay untouched while we write elsewhere.
-		routingConf := preflight(c.Path, rel, op == "update")
-		if routingConf != nil {
-			if routingConf.Code != "foreign_unstaged_state" {
-				return nil, routingConf
+		// The persistent clean-writer clone is the SOLE publisher for
+		// daybook cortices. The registered human checkout is never
+		// scanned, stashed, or used as transaction state.
+		wdir, werr := ensureWriter(c.Name, c.Path)
+		if werr != nil {
+			if _, gerr := git(c.Path, "remote", "get-url", "origin"); gerr == nil {
+				return nil, conflict("writer_unavailable", op, rel,
+					"failed to provision clean-writer clone; check disk access and git origin",
+					map[string]any{"detail": werr.Error()})
 			}
-			wdir, werr := ensureWriter(c.Name, c.Path)
-			if werr != nil {
-				routingConf.Detail["writer_error"] = werr.Error()
-				return nil, routingConf
-			}
+			dir = c.Path
+			abs = filepath.Join(dir, filepath.FromSlash(rel))
+		} else {
 			dir = wdir
 			abs = filepath.Join(dir, filepath.FromSlash(rel))
-		} else if wd := writerDir(c); wd != "" {
-			// Root selection is sticky once a writer exists: writes land
-			// in the same clone Get reads from, clean checkout or not.
-			dir = wd
-			abs = filepath.Join(dir, filepath.FromSlash(rel))
 		}
-
 		// Step 2 scan on the SELECTED root before refresh — a dirty or
-		// leftover-warm writer must not be stash-cycled either.
+		// leftover-warm writer must not be modified if unclean.
 		if conf := preflight(dir, rel, op == "update"); conf != nil {
 			return nil, conf
 		}
 		if hasUpstream(dir) {
-			if _, gerr := git(dir, "pull", "--rebase", "--autostash"); gerr != nil {
+			if _, gerr := git(dir, "pull", "--rebase"); gerr != nil {
 				return nil, conflict("refresh_failed", op, rel,
 					"resolve the pull failure and retry; nothing was written",
 					map[string]any{"detail": gerr.(*GitError).Stderr})
@@ -282,25 +265,6 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 		}
 		res.Pushed = true
 
-		// Post-push sync (best-effort): fast-forward the REGISTERED
-		// checkout along unrelated paths so its qmd-indexed tree stays
-		// current for search. Git permits an ff merge past unrelated
-		// dirty files; any failure is non-fatal because effectiveRoot
-		// prefers the synced writer for reads.
-		if dir != c.Path {
-			if !hasUpstream(c.Path) {
-				res.Warnings = append(res.Warnings, fm.Finding{Level: "warning", Rule: "shared_sync_failed",
-					Message: "registered checkout has no upstream tracking; its qmd-indexed tree was not synced"})
-			} else {
-				if _, ferr := git(c.Path, "fetch"); ferr != nil {
-					res.Warnings = append(res.Warnings, fm.Finding{Level: "warning", Rule: "shared_sync_failed",
-						Message: "fetch: " + strings.TrimSpace(ferr.(*GitError).Stderr)})
-				} else if _, merr := git(c.Path, "merge", "--ff-only", "@{u}"); merr != nil {
-					res.Warnings = append(res.Warnings, fm.Finding{Level: "warning", Rule: "shared_sync_failed",
-						Message: strings.TrimSpace(merr.(*GitError).Stderr)})
-				}
-			}
-		}
 	}
 	return res, nil
 }
@@ -588,27 +552,43 @@ func ensureWriter(name, shared string) (string, error) {
 		return "", err
 	}
 	w := filepath.Join(cfg, "writers", name)
-	if _, statErr := os.Stat(filepath.Join(w, ".git")); statErr == nil {
-		// Existing writers return AS-IS: Put preflights the selected
-		// root before any pull, so leftover dirt aborts instead of
-		// being stash-cycled by a sync that runs too early.
-		return w, nil
-	}
+
 	url, err := git(shared, "remote", "get-url", "origin")
 	if err != nil {
 		return "", fmt.Errorf("shared checkout has no origin to clone: %s", strings.TrimSpace(err.(*GitError).Stderr))
 	}
+	url = strings.TrimSpace(url)
+
+	branch, berr := git(shared, "rev-parse", "--abbrev-ref", "HEAD")
+	if berr != nil {
+		return "", fmt.Errorf("shared checkout has no HEAD branch: %s", strings.TrimSpace(berr.(*GitError).Stderr))
+	}
+	branch = strings.TrimSpace(branch)
+
+	// Validate existing writer clone: must match the shared checkout's remote and branch.
+	if _, statErr := os.Stat(filepath.Join(w, ".git")); statErr == nil {
+		wURL, _ := git(w, "remote", "get-url", "origin")
+		wBranch, _ := git(w, "rev-parse", "--abbrev-ref", "HEAD")
+		if strings.TrimSpace(wURL) != url || strings.TrimSpace(wBranch) != branch {
+			return "", fmt.Errorf("writer clone mismatch (url=%q want %q, branch=%q want %q); inspect %s before manual recovery",
+				strings.TrimSpace(wURL), url, strings.TrimSpace(wBranch), branch, w)
+		}
+		return w, nil
+	}
+
 	os.MkdirAll(filepath.Dir(w), 0o755)
-	if out, cerr := git("", "clone", strings.TrimSpace(url), w); cerr != nil {
+	var cloneArgs []string
+	if branch != "" && branch != "HEAD" {
+		cloneArgs = []string{"clone", "-b", branch, url, w}
+	} else {
+		cloneArgs = []string{"clone", url, w}
+	}
+	if out, cerr := git("", cloneArgs...); cerr != nil {
 		return "", fmt.Errorf("writer clone failed: %s", strings.TrimSpace(cerr.(*GitError).Stderr+" "+out))
 	}
 	if err := ffToUpstream(w); err != nil {
 		return "", err
 	}
-	// Carry repo-local identity into the writer: hosts that rely on
-	// per-repo user.name/user.email have none on a fresh clone, and
-	// the first commit would fail. Global/system config stays last
-	// resort for hosts that work that way.
 	for _, key := range []string{"user.name", "user.email"} {
 		if v, gerr := git(shared, "config", "--local", "--get", key); gerr == nil {
 			_, _ = git(w, "config", key, strings.TrimSpace(v))
