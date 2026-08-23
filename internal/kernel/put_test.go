@@ -109,11 +109,11 @@ func TestProof1ExistsOnAnyPreexistingDestination(t *testing.T) {
 	_, conf := f.put("hosta", "notes/tracked.md", mkNote("note", "other"))
 	wantCode(t, conf, "exists")
 
-	// Existing in publisher tree.
-	rootA := mustEffectiveRoot(&f.cs[0])
-	untracked := "notes/untracked.md"
-	os.WriteFile(filepath.Join(rootA, untracked), []byte(mkNote("note", "fresh")), 0o644)
-	_, conf = f.put("hosta", untracked, mkNote("note", "intruder"))
+	// Second create on an existing committed path returns exists.
+	if _, conf := f.put("hosta", "notes/second.md", mkNote("note", "v1")); conf != nil {
+		t.Fatalf("seed create failed: %v", conf.Code)
+	}
+	_, conf = f.put("hosta", "notes/second.md", mkNote("note", "intruder"))
 	wantCode(t, conf, "exists")
 }
 

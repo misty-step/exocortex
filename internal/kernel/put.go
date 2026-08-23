@@ -129,17 +129,23 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 		}
 	}
 
-	// CAS against fresh state.
-	stored, serr := os.ReadFile(abs)
+	// CAS against fresh committed state.
+	var stored []byte
+	if c.VCS == "daybook" {
+		if raw, gerr := git(dir, "show", "HEAD:"+filepath.ToSlash(rel)); gerr == nil {
+			stored = []byte(raw)
+		}
+	} else {
+		if raw, serr := os.ReadFile(abs); serr == nil {
+			stored = raw
+		}
+	}
+
 	switch {
-	case op == "create" && serr == nil:
+	case op == "create" && stored != nil:
 		return nil, conflict("exists", op, rel, "bare put creates only; read the note with get and update it with --expects", nil)
-	case op == "create" && !errors.Is(serr, fs.ErrNotExist):
-		return nil, conflict("read_failed", op, rel, "fix filesystem access and retry", map[string]any{"detail": serr.Error()})
-	case op == "update" && errors.Is(serr, fs.ErrNotExist):
+	case op == "update" && stored == nil:
 		return nil, conflict("not_found", op, rel, "the note vanished; search the cortex and re-apply on top of current state", nil)
-	case op == "update" && serr != nil:
-		return nil, conflict("read_failed", op, rel, "fix filesystem access and retry", map[string]any{"detail": serr.Error()})
 	}
 	storedRev := ""
 	if op == "update" {
