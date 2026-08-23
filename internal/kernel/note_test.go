@@ -128,21 +128,22 @@ func TestProof14ConcurrentJournalPushesBothLand(t *testing.T) {
 	}
 }
 
-// Every terminal conflict preserves the in-memory payload: production
-// hit foreign_unstaged_state on daybook minutes into real use. Uses a
-// no-origin cortex so the abort path (not the clean-writer fallback)
-// is what runs.
+// Every terminal conflict preserves the in-memory payload.
 func TestNotePreservesPayloadOnNonRetryable(t *testing.T) {
 	f := newFixture(t)
-	no := f.noOriginClone(t, "hostno") // fresh clone is already at the origin tip
-	foreign := filepath.Join(no, "notes/foreign-wip.md")
+	// Provision writer clone
+	if _, conf := f.put("hosta", "notes/provision.md", mkNote("note", "provisioned")); conf != nil {
+		t.Fatal(conf.Code)
+	}
+	writer := mustEffectiveRoot(&f.cs[0])
+	foreign := filepath.Join(writer, "notes/foreign-wip.md")
 	os.MkdirAll(filepath.Dir(foreign), 0o755)
 	os.WriteFile(foreign, []byte("---\ntype: x\n---\nseed\n"), 0o644)
-	g(t, no, "add", "notes/foreign-wip.md")
-	g(t, no, "commit", "-m", "seed foreign tracked file")
+	g(t, writer, "add", "notes/foreign-wip.md")
+	g(t, writer, "commit", "-m", "seed foreign tracked file")
 	os.WriteFile(foreign, []byte("---\ntype: x\n---\nwip mid-edit\n"), 0o644)
 
-	_, conf := Note(nil, f.cs, NoteInput{CortexName: "hostno", Text: "precious thought", Agent: "a", Via: "cli"})
+	_, conf := Note(nil, f.cs, NoteInput{CortexName: "hosta", Text: "precious thought", Agent: "a", Via: "cli"})
 	if conf == nil || conf.Code != "foreign_unstaged_state" {
 		t.Fatalf("want foreign_unstaged_state, got %#v", conf)
 	}

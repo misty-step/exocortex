@@ -98,17 +98,12 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 		// scanned, stashed, or used as transaction state.
 		wdir, werr := ensureWriter(c.Name, c.Path)
 		if werr != nil {
-			if _, gerr := git(c.Path, "remote", "get-url", "origin"); gerr == nil {
-				return nil, conflict("writer_unavailable", op, rel,
-					"failed to provision clean-writer clone; check disk access and git origin",
-					map[string]any{"detail": werr.Error()})
-			}
-			dir = c.Path
-			abs = filepath.Join(dir, filepath.FromSlash(rel))
-		} else {
-			dir = wdir
-			abs = filepath.Join(dir, filepath.FromSlash(rel))
+			return nil, conflict("writer_unavailable", op, rel,
+				"failed to provision publisher clone; daybook cortices require a valid git origin",
+				map[string]any{"detail": werr.Error()})
 		}
+		dir = wdir
+		abs = filepath.Join(dir, filepath.FromSlash(rel))
 		// Step 2 scan on the SELECTED root before refresh — a dirty or
 		// leftover-warm writer must not be modified if unclean.
 		if conf := preflight(dir, rel, op == "update"); conf != nil {
@@ -532,13 +527,11 @@ func writerDir(c *Cortex) string {
 // failing closed to prevent reading uncommitted human dirt.
 func effectiveRoot(c *Cortex) (string, error) {
 	if c.VCS == "daybook" {
-		if _, err := git(c.Path, "remote", "get-url", "origin"); err == nil {
-			w, werr := ensureWriter(c.Name, c.Path)
-			if werr != nil {
-				return "", fmt.Errorf("failed to provision publisher clone for %s: %w", c.Name, werr)
-			}
-			return w, nil
+		w, werr := ensureWriter(c.Name, c.Path)
+		if werr != nil {
+			return "", fmt.Errorf("failed to provision publisher clone for %s: %w", c.Name, werr)
 		}
+		return w, nil
 	}
 	return c.Path, nil
 }

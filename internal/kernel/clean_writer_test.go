@@ -228,3 +228,83 @@ func TestProof18ProvisioningFailureFailsClosed(t *testing.T) {
 		t.Fatalf("want cortex_unavailable on lint, got %#v", conf)
 	}
 }
+
+// Proof 19: completely missing origin remote on a daybook cortex fails closed
+// across reads and writes — Put returns writer_unavailable; Get/Log/Lint return
+// cortex_unavailable; zero fallback to c.Path.
+func TestProof19MissingOriginFailsClosedAcrossReadsAndWrites(t *testing.T) {
+	testConfigEnv(t)
+	base := t.TempDir()
+	human := filepath.Join(base, "human-no-origin")
+	os.MkdirAll(filepath.Join(human, "notes"), 0o755)
+	os.WriteFile(filepath.Join(human, "notes/secret.md"), []byte("human uncommitted secret"), 0o644)
+	g(t, base, "init", "-b", "master", human)
+
+	c, err := Register("no-origin", human, "daybook", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Reads must fail closed.
+	_, conf := Get([]Cortex{*c}, "no-origin", "notes/secret.md")
+	if conf == nil || conf.Code != "cortex_unavailable" {
+		t.Fatalf("want cortex_unavailable on get with missing origin, got %#v", conf)
+	}
+
+	_, conf = Log([]Cortex{*c}, "no-origin", "notes/secret.md", 10)
+	if conf == nil || conf.Code != "cortex_unavailable" {
+		t.Fatalf("want cortex_unavailable on log with missing origin, got %#v", conf)
+	}
+
+	_, conf = Lint([]Cortex{*c}, "no-origin", "notes/secret.md")
+	if conf == nil || conf.Code != "cortex_unavailable" {
+		t.Fatalf("want cortex_unavailable on lint with missing origin, got %#v", conf)
+	}
+
+	// Writes must fail closed.
+	_, pconf := Put(nil, []Cortex{*c}, PutInput{
+		CortexName: "no-origin", Path: "notes/secret.md",
+		Payload: []byte(mkNote("note", "must not write")),
+		Agent: "a", Via: "cli", OwnPayload: true,
+	})
+	if pconf == nil || pconf.Code != "writer_unavailable" {
+		t.Fatalf("want writer_unavailable on put with missing origin, got %#v", pconf)
+	}
+
+	// Verify the local file in human checkout was never modified.
+	disk, _ := os.ReadFile(filepath.Join(human, "notes/secret.md"))
+	if string(disk) != "human uncommitted secret" {
+		t.Fatal("local file in human checkout was mutated")
+	}
+}
+
+// Proof 20: Get reads the committed Git snapshot and NEVER observes uncommitted
+// working-tree bytes during an in-flight Put or failed unwound push.
+func TestProof20GetReadsCommittedSnapshotNeverObservesUncommittedAtomicWrite(t *testing.T) {
+	f := newFixture(t)
+	// Seed note at R1
+	if _, conf := f.put("hosta", "notes/snap.md", mkNote("note", "committed v1")); conf != nil {
+		t.Fatal(conf.Code)
+	}
+	r1 := f.rev("hosta", "notes/snap.md")
+
+	writer := mustEffectiveRoot(&f.cs[0])
+	// Simulate an uncommitted file written directly to the writer worktree
+	// (e.g. intermediate atomicWrite before commit).
+	os.WriteFile(filepath.Join(writer, "notes/snap.md"), []byte(mkNote("note", "uncommitted transient bytes")), 0o644)
+
+	// Get must still return the committed v1 snapshot from HEAD, not the uncommitted disk bytes!
+	got, conf := Get(f.cs, "hosta", "notes/snap.md")
+	if conf != nil {
+		t.Fatalf("get failed: %v", conf)
+	}
+	if !strings.Contains(got.Content, "committed v1") {
+		t.Fatalf("got content = %q, want committed v1", got.Content)
+	}
+	if strings.Contains(got.Content, "uncommitted transient bytes") {
+		t.Fatal("get observed uncommitted working tree bytes")
+	}
+	if got.Revision != r1 {
+		t.Fatalf("get revision = %s, want %s", got.Revision, r1)
+	}
+}

@@ -50,6 +50,25 @@ func Get(cs []Cortex, nameFlag, p string) (*GetResult, *Conflict) {
 	if rerr != nil {
 		return nil, conflict("cortex_unavailable", "get", p, "publisher repository is unavailable; check remote access", map[string]any{"detail": rerr.Error()})
 	}
+	if c.VCS == "daybook" {
+		raw, gerr := git(root, "show", "HEAD:"+filepath.ToSlash(rel))
+		if gerr != nil {
+			return nil, conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
+		}
+		rawBytes := []byte(raw)
+		note := fm.Split(rawBytes)
+		var fmm map[string]any
+		if m, perr := fm.Parse(note); perr == nil {
+			fmm = m
+		}
+		return &GetResult{
+			Cortex:      c.Name,
+			Path:        filepath.ToSlash(rel),
+			Revision:    Revision(rawBytes),
+			Frontmatter: fmm,
+			Content:     raw,
+		}, nil
+	}
 	abs := filepath.Join(root, rel)
 	raw, serr := os.ReadFile(abs)
 	if errors.Is(serr, fs.ErrNotExist) {

@@ -686,30 +686,6 @@ func TestProof10UnwindSparesForeignUnstaged(t *testing.T) {
 	if !strings.Contains(string(disk), "remote winner") || !strings.Contains(string(disk), "agent: a") {
 		t.Fatalf("tail file = %q, want winner's stamped payload", disk)
 	}
-
-	// Pre-flight alone on a NO-ORIGIN cortex: an unrelated unstaged
-	// tracked edit aborts cleanly — no clean-writer fallback exists
-	// without a remote.
-	no := f.noOriginClone(t, "hostno") // fresh clone is already at the origin tip
-	scratchRel := "notes/scratch.md"
-	scratchAbs := filepath.Join(no, scratchRel)
-	os.WriteFile(scratchAbs, []byte("---\ntype: x\n---\nseed\n"), 0o644)
-	g(t, no, "add", scratchRel)
-	g(t, no, "commit", "-m", "vault(test): seed scratch")
-	os.WriteFile(scratchAbs, []byte("---\ntype: x\n---\ndirty\n"), 0o644) // unstaged
-
-	r2 := f.rev("hostno", "notes/tail.md")
-	_, conf := Put(nil, f.cs, PutInput{
-		CortexName: "hostno", Path: "notes/tail.md",
-		Payload: []byte(mkNote("note", "blocked")), Expects: r2,
-		Agent: "b", Via: "cli", OwnPayload: true,
-	})
-	wantCode(t, conf, "foreign_unstaged_state")
-	if paths, ok := conf.Detail["paths"].([]string); ok && len(paths) == 1 && paths[0] == scratchRel {
-		// expected
-	} else {
-		t.Fatalf("foreign_unstaged_state paths = %#v", conf.Detail["paths"])
-	}
 }
 
 // Proof 11: cross-host CREATE race — losing creator exits exists and
