@@ -265,7 +265,13 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 			return nil, conf
 		}
 		res.Pushed = true
-		_ = markDirty(c.Name, res.Commit)
+		if merr := markDirty(c.Name, res.Commit); merr != nil {
+			res.Warnings = append(res.Warnings, fm.Finding{
+				Level:   "warning",
+				Rule:    "dirty_marker_failed",
+				Message: fmt.Sprintf("failed to record dirty sync marker: %v", merr),
+			})
+		}
 	}
 	return res, nil
 }
