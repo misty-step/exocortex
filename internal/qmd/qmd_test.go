@@ -97,6 +97,7 @@ func TestCollectionPathParsesShowOutput(t *testing.T) {
 	binDir := t.TempDir()
 	fake := filepath.Join(binDir, "qmd")
 	script := `#!/bin/sh
+while [ "$1" = "--index" ]; do shift 2; done
 if [ "$1" != "collection" ] || [ "$2" != "show" ] || [ "$3" != "daybook" ]; then
   echo "unexpected args: $*" >&2
   exit 1
@@ -132,5 +133,37 @@ exit 1
 	}
 	if _, err := CollectionPath(context.Background(), ""); err == nil {
 		t.Fatal("empty name must fail")
+	}
+}
+
+func TestEmbedRejectsIncompleteBanners(t *testing.T) {
+	binDir := t.TempDir()
+	fake := filepath.Join(binDir, "qmd")
+	script := `#!/bin/sh
+echo "Done!"
+echo "⚠ 3 chunks still failed after retries"
+exit 0
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	if err := Embed(context.Background(), "daybook"); err == nil {
+		t.Fatal("incomplete embed must fail")
+	}
+}
+
+func TestEmbedRequiresCompletionBanner(t *testing.T) {
+	binDir := t.TempDir()
+	fake := filepath.Join(binDir, "qmd")
+	script := `#!/bin/sh
+exit 0
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	if err := Embed(context.Background(), "daybook"); err == nil {
+		t.Fatal("missing banner must fail")
 	}
 }

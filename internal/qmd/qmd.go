@@ -53,6 +53,16 @@ func sanitizeEnv() []string {
 	return env
 }
 
+// indexFlag pins the global QMD index so cwd-local .qmd trees cannot
+// steal search or sync from the fleet collection database.
+var indexFlag = []string{"--index", "index"}
+
+func qmdArgs(args ...string) []string {
+	out := make([]string, 0, len(indexFlag)+len(args))
+	out = append(out, indexFlag...)
+	return append(out, args...)
+}
+
 // Search runs one qmd retrieval with a sanitized environment and returns raw hits.
 // If hybrid query expansion fails, it falls back to deterministic BM25 search.
 func Search(ctx context.Context, query string, collections []string, mode string, limit int) ([]Hit, error) {
@@ -74,7 +84,7 @@ func Search(ctx context.Context, query string, collections []string, mode string
 		tmpPath := tmpFile.Name()
 		defer os.Remove(tmpPath)
 
-		args := []string{cmdName, "--format", "json", "-n", strconv.Itoa(limit)}
+		args := qmdArgs(cmdName, "--format", "json", "-n", strconv.Itoa(limit))
 		for _, c := range collections {
 			if c != "" {
 				args = append(args, "-c", c)
@@ -116,7 +126,7 @@ func Search(ctx context.Context, query string, collections []string, mode string
 
 // Update runs `qmd update <collection>`.
 func Update(ctx context.Context, collection string) error {
-	args := []string{"update"}
+	args := qmdArgs("update")
 	if collection != "" {
 		args = append(args, collection)
 	}
@@ -130,18 +140,29 @@ func Update(ctx context.Context, collection string) error {
 	return nil
 }
 
-// Embed runs `qmd embed -c <collection>`.
+// Embed runs `qmd embed -c <collection>`. Exit 0 is not enough:
+// installed QMD can skip remaining batches or leave failed chunks and
+// still return success. We require a completion banner and reject the
+// known incomplete banners.
 func Embed(ctx context.Context, collection string) error {
-	args := []string{"embed"}
+	args := qmdArgs("embed")
 	if collection != "" {
 		args = append(args, "-c", collection)
 	}
 	cmd := exec.CommandContext(ctx, "qmd", args...)
 	cmd.Env = sanitizeEnv()
-	var stderr strings.Builder
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if out, err := cmd.Output(); err != nil {
-		return fmt.Errorf("qmd embed failed: %s %s: %w", strings.TrimSpace(stderr.String()), strings.TrimSpace(string(out)), err)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("qmd embed failed: %s %s: %w", strings.TrimSpace(stderr.String()), strings.TrimSpace(stdout.String()), err)
+	}
+	out := stdout.String() + "\n" + stderr.String()
+	if strings.Contains(out, "chunks still failed after retries") || strings.Contains(out, "Session expired") {
+		return fmt.Errorf("qmd embed incomplete: %s", strings.TrimSpace(out))
+	}
+	if !strings.Contains(out, "Done!") && !strings.Contains(out, "No non-empty documents to embed") {
+		return fmt.Errorf("qmd embed incomplete: missing completion banner")
 	}
 	return nil
 }
@@ -153,7 +174,7 @@ func CollectionPath(ctx context.Context, name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("qmd collection show: empty collection name")
 	}
-	cmd := exec.CommandContext(ctx, "qmd", "collection", "show", name)
+	cmd := exec.CommandContext(ctx, "qmd", qmdArgs("collection", "show", name)...)
 	cmd.Env = sanitizeEnv()
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
