@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
-# Requires ~/.local/bin/exocortex already installed from this tree
-# (88675d8 or later). This script only installs the user timer.
+# Requires ~/.local/bin/exocortex built from THIS checkout (go install
+# ./cmd/exocortex). Older SHAs including 88675d8 and ad5f242 are rejected.
 
 USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$USER_SYSTEMD_DIR"
