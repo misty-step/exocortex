@@ -159,7 +159,7 @@ func CollectionPath(ctx context.Context, name string) (string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("qmd collection show %s: %s %w", name, strings.TrimSpace(stderr.String()), err)
+		return "", fmt.Errorf("qmd collection show %s: collection must exist and expose a non-empty Path: %s %w", name, strings.TrimSpace(stderr.String()), err)
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
@@ -169,11 +169,11 @@ func CollectionPath(ctx context.Context, name string) (string, error) {
 		}
 		p := strings.TrimSpace(rest)
 		if p == "" {
-			return "", fmt.Errorf("qmd collection show %s: empty Path", name)
+			return "", fmt.Errorf("qmd collection show %s: collection must expose a non-empty Path", name)
 		}
 		return p, nil
 	}
-	return "", fmt.Errorf("qmd collection show %s: Path field missing", name)
+	return "", fmt.Errorf("qmd collection show %s: collection must exist and expose a non-empty Path", name)
 }
 
 // SplitURI decomposes a qmd file URI into its collection and

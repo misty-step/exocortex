@@ -166,11 +166,14 @@ func Sync(ctx context.Context, cs []Cortex, nameFlag string) ([]SyncResult, *Con
 					detail = d
 				}
 			}
-			results = append(results, SyncResult{
-				Cortex: c.Name,
-				Error:  conf.Code,
-				Detail: detail,
-			})
+			sr := SyncResult{Cortex: c.Name, Error: conf.Code, Detail: detail}
+			if res != nil {
+				sr.Updated = res.Updated
+				sr.IndexedCommit = res.IndexedCommit
+				sr.Embedded = res.Embedded
+				sr.DirtyCleared = res.DirtyCleared
+			}
+			results = append(results, sr)
 			if first == nil {
 				first = conf
 			}
@@ -294,29 +297,37 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 		return nil, conflict("state_failed", "sync", c.Name, "failed to write synced state; markers retained", map[string]any{"detail": derr.Error()})
 	}
 	if err := atomicWrite(syncedPath, syncedData); err != nil {
+		writeSyncError(c.Name, newestCommit, "synced", err.Error())
 		return nil, conflict("state_failed", "sync", c.Name, "failed to write synced state; markers retained", map[string]any{"detail": err.Error()})
 	}
-	_ = os.Remove(errorPath)
 
-	// 4. Delete ONLY the snapshotted files (leaving any files created during sync intact!)
 	deletionFailed := false
 	for _, fName := range snapshotFiles {
 		if err := os.Remove(filepath.Join(dDir, fName)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			deletionFailed = true
 		}
 	}
+	if deletionFailed {
+		writeSyncError(c.Name, newestCommit, "cleanup", "failed to delete one or more snapshotted dirty markers")
+		return &SyncResult{
+			Cortex:        c.Name,
+			Updated:       true,
+			IndexedCommit: newestCommit,
+			Embedded:      true,
+			DirtyCleared:  false,
+		}, conflict("state_failed", "sync", c.Name, "index advanced but snapshotted markers were not deleted; inspect state and retry", nil)
+	}
+	_ = os.Remove(errorPath)
 
-	// Check if any arrivals appeared during sync
 	remaining, _ := os.ReadDir(dDir)
-	cleared := !deletionFailed && len(remaining) == 0
-
 	return &SyncResult{
 		Cortex:        c.Name,
 		Updated:       true,
 		IndexedCommit: newestCommit,
 		Embedded:      true,
-		DirtyCleared:  cleared,
+		DirtyCleared:  len(remaining) == 0,
 	}, nil
+
 }
 
 // Status inspects dirty markers, synced.json, and sync_error.json for cortices.

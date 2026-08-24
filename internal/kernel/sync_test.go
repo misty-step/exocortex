@@ -517,3 +517,82 @@ func TestSyncRejectsHumanCheckoutAfterWriterLoss(t *testing.T) {
 		t.Fatalf("want fail-closed root check, got %#v", sConf)
 	}
 }
+
+func TestSyncCleanupFailureRecordsError(t *testing.T) {
+	f := newFixture(t)
+	logFile := filepath.Join(t.TempDir(), "qmd-calls.log")
+	setupSyncMockQMD(t, logFile, "")
+	res, conf := f.put("hosta", "notes/cleanup.md", mkNote("note", "cleanup fail"))
+	if conf != nil {
+		t.Fatal(conf)
+	}
+	alignMockCollection(t, f.cs[0])
+	dDir, err := dirtyMarkerPath("hosta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncHook = func(string) {
+		if err := os.Chmod(dDir, 0o555); err != nil {
+			t.Errorf("chmod dirty dir: %v", err)
+		}
+	}
+	defer func() {
+		syncHook = nil
+		_ = os.Chmod(dDir, 0o755)
+	}()
+
+	syncRes, sConf := Sync(context.Background(), f.cs, "hosta")
+	if sConf == nil || sConf.Code != "state_failed" {
+		t.Fatalf("want state_failed on cleanup, got %#v / %+v", sConf, syncRes)
+	}
+	if len(syncRes) != 1 || !syncRes[0].Updated || !syncRes[0].Embedded || syncRes[0].DirtyCleared || syncRes[0].IndexedCommit != res.Commit {
+		t.Fatalf("partial result = %+v, want index advanced for %s", syncRes, res.Commit)
+	}
+	st, _ := Status(f.cs, "hosta")
+	if !st[0].Dirty || st[0].DirtyCommit != res.Commit {
+		t.Fatalf("markers must remain: %+v", st[0])
+	}
+	if st[0].SyncedCommit != res.Commit {
+		t.Fatalf("synced commit = %s, want %s", st[0].SyncedCommit, res.Commit)
+	}
+	if !strings.Contains(st[0].LastSyncError, "snapshotted dirty markers") {
+		t.Fatalf("last sync error = %q", st[0].LastSyncError)
+	}
+}
+
+func TestDirtyMarkerFailedWarningOnUnwritableState(t *testing.T) {
+	f := newFixture(t)
+	cfg, err := ConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateParent := filepath.Join(cfg, "state")
+	if err := os.MkdirAll(stateParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(stateParent, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(stateParent, 0o755)
+
+	res, conf := f.put("hosta", "notes/nowrite.md", mkNote("note", "marker fail"))
+	if conf != nil {
+		t.Fatalf("put must succeed: %v", conf)
+	}
+	found := false
+	for _, w := range res.Warnings {
+		if w.Rule == "dirty_marker_failed" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want dirty_marker_failed warning, got %+v", res.Warnings)
+	}
+	st, sConf := Status(f.cs, "hosta")
+	if sConf != nil {
+		t.Fatal(sConf)
+	}
+	if st[0].Dirty {
+		t.Fatal("status must stay clean when marker write failed")
+	}
+}
