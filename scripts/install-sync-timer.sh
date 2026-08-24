@@ -1,5 +1,7 @@
 #!/bin/sh
 set -eu
+# Requires ~/.local/bin/exocortex already installed from this tree
+# (88675d8 or later). This script only installs the user timer.
 
 USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$USER_SYSTEMD_DIR"
