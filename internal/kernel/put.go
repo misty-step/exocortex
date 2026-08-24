@@ -228,52 +228,63 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 			beforePushHook = nil
 			h()
 		}
-		if !hasUpstream(dir) {
-			// Remoteless target: commit locally; nothing to push and no
-			// cross-host CAS. The next upstream-aware put refreshes.
-			return res, nil
-		}
-		if _, perr := git(dir, "push"); perr != nil {
-			ge := perr.(*GitError)
-			unwindErrs := unwindAndConverge(dir, base, rel)
-			actual := Revision(mustRead(abs))
-			var conf *Conflict
-			if op == "create" {
-				// A create that loses a push race means the winner's
-				// note now exists at this path (operator decision:
-				// existing path -> exists).
-				conf = conflict("exists", op, rel,
-					"a peer created this note first; after the automatic restore-to-remote, re-read with get and update it with --expects",
-					map[string]any{
-						"actual":      actual,
-						"push_stderr": strings.TrimSpace(ge.Stderr),
-						"unwind":      unwindErrs,
-						"base":        base,
-					})
-			} else {
-				conf = conflict("revision_conflict", op, rel,
-					"remote moved; re-read with get and retry",
-					map[string]any{
-						"expected":    in.Expects,
-						"actual":      actual,
-						"push_stderr": strings.TrimSpace(ge.Stderr),
-						"unwind":      unwindErrs,
-						"base":        base,
-					})
+		if hasUpstream(dir) {
+			if _, perr := git(dir, "push"); perr != nil {
+				ge := perr.(*GitError)
+				unwindErrs := unwindAndConverge(dir, base, rel)
+				actual := Revision(mustRead(abs))
+				var conf *Conflict
+				if op == "create" {
+					// A create that loses a push race means the winner's
+					// note now exists at this path (operator decision:
+					// existing path -> exists).
+					conf = conflict("exists", op, rel,
+						"a peer created this note first; after the automatic restore-to-remote, re-read with get and update it with --expects",
+						map[string]any{
+							"actual":      actual,
+							"push_stderr": strings.TrimSpace(ge.Stderr),
+							"unwind":      unwindErrs,
+							"base":        base,
+						})
+				} else {
+					conf = conflict("revision_conflict", op, rel,
+						"remote moved; re-read with get and retry",
+						map[string]any{
+							"expected":    in.Expects,
+							"actual":      actual,
+							"push_stderr": strings.TrimSpace(ge.Stderr),
+							"unwind":      unwindErrs,
+							"base":        base,
+						})
+				}
+				preservePayload(in, conf)
+				return nil, conf
 			}
-			preservePayload(in, conf)
-			return nil, conf
-		}
-		res.Pushed = true
-		if merr := markDirty(c.Name, res.Commit); merr != nil {
-			res.Warnings = append(res.Warnings, fm.Finding{
-				Level:   "warning",
-				Rule:    "dirty_marker_failed",
-				Message: fmt.Sprintf("failed to record dirty sync marker: %v", merr),
-			})
+			res.Pushed = true
 		}
 	}
+	recordDirty(res, c.Name)
 	return res, nil
+}
+
+// recordDirty writes a sync marker after a successful durable write.
+// Identity is the git commit when the VCS tail produced one, otherwise
+// the content revision. Persistence failure is a warning, not a put failure.
+func recordDirty(res *PutResult, name string) {
+	id := res.Commit
+	if id == "" {
+		id = res.Revision
+	}
+	if id == "" {
+		return
+	}
+	if merr := markDirty(name, id); merr != nil {
+		res.Warnings = append(res.Warnings, fm.Finding{
+			Level:   "warning",
+			Rule:    "dirty_marker_failed",
+			Message: fmt.Sprintf("failed to record dirty sync marker: %v", merr),
+		})
+	}
 }
 
 // hasUpstream reports whether the branch tracks a remote — remoteless

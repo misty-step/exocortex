@@ -199,3 +199,175 @@ func TestMalformedDirtyMarkerFailsStateFailedAndRetainsMarkers(t *testing.T) {
 		t.Fatal("malformed marker file was deleted on error")
 	}
 }
+
+func TestDirtyMarkerWrittenOnNoneVCSPut(t *testing.T) {
+	testConfigEnv(t)
+	root := t.TempDir()
+	c, err := Register("nonebox", root, "none", "daybook", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := []Cortex{*c}
+	res, conf := Put(context.Background(), cs, PutInput{
+		CortexName: "nonebox",
+		Path:       "notes/none.md",
+		Payload:    []byte(mkNote("note", "none vcs marker")),
+		Agent:      "test",
+		Via:        "test",
+	})
+	if conf != nil {
+		t.Fatalf("put failed: %v", conf)
+	}
+	if res.Commit != "" || res.Pushed {
+		t.Fatalf("none vcs should not commit: %+v", res)
+	}
+	if res.Revision == "" {
+		t.Fatal("expected content revision")
+	}
+	st, sConf := Status(cs, "nonebox")
+	if sConf != nil || len(st) != 1 {
+		t.Fatalf("status failed: %v", sConf)
+	}
+	if !st[0].Dirty || st[0].DirtyCommit != res.Revision {
+		t.Fatalf("status = %+v, want dirty revision %s", st[0], res.Revision)
+	}
+}
+
+func TestDirtyMarkerWrittenOnRemotelessDaybookPut(t *testing.T) {
+	f := newFixture(t)
+	if _, conf := f.put("hosta", "notes/seed-writer.md", mkNote("note", "provision writer")); conf != nil {
+		t.Fatal(conf)
+	}
+	w := writerDir(&f.cs[0])
+	if w == "" {
+		t.Fatal("writer clone missing after first put")
+	}
+	g(t, w, "branch", "--unset-upstream")
+
+	res, conf := f.put("hosta", "notes/local-only.md", mkNote("note", "remoteless commit"))
+	if conf != nil {
+		t.Fatal(conf)
+	}
+	if res.Pushed {
+		t.Fatal("expected remoteless put to skip push")
+	}
+	if res.Commit == "" {
+		t.Fatal("expected local commit identity")
+	}
+	st, sConf := Status(f.cs, "hosta")
+	if sConf != nil {
+		t.Fatal(sConf)
+	}
+	if !st[0].Dirty || st[0].DirtyCommit != res.Commit {
+		t.Fatalf("status = %+v, want dirty commit %s", st[0], res.Commit)
+	}
+}
+
+func TestNoopPutDoesNotMarkDirty(t *testing.T) {
+	f := newFixture(t)
+	logFile := filepath.Join(t.TempDir(), "qmd-calls.log")
+	setupSyncMockQMD(t, logFile, "")
+
+	payload := mkNote("note", "noop marker")
+	res, conf := f.put("hosta", "notes/noop.md", payload)
+	if conf != nil {
+		t.Fatal(conf)
+	}
+	if _, sConf := Sync(context.Background(), f.cs, "hosta"); sConf != nil {
+		t.Fatal(sConf)
+	}
+	st, _ := Status(f.cs, "hosta")
+	if st[0].Dirty {
+		t.Fatal("expected clean after sync")
+	}
+
+	again, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hosta",
+		Path:       "notes/noop.md",
+		Payload:    []byte(payload),
+		Expects:    res.Revision,
+		Agent:      "test",
+		Via:        "test",
+	})
+	if conf != nil || !again.Noop {
+		t.Fatalf("want noop, got %+v / %v", again, conf)
+	}
+	st, _ = Status(f.cs, "hosta")
+	if st[0].Dirty {
+		t.Fatal("noop put must not create a dirty marker")
+	}
+}
+
+func TestSyncContinuesAfterSiblingFailure(t *testing.T) {
+	f := newFixture(t)
+	logFile := filepath.Join(t.TempDir(), "qmd-calls.log")
+	setupSyncMockQMD(t, logFile, "")
+
+	if _, conf := f.put("hostb", "notes/ok.md", mkNote("note", "sibling survives")); conf != nil {
+		t.Fatal(conf)
+	}
+	dDir, err := dirtyMarkerDir("hosta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(dDir, "0001-broken.json")
+	if err := os.WriteFile(broken, []byte("{invalid"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	syncRes, sConf := Sync(context.Background(), f.cs, "")
+	if sConf == nil || sConf.Code != "state_failed" {
+		t.Fatalf("want state_failed, got %#v", sConf)
+	}
+	var hosta, hostb *SyncResult
+	for i := range syncRes {
+		switch syncRes[i].Cortex {
+		case "hosta":
+			hosta = &syncRes[i]
+		case "hostb":
+			hostb = &syncRes[i]
+		}
+	}
+	if hosta == nil || hosta.Error != "state_failed" {
+		t.Fatalf("hosta result = %+v", hosta)
+	}
+	if hostb == nil || !hostb.Updated || !hostb.Embedded || !hostb.DirtyCleared {
+		t.Fatalf("hostb should still sync, got %+v", hostb)
+	}
+}
+
+func TestStatusDoesNotCreateStateOrWriter(t *testing.T) {
+	f := newFixture(t)
+	st, conf := Status(f.cs, "hosta")
+	if conf != nil || len(st) != 1 {
+		t.Fatalf("status failed: %v / %v", conf, st)
+	}
+	if st[0].Dirty {
+		t.Fatal("untouched cortex must not report dirty")
+	}
+	cfg, err := ConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg, "state", "hosta")); !os.IsNotExist(err) {
+		t.Fatalf("status created state dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg, "writers", "hosta")); !os.IsNotExist(err) {
+		t.Fatalf("status created writer clone: %v", err)
+	}
+}
+
+func TestUnreadableDirtyPathFailsStateFailed(t *testing.T) {
+	f := newFixture(t)
+	sDir, err := cortexStateDir("hosta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sDir, "dirty"), []byte("not-a-directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, sConf := Sync(context.Background(), f.cs, "hosta")
+	if sConf == nil || sConf.Code != "state_failed" {
+		t.Fatalf("want state_failed, got %#v", sConf)
+	}
+}

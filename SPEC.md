@@ -85,12 +85,19 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     daybook-cortex writes fall back to a persistent per-cortex
     CLEAN-WRITER clone under
     `<config>/exocortex/writers/<name>` (created on demand from the
-    checkout's origin, ff-synced): the write lands there and pushes,
-    a best-effort post-push ff keeps the registered checkout's
-    qmd-indexed tree current (`shared_sync_failed` warning on
-    failure), reads prefer the writer once it exists, and staged /
+    checkout's origin, ff-synced): the write lands there and pushes.
+    The writer tree is the authoritative indexed root; the QMD
+    collection named for the cortex must point at that tree (or, for
+    `caller`/`none`, at the registered path). `sync` owns index and
+    embed freshness. Reads prefer the writer once it exists, and staged /
     destination / foreign-staged state on the registered checkout
     remains terminal.
+  - `sync [--cortex <name>]` — snapshot dirty markers, run
+    `qmd update` then `qmd embed -c`, persist `synced.json`, and
+    delete only the snapshotted markers. Missing `--cortex` walks every
+    registered cortex and continues after a per-cortex failure.
+  - `status [--cortex <name>]` — report dirty markers, last synced
+    identity, and last sync error without creating state or clones.
   - `log <path>` — git lineage.
 - **MCP stdio server** — same operations; `put` is
   `{path, content, expectedRevision?}` — content supplied in the call.
@@ -104,6 +111,11 @@ Write path mechanics:
   byte-identical to stored content.
 - Provenance stamping: agent identity, timestamp, source — non-noop writes
   only.
+- Dirty marker: every successful non-noop put records an immutable marker
+  under `<config>/exocortex/state/<cortex>/dirty/`. Identity is the git
+  commit when the VCS tail produced one, otherwise the content revision.
+  Marker persistence failure is a `dirty_marker_failed` warning, not a
+  put failure. No-op puts do not mark.
 - Payload separation: `<path>` is only ever the destination; the payload
   arrives via `--from`/`content`. Concurrency stays structural for EVERY
   cortex: the CAS lock lives in the generic put pipeline, not in any VCS
@@ -338,8 +350,9 @@ skill is installed directly into `omp-config`.
   and pi raw sessions only; Hermes/Amos live in SQLite outside QMD, and
   Codex/opencode/goose session storage is unverified. Inventory every fleet
   session source before any completeness claim or feed work starts.
-- QMD embedding backfill and freshness ownership (35% of daybook docs lack
-  embeddings as of 2026-08-21).
+- Historical embedding gap (35% of daybook docs lacked embeddings as of
+  2026-08-21) is closed by `sync` + the dirty-marker write path, not by
+  a separate backfill owner.
 
 ## References
 
