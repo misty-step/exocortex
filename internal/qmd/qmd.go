@@ -46,9 +46,11 @@ func subcommandFor(mode string) (string, error) {
 func sanitizeEnv() []string {
 	var env []string
 	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "CI=") && !strings.HasPrefix(e, "CI_") {
-			env = append(env, e)
+		if strings.HasPrefix(e, "CI=") || strings.HasPrefix(e, "CI_") ||
+			strings.HasPrefix(e, "INDEX_PATH=") || strings.HasPrefix(e, "QMD_CONFIG_DIR=") {
+			continue
 		}
+		env = append(env, e)
 	}
 	return env
 }
