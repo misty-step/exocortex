@@ -168,15 +168,35 @@ func TestSyncAndStatusCLI(t *testing.T) {
 		t.Fatalf("register failed: %v", body)
 	}
 
-	// Status on clean cortex returns array of status results
-	code, body, _ = runMain(t, "", "status", "--cortex", "smoke")
-	if code != 0 {
-		t.Fatalf("status failed: exit=%d body=%v", code, body)
+	code, body, _ = runMain(t, "", "sync", "daybok")
+	if code != 2 || body["error"] != "invalid_input" {
+		t.Fatalf("sync positional: exit=%d body=%v", code, body)
+	}
+	code, body, _ = runMain(t, "", "status", "daybok")
+	if code != 2 || body["error"] != "invalid_input" {
+		t.Fatalf("status positional: exit=%d body=%v", code, body)
 	}
 
-	// Sync on clean cortex succeeds with updated=false
-	code, body, _ = runMain(t, "", "sync", "--cortex", "smoke")
+	note := "---\ntype: note\ncreated: 2026-08-21T00:00:00Z\n---\n\ncli dirty marker\n"
+	code, body, _ = runMain(t, note, "put", "notes/x.md", "--from", "-", "--cortex", "smoke")
 	if code != 0 {
-		t.Fatalf("sync failed: exit=%d body=%v", code, body)
+		t.Fatalf("put failed: exit=%d body=%v", code, body)
 	}
+	rev, _ := body["revision"].(string)
+	if rev == "" {
+		t.Fatal("put missing revision")
+	}
+
+	code, _, raw := runMain(t, "", "status", "--cortex", "smoke")
+	if code != 0 {
+		t.Fatalf("status failed: exit=%d %s", code, raw)
+	}
+	var st []map[string]any
+	if err := json.Unmarshal([]byte(raw), &st); err != nil || len(st) != 1 {
+		t.Fatalf("status json: %v %s", err, raw)
+	}
+	if st[0]["dirty"] != true || st[0]["dirty_commit"] != rev {
+		t.Fatalf("status after none-vcs put = %v, want dirty %s", st[0], rev)
+	}
+
 }

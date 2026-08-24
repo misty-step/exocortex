@@ -677,15 +677,25 @@ func cmdSync(args []string) (any, *kernel.Conflict, error) {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
-	flags, _ := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
+	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("sync", err.Error(), "run `exocortex help` for sync usage"), nil
+	}
+	if len(pos) != 0 {
+		return nil, inputErr("sync", "sync takes no positional arguments",
+			"exocortex sync [--cortex <name>]"), nil
 	}
 	cs, err := loadRegistry()
 	if err != nil {
 		return nil, nil, err
 	}
 	res, conf := kernel.Sync(context.Background(), cs, *cortex)
+	if conf != nil && res != nil {
+		if conf.Detail == nil {
+			conf.Detail = map[string]any{}
+		}
+		conf.Detail["results"] = res
+	}
 	return res, conf, nil
 }
 
@@ -693,9 +703,13 @@ func cmdStatus(args []string) (any, *kernel.Conflict, error) {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
-	flags, _ := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
+	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("status", err.Error(), "run `exocortex help` for status usage"), nil
+	}
+	if len(pos) != 0 {
+		return nil, inputErr("status", "status takes no positional arguments",
+			"exocortex status [--cortex <name>]"), nil
 	}
 	cs, err := loadRegistry()
 	if err != nil {

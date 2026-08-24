@@ -23,13 +23,14 @@ type SyncMarker struct {
 	At     time.Time `json:"at"`
 }
 
-// SyncResult is the result of an `exocortex sync` invocation.
 type SyncResult struct {
 	Cortex        string `json:"cortex"`
 	Updated       bool   `json:"updated"`
 	IndexedCommit string `json:"indexed_commit,omitempty"`
 	Embedded      bool   `json:"embedded"`
 	DirtyCleared  bool   `json:"dirty_cleared"`
+	Error         string `json:"error,omitempty"`
+	Detail        string `json:"detail,omitempty"`
 }
 
 // StatusResult describes the current synchronization state and lag for one cortex.
@@ -46,12 +47,27 @@ type StatusResult struct {
 	LastErrorAt   string `json:"last_error_at,omitempty"`
 }
 
-func cortexStateDir(cortexName string) (string, error) {
+func cortexStatePath(cortexName string) (string, error) {
 	cfg, err := ConfigDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(cfg, "state", cortexName)
+	return filepath.Join(cfg, "state", cortexName), nil
+}
+
+func dirtyMarkerPath(cortexName string) (string, error) {
+	sDir, err := cortexStatePath(cortexName)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(sDir, "dirty"), nil
+}
+
+func cortexStateDir(cortexName string) (string, error) {
+	dir, err := cortexStatePath(cortexName)
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -59,18 +75,19 @@ func cortexStateDir(cortexName string) (string, error) {
 }
 
 func dirtyMarkerDir(cortexName string) (string, error) {
-	sDir, err := cortexStateDir(cortexName)
+	dir, err := dirtyMarkerPath(cortexName)
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(sDir, "dirty")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	return dir, nil
 }
 
-// markDirty atomically writes an immutable marker file for a cortex after a successful push.
+// markDirty atomically writes an immutable marker after a durable write.
+// commit is the sync identity: a git SHA when one exists, otherwise the
+// content revision. Empty identities are rejected by syncOne.
 func markDirty(cortexName, commit string) error {
 	dir, err := dirtyMarkerDir(cortexName)
 	if err != nil {
@@ -128,14 +145,29 @@ func Sync(ctx context.Context, cs []Cortex, nameFlag string) ([]SyncResult, *Con
 	}
 
 	var results []SyncResult
+	var first *Conflict
 	for _, c := range targets {
 		res, conf := syncOne(ctx, c)
 		if conf != nil {
-			return nil, conf
+			detail := ""
+			if conf.Detail != nil {
+				if d, ok := conf.Detail["detail"].(string); ok {
+					detail = d
+				}
+			}
+			results = append(results, SyncResult{
+				Cortex: c.Name,
+				Error:  conf.Code,
+				Detail: detail,
+			})
+			if first == nil {
+				first = conf
+			}
+			continue
 		}
 		results = append(results, *res)
 	}
-	return results, nil
+	return results, first
 }
 
 func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
@@ -145,21 +177,24 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 	}
 	defer lock.release()
 
-	dDir, err := dirtyMarkerDir(c.Name)
+	dDir, err := dirtyMarkerPath(c.Name)
 	if err != nil {
 		return nil, conflict("state_failed", "sync", c.Name, "fix state directory access and retry", map[string]any{"detail": err.Error()})
 	}
-	sDir, _ := cortexStateDir(c.Name)
+	sDir, _ := cortexStatePath(c.Name)
 	errorPath := filepath.Join(sDir, "sync_error.json")
 	syncedPath := filepath.Join(sDir, "synced.json")
 
 	// Snapshot all pending dirty markers at the start of sync
 	entries, rerr := os.ReadDir(dDir)
-	if errors.Is(rerr, fs.ErrNotExist) || len(entries) == 0 {
+	if errors.Is(rerr, fs.ErrNotExist) {
 		return &SyncResult{Cortex: c.Name, Updated: false, Embedded: false}, nil
 	}
 	if rerr != nil {
 		return nil, conflict("state_failed", "sync", c.Name, "failed to read dirty markers", map[string]any{"detail": rerr.Error()})
+	}
+	if len(entries) == 0 {
+		return &SyncResult{Cortex: c.Name, Updated: false, Embedded: false}, nil
 	}
 
 	var snapshotFiles []string
@@ -193,6 +228,9 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 	}
 
 	recordError := func(stage, detail string) {
+		if _, derr := cortexStateDir(c.Name); derr != nil {
+			return
+		}
 		errData, _ := json.MarshalIndent(map[string]any{
 			"cortex": c.Name,
 			"commit": newestCommit,
@@ -219,7 +257,6 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 		syncHook(c.Name)
 	}
 
-	// 3. Update synced.json with newest commit in snapshot
 	syncedMarker := SyncMarker{
 		Cortex: c.Name,
 		Commit: newestCommit,
@@ -228,6 +265,9 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 	syncedData, err := json.MarshalIndent(syncedMarker, "", "  ")
 	if err != nil {
 		return nil, conflict("state_failed", "sync", c.Name, "failed to marshal sync state", map[string]any{"detail": err.Error()})
+	}
+	if _, derr := cortexStateDir(c.Name); derr != nil {
+		return nil, conflict("state_failed", "sync", c.Name, "failed to write synced state; markers retained", map[string]any{"detail": derr.Error()})
 	}
 	if err := atomicWrite(syncedPath, syncedData); err != nil {
 		return nil, conflict("state_failed", "sync", c.Name, "failed to write synced state; markers retained", map[string]any{"detail": err.Error()})
@@ -271,8 +311,12 @@ func Status(cs []Cortex, nameFlag string) ([]StatusResult, *Conflict) {
 	var results []StatusResult
 	for _, c := range targets {
 		st := StatusResult{Cortex: c.Name}
-		sDir, _ := cortexStateDir(c.Name)
-		dDir, _ := dirtyMarkerDir(c.Name)
+		sDir, err := cortexStatePath(c.Name)
+		if err != nil {
+			results = append(results, st)
+			continue
+		}
+		dDir := filepath.Join(sDir, "dirty")
 
 		if entries, err := os.ReadDir(dDir); err == nil && len(entries) > 0 {
 			var validMarkers []string
@@ -318,10 +362,12 @@ func Status(cs []Cortex, nameFlag string) ([]StatusResult, *Conflict) {
 			}
 		}
 
-		if root, err := effectiveRoot(&c); err == nil {
-			if head, gerr := git(root, "rev-parse", "HEAD"); gerr == nil {
-				st.HeadCommit = strings.TrimSpace(head)
-			}
+		root := c.Path
+		if w := writerDir(&c); w != "" {
+			root = w
+		}
+		if head, gerr := git(root, "rev-parse", "HEAD"); gerr == nil {
+			st.HeadCommit = strings.TrimSpace(head)
 		}
 
 		results = append(results, st)
