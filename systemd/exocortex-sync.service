@@ -1,0 +1,9 @@
+[Unit]
+Description=Exocortex search index and vector embedding sync worker
+Documentation=https://github.com/misty-step/exocortex
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/exocortex sync
+StandardOutput=journal
+StandardError=journal
