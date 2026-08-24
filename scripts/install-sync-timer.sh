@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
-# Requires ~/.local/bin/exocortex built from THIS checkout (go install
-# ./cmd/exocortex). Older SHAs including 88675d8 and ad5f242 are rejected.
+# Policy: run this only after `go install` from this checkout. The script
+# does not verify binary identity; an old ~/.local/bin/exocortex still runs.
 
 USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$USER_SYSTEMD_DIR"
