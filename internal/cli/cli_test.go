@@ -16,7 +16,10 @@ func runMain(t *testing.T, stdin string, args ...string) (int, map[string]any, s
 	var body map[string]any
 	raw := out.String()
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
-		t.Fatalf("stdout is not JSON (exit %d):\n%s\nstderr: %s", code, raw, errb.String())
+		var arr []any
+		if aerr := json.Unmarshal([]byte(raw), &arr); aerr != nil {
+			t.Fatalf("stdout is not JSON (exit %d):\n%s\nstderr: %s", code, raw, errb.String())
+		}
 	}
 	return code, body, raw
 }
@@ -155,5 +158,25 @@ func TestSearchAndBriefCLI(t *testing.T) {
 	code, body, _ = runMain(t, "", "search", "topic", "--invalid-flag")
 	if code != 2 || body["error"] != "invalid_input" {
 		t.Fatalf("search invalid flag: exit=%d body=%v", code, body)
+	}
+}
+
+func TestSyncAndStatusCLI(t *testing.T) {
+	repo := setupCortex(t)
+	code, body, _ := runMain(t, "", "register", "smoke", repo, "--json")
+	if code != 0 {
+		t.Fatalf("register failed: %v", body)
+	}
+
+	// Status on clean cortex returns array of status results
+	code, body, _ = runMain(t, "", "status", "--cortex", "smoke")
+	if code != 0 {
+		t.Fatalf("status failed: exit=%d body=%v", code, body)
+	}
+
+	// Sync on clean cortex succeeds with updated=false
+	code, body, _ = runMain(t, "", "sync", "--cortex", "smoke")
+	if code != 0 {
+		t.Fatalf("sync failed: exit=%d body=%v", code, body)
 	}
 }

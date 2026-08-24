@@ -31,6 +31,7 @@ var subcommand = map[string]string{
 	"bm25":   "search",
 	"vector": "vsearch",
 }
+
 func subcommandFor(mode string) (string, error) {
 	if mode == "" {
 		mode = "bm25"
@@ -106,12 +107,43 @@ func Search(ctx context.Context, query string, collections []string, mode string
 		}
 		return hits, nil
 	}
-
 	hits, err := run(sub)
 	if err != nil && mode == "hybrid" {
 		return run("search")
 	}
 	return hits, err
+}
+
+// Update runs `qmd update <collection>`.
+func Update(ctx context.Context, collection string) error {
+	args := []string{"update"}
+	if collection != "" {
+		args = append(args, collection)
+	}
+	cmd := exec.CommandContext(ctx, "qmd", args...)
+	cmd.Env = sanitizeEnv()
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if out, err := cmd.Output(); err != nil {
+		return fmt.Errorf("qmd update failed: %s %s: %w", strings.TrimSpace(stderr.String()), strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// Embed runs `qmd embed -c <collection>`.
+func Embed(ctx context.Context, collection string) error {
+	args := []string{"embed"}
+	if collection != "" {
+		args = append(args, "-c", collection)
+	}
+	cmd := exec.CommandContext(ctx, "qmd", args...)
+	cmd.Env = sanitizeEnv()
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if out, err := cmd.Output(); err != nil {
+		return fmt.Errorf("qmd embed failed: %s %s: %w", strings.TrimSpace(stderr.String()), strings.TrimSpace(string(out)), err)
+	}
+	return nil
 }
 
 // SplitURI decomposes a qmd file URI into its collection and

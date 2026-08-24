@@ -265,7 +265,7 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 			return nil, conf
 		}
 		res.Pushed = true
-
+		_ = markDirty(c.Name, res.Commit)
 	}
 	return res, nil
 }
