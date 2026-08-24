@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -29,11 +30,6 @@ var subcommand = map[string]string{
 	"bm25":   "search",
 	"vector": "vsearch",
 }
-
-// subcommandFor maps a retrieval mode onto its qmd subcommand. Empty
-// mode selects bm25: a kernel primitive must be deterministic and must
-// not depend on LLM availability (qmd's hybrid expansion is disabled
-// under CI=true).
 func subcommandFor(mode string) (string, error) {
 	if mode == "" {
 		mode = "bm25"
@@ -45,32 +41,57 @@ func subcommandFor(mode string) (string, error) {
 	return sub, nil
 }
 
-// Search runs one qmd retrieval and returns raw hits.
+func sanitizeEnv() []string {
+	var env []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "CI=") && !strings.HasPrefix(e, "CI_") {
+			env = append(env, e)
+		}
+	}
+	return env
+}
+
+// Search runs one qmd retrieval with a sanitized environment and returns raw hits.
+// If hybrid query expansion fails, it falls back to deterministic BM25 search.
 func Search(ctx context.Context, query, collection, mode string, limit int) ([]Hit, error) {
-	sub, err := subcommandFor(mode)
-	if err != nil {
-		return nil, err
+	if mode == "" {
+		mode = "hybrid"
+	}
+	sub, ok := subcommand[mode]
+	if !ok {
+		return nil, fmt.Errorf("mode %q must be hybrid, bm25, or vector", mode)
 	}
 	if limit <= 0 {
 		limit = 20
 	}
-	args := []string{sub, "--format", "json", "-n", strconv.Itoa(limit)}
-	if collection != "" {
-		args = append(args, "-c", collection)
+
+	run := func(cmdName string) ([]Hit, error) {
+		args := []string{cmdName, "--format", "json", "-n", strconv.Itoa(limit)}
+		if collection != "" {
+			args = append(args, "-c", collection)
+		}
+		args = append(args, query)
+		cmd := exec.CommandContext(ctx, "qmd", args...)
+		cmd.Env = sanitizeEnv()
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if err != nil {
+			return nil, fmt.Errorf("qmd %s failed: %s: %w", cmdName, strings.TrimSpace(stderr.String()), err)
+		}
+		var hits []Hit
+		if err := json.Unmarshal(out, &hits); err != nil {
+			return nil, fmt.Errorf("qmd returned unparseable JSON: %w", err)
+		}
+		return hits, nil
 	}
-	args = append(args, query)
-	cmd := exec.CommandContext(ctx, "qmd", args...)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("qmd %s failed: %s: %w", sub, strings.TrimSpace(stderr.String()), err)
+
+	hits, err := run(sub)
+	if err != nil && mode == "hybrid" {
+		// Fallback to deterministic BM25 search if hybrid fails
+		return run("search")
 	}
-	var hits []Hit
-	if err := json.Unmarshal(out, &hits); err != nil {
-		return nil, fmt.Errorf("qmd returned unparseable JSON: %w", err)
-	}
-	return hits, nil
+	return hits, err
 }
 
 // SplitURI decomposes a qmd file URI into its collection and

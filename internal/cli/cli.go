@@ -36,6 +36,8 @@ func Main(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		payload, conf, err = cmdGet(rest)
 	case "search":
 		payload, conf, err = cmdSearch(rest)
+	case "brief":
+		payload, conf, err = cmdBrief(rest)
 	case "log":
 		payload, conf, err = cmdLog(rest)
 	case "note":
@@ -106,12 +108,14 @@ Usage:
   exocortex register <name> <path> [--vcs daybook|caller|none] [--profile daybook|strict]
   exocortex put <path> --from <file|-> [--expects <sha>] [--cortex <name>] [--agent <id>]
   exocortex get <path> [--cortex <name>]
-  exocortex search "<query>" [--cortex <name>] [--limit N] [--mode bm25|hybrid|vector]
-  exocortex log <path> [--cortex <name>] [--limit N]
+  exocortex search "<query>" [--cortex <name>] [--mode hybrid|bm25|vector] [--type <kind>] [--limit <n>]
+  exocortex brief "<topic>" [--cortex <name>] [--limit <n>]
+  exocortex note "<thought>" [--cortex <name>] [--agent <id>]
+  exocortex log <path> [--cortex <name>] [--limit <n>]
   exocortex lint [<path>] [--cortex <name>]
   exocortex mcp
 
-All output is JSON. Conflicts and errors exit nonzero with a JSON body
+Every command returns a JSON document on stdout. Failures speak JSON (CR-04)
 naming the error, operation, path, and recovery hint.
 `)
 }
@@ -293,8 +297,9 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
 	limit := fs.Int("limit", 20, "max hits")
-	mode := fs.String("mode", "bm25", "retrieval mode: bm25 (deterministic default) | hybrid | vector")
-	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "limit": true, "mode": true, "agent": true})
+	mode := fs.String("mode", "hybrid", "retrieval mode: hybrid (default) | bm25 | vector")
+	typeFilter := fs.String("type", "", "filter by note frontmatter type (e.g. decision, note, memo, scratch)")
+	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "limit": true, "mode": true, "type": true, "agent": true})
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("search", err.Error(), "run `exocortex help` for search usage"), nil
 	}
@@ -328,7 +333,100 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 		}
 		out = append(out, entry)
 	}
+	if *typeFilter != "" {
+		cs, _ := loadRegistry()
+		filtered := make([]map[string]any, 0)
+		for _, entry := range out {
+			cName, _ := entry["cortex"].(string)
+			rPath, _ := entry["path"].(string)
+			if cName != "" && rPath != "" {
+				if getRes, getConf := kernel.Get(cs, cName, rPath); getConf == nil && getRes != nil {
+					if t, ok := getRes.Frontmatter["type"].(string); ok && strings.EqualFold(t, *typeFilter) {
+						filtered = append(filtered, entry)
+					}
+				}
+			}
+		}
+		out = filtered
+	}
 	return out, nil, nil
+}
+
+func cmdBrief(args []string) (any, *kernel.Conflict, error) {
+	fs := flag.NewFlagSet("brief", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	cortex := commonFlags(fs)
+	limit := fs.Int("limit", 5, "max notes to summarize")
+	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "limit": true, "agent": true})
+	if err := fs.Parse(flags); err != nil {
+		return nil, inputErr("brief", err.Error(), "run `exocortex help` for brief usage"), nil
+	}
+	if len(pos) != 1 {
+		return nil, inputErr("brief", `brief requires one "<topic>"`, `exocortex brief "<topic>"`), nil
+	}
+	cs, err := loadRegistry()
+	if err != nil {
+		return nil, nil, err
+	}
+	hits, err := qmd.Search(context.Background(), pos[0], *cortex, "hybrid", 20)
+	if err != nil {
+		hits, err = qmd.Search(context.Background(), pos[0], *cortex, "bm25", 20)
+	}
+	if err != nil {
+		return nil, &kernel.Conflict{
+			Code:      "search_unavailable",
+			Operation: "brief",
+			Path:      pos[0],
+			Hint:      "check that qmd is installed and the cortex has an indexed qmd collection",
+			Detail:    map[string]any{"detail": err.Error()},
+		}, nil
+	}
+	var notes []map[string]any
+	seen := map[string]bool{}
+	for _, h := range hits {
+		cName, rel, ok := qmd.SplitURI(h.File)
+		if !ok || seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		res, conf := kernel.Get(cs, cName, rel)
+		if conf != nil || res == nil {
+			continue
+		}
+		if strings.HasPrefix(rel, "meta/agents-board/memo/") && len(notes) > 0 {
+			continue
+		}
+		desc := ""
+		if d, ok := res.Frontmatter["description"].(string); ok {
+			desc = d
+		}
+		status := ""
+		if s, ok := res.Frontmatter["status"].(string); ok {
+			status = s
+		}
+		var tags []any
+		if t, ok := res.Frontmatter["tags"].([]any); ok {
+			tags = t
+		}
+		notes = append(notes, map[string]any{
+			"cortex":      res.Cortex,
+			"path":        res.Path,
+			"title":       h.Title,
+			"description": desc,
+			"status":      status,
+			"tags":        tags,
+			"snippet":     h.Snippet,
+			"revision":    res.Revision,
+		})
+		if len(notes) >= *limit {
+			break
+		}
+	}
+	return map[string]any{
+		"topic": pos[0],
+		"notes": notes,
+		"count": len(notes),
+	}, nil, nil
 }
 func cmdLog(args []string) (any, *kernel.Conflict, error) {
 	fs := flag.NewFlagSet("log", flag.ContinueOnError)

@@ -1,9 +1,9 @@
 # AGENTS.md — Exocortex kernel
 
 One binary (`exocortex`) giving every Misty Step agent a uniform
-read/write/search interface over registered knowledge corpora. Spec-seeded
-2026-08-21; nothing is implemented yet. The v0 build job is Powder card
-`exocortex-v0`.
+read/write/search interface over registered knowledge corpora. Built in Go
+(v0.2 on master) with sole-publisher isolation, fail-closed reads, and
+compare-and-swap concurrency.
 
 ## Operator-set decisions (2026-08-21)
 
@@ -20,10 +20,13 @@ Source artifact: daybook `misty-step/exocortex-kernel.md`.
   commits. The daybook driver runs `pull --rebase --autostash`, stages
   touched paths only, commits, pushes (daybook's own repo contract). Other
   cortices declare caller-owned commits or no VCS.
-- Fleet delivery: the CLI is the universal baseline (any harness can exec a
-  shell command). MCP is registered per harness; slice 2 owns the omp /
-  Claude Code / Codex / opencode / goose / pi install targets.
-
+- Fleet delivery: the CLI (`exocortex`) and bundled skill (`skill://exocortex`)
+  is the official, universal fleet interface. The fleet runs on OMP; per-harness
+  MCP fleet installations (Slice 2) were retired by operator decision (2026-08-24)
+  as unnecessary complexity.
+- Publisher model: for Git cortices, the kernel-owned clone in
+  `~/.config/exocortex/writers/<cortex>` is the exclusive publisher and read
+  authority. Registered human workspaces are never preflighted, stashed, or mutated.
 ## Open decisions
 
 - Language: Go recommended (velocity, single-binary fleet distribution);

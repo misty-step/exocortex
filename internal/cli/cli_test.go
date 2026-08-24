@@ -132,3 +132,28 @@ func bodyRevision(t *testing.T, repo, rel string) string {
 	}
 	return rev
 }
+
+func TestSearchAndBriefCLI(t *testing.T) {
+	repo := setupCortex(t)
+	code, body, _ := runMain(t, "", "register", "smoke", repo, "--json")
+	if code != 0 {
+		t.Fatalf("register failed: %v", body)
+	}
+
+	// Missing query/topic -> JSON invalid_input exit 2.
+	code, body, _ = runMain(t, "", "search")
+	if code != 2 || body["error"] != "invalid_input" {
+		t.Fatalf("search missing query: exit=%d body=%v", code, body)
+	}
+
+	code, body, _ = runMain(t, "", "brief")
+	if code != 2 || body["error"] != "invalid_input" {
+		t.Fatalf("brief missing topic: exit=%d body=%v", code, body)
+	}
+
+	// Invalid flag -> JSON invalid_input exit 2.
+	code, body, _ = runMain(t, "", "search", "topic", "--invalid-flag")
+	if code != 2 || body["error"] != "invalid_input" {
+		t.Fatalf("search invalid flag: exit=%d body=%v", code, body)
+	}
+}
