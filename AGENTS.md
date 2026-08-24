@@ -15,7 +15,7 @@ Source artifact: daybook `misty-step/exocortex-kernel.md`.
   markdown+git corpora with full read/write; **feeds** are adapters that
   ingest foreign sources into a cortex as compiled, provenance-stamped notes
   with `source:` lineage. No content port; no storage backends.
-- Daybook is cortex #1. Core operations: `register/put/get/search/brief/note/log/lint`.
+- Daybook is cortex #1. Core operations: `register/put/get/search/brief/note/sync/status/log/lint`.
 - Sole-publisher architecture: for Daybook cortices, the kernel-owned clone in
   `~/.config/exocortex/writers/<cortex>` is the exclusive write and read authority.
   The kernel runs `pull --rebase`, stages touched paths only, commits, and pushes
