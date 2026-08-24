@@ -15,18 +15,19 @@ Source artifact: daybook `misty-step/exocortex-kernel.md`.
   markdown+git corpora with full read/write; **feeds** are adapters that
   ingest foreign sources into a cortex as compiled, provenance-stamped notes
   with `source:` lineage. No content port; no storage backends.
-- Daybook is cortex #1. Skeleton first: `register/put/get/search/log/lint`.
-- VCS lifecycle is a per-cortex policy; generic `put` never hard-codes
-  commits. The daybook driver runs `pull --rebase --autostash`, stages
-  touched paths only, commits, pushes (daybook's own repo contract). Other
-  cortices declare caller-owned commits or no VCS.
+- Daybook is cortex #1. Core operations: `register/put/get/search/brief/note/log/lint`.
+- Sole-publisher architecture: for Daybook cortices, the kernel-owned clone in
+  `~/.config/exocortex/writers/<cortex>` is the exclusive write and read authority.
+  The kernel runs `pull --rebase`, stages touched paths only, commits, and pushes
+  from the isolated clone. Registered human workspaces are never preflighted,
+  stashed, committed to, or mutated.
+- Fail-closed operations: a missing origin remote or provisioning error fails
+  closed (`writer_unavailable` / `cortex_unavailable`) with zero fallback to
+  reading or writing uncommitted human bytes.
 - Fleet delivery: the CLI (`exocortex`) and bundled skill (`skill://exocortex`)
   is the official, universal fleet interface. The fleet runs on OMP; per-harness
   MCP fleet installations (Slice 2) were retired by operator decision (2026-08-24)
   as unnecessary complexity.
-- Publisher model: for Git cortices, the kernel-owned clone in
-  `~/.config/exocortex/writers/<cortex>` is the exclusive publisher and read
-  authority. Registered human workspaces are never preflighted, stashed, or mutated.
 ## Open decisions
 
 - Language: Go recommended (velocity, single-binary fleet distribution);
