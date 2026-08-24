@@ -4,9 +4,10 @@ Foundation-shaped memory kernel for the Misty Step agent fleet: one binary
 that gives every agent a uniform read/write/search interface over registered
 knowledge corpora.
 
-**Status: spec-seeded, unbuilt.** The v0 build is Powder card `exocortex-v0`.
-Everything below describes the agreed contract, not shipped code.
-
+**Status: v0.2 on master.** Built in Go with sole-publisher isolation,
+fail-closed reads, compare-and-swap concurrency, hybrid semantic retrieval,
+and executive orientation briefs (`brief`). The CLI and bundled skill
+(`skill://exocortex`) is the universal fleet baseline.
 ## Model
 
 - **Cortex** — a writable markdown+git corpus registered with the kernel.
@@ -16,17 +17,18 @@ Everything below describes the agreed contract, not shipped code.
   harness session logs) into a cortex as compiled, provenance-stamped notes
   with `source:` lineage. Raw sources stay where they are.
 
-## Planned surface (v0)
+## Surface
 
 ```sh
 exocortex register daybook ~/Development/misty-step/daybook
-exocortex put <path> --from draft.md                  # create-only (fails if path exists)
-exocortex put <path> --from draft.md --expects <sha>  # update: stored-revision hash REQUIRED
-exocortex get <path>
-exocortex search "<query>" --json        # shells qmd
-exocortex log <path>                     # git lineage
-exocortex lint [<path>]                  # frontmatter floor gate
-exocortex mcp                            # stdio MCP server, same operations
+exocortex brief "<topic>"                               # executive orientation briefing
+exocortex search "<query>" [--type decision|memo|session] # hybrid semantic search (BM25 + Qwen rerank)
+exocortex get <path>                                    # read from committed Git HEAD snapshot
+exocortex note "<thought>"                              # atomic memo capture (~2s)
+exocortex put <path> --from draft.md                    # create-only (fails if path exists)
+exocortex put <path> --from draft.md --expects <sha>    # update: stored-revision hash REQUIRED
+exocortex log <path>                                   # git lineage
+exocortex lint [<path>]                                # frontmatter floor gate
 ```
 
 ## Docs
@@ -35,7 +37,7 @@ exocortex mcp                            # stdio MCP server, same operations
 - [VISION.md](VISION.md) — why this exists
 - [ADR-0001](docs/adr/0001-exocortex-kernel.md) — accepted kernel decision
 - [skills/exocortex/SKILL.md](skills/exocortex/SKILL.md) — bundled agent skill
-  (canonical copy; omp-config installs it in slice 2)
+  (canonical copy installed into omp-config)
 
 ## Provenance
 

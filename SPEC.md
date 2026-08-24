@@ -317,22 +317,10 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
 ## Fleet delivery
 
 The CLI is the universal baseline: every harness execs shell commands, and
-the bundled skill teaches agents the interface. MCP is registered per
-harness — no single config covers the fleet:
-
-| Harness | Target | Slice |
-| --- | --- | --- |
-| Oh My Pi | `omp-config/mcp.json` + `install` (writes only to `${PI_CODING_AGENT_DIR:-$(omp config path)}`) | 2 |
-| Claude Code | user-scope `claude mcp add` or project `.mcp.json` | 2 |
-| Codex | `~/.codex/config.toml` `[mcp_servers.exocortex]` | 2 |
-| opencode | `opencode.json` `mcp` block | 2 |
-| goose | goose config extensions block | 2 |
-| pi | its own MCP config target | 2 |
-
-Slice 2 also owns: `skills/exocortex/` installed into omp-config from this
-repo's canonical copy, and the one-line pointer in omp-config
-`global/AGENTS.md`. Until then, cross-harness parity comes from the CLI.
-
+the bundled skill (`skill://exocortex`) teaches agents the interface. The
+fleet runs on OMP; per-harness MCP fleet registration (Slice 2) was retired
+by operator decision (2026-08-24) as unnecessary complexity. The canonical
+skill is installed directly into `omp-config`.
 ## Rejected options
 
 - **Standalone memory service** (daemon + own DB) — duplicates versioning and
