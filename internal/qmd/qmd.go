@@ -4,6 +4,7 @@
 package qmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -53,7 +54,7 @@ func sanitizeEnv() []string {
 
 // Search runs one qmd retrieval with a sanitized environment and returns raw hits.
 // If hybrid query expansion fails, it falls back to deterministic BM25 search.
-func Search(ctx context.Context, query, collection, mode string, limit int) ([]Hit, error) {
+func Search(ctx context.Context, query string, collections []string, mode string, limit int) ([]Hit, error) {
 	if mode == "" {
 		mode = "hybrid"
 	}
@@ -64,23 +65,43 @@ func Search(ctx context.Context, query, collection, mode string, limit int) ([]H
 	if limit <= 0 {
 		limit = 20
 	}
-
 	run := func(cmdName string) ([]Hit, error) {
+		tmpFile, err := os.CreateTemp("", "qmd-search-*.json")
+		if err != nil {
+			return nil, err
+		}
+		tmpPath := tmpFile.Name()
+		defer os.Remove(tmpPath)
+
 		args := []string{cmdName, "--format", "json", "-n", strconv.Itoa(limit)}
-		if collection != "" {
-			args = append(args, "-c", collection)
+		for _, c := range collections {
+			if c != "" {
+				args = append(args, "-c", c)
+			}
 		}
 		args = append(args, query)
 		cmd := exec.CommandContext(ctx, "qmd", args...)
 		cmd.Env = sanitizeEnv()
+		cmd.Stdout = tmpFile
 		var stderr strings.Builder
 		cmd.Stderr = &stderr
-		out, err := cmd.Output()
-		if err != nil {
+
+		if err := cmd.Run(); err != nil {
+			tmpFile.Close()
 			return nil, fmt.Errorf("qmd %s failed: %s: %w", cmdName, strings.TrimSpace(stderr.String()), err)
 		}
+		tmpFile.Close()
+
+		data, err := os.ReadFile(tmpPath)
+		if err != nil {
+			return nil, err
+		}
+		start := bytes.IndexByte(data, '[')
+		if start < 0 {
+			return nil, fmt.Errorf("qmd %s returned non-JSON output: %s", cmdName, strings.TrimSpace(string(data)))
+		}
 		var hits []Hit
-		if err := json.Unmarshal(out, &hits); err != nil {
+		if err := json.Unmarshal(data[start:], &hits); err != nil {
 			return nil, fmt.Errorf("qmd returned unparseable JSON: %w", err)
 		}
 		return hits, nil
@@ -88,7 +109,6 @@ func Search(ctx context.Context, query, collection, mode string, limit int) ([]H
 
 	hits, err := run(sub)
 	if err != nil && mode == "hybrid" {
-		// Fallback to deterministic BM25 search if hybrid fails
 		return run("search")
 	}
 	return hits, err

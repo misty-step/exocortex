@@ -136,7 +136,11 @@ func put(ctx context.Context, req *mcp.CallToolRequest, a putArgs) (*mcp.CallToo
 }
 
 func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.CallToolResult, any, error) {
-	hits, err := qmd.Search(ctx, a.Query, a.Cortex, a.Mode, a.Limit)
+	var collections []string
+	if a.Cortex != "" {
+		collections = []string{a.Cortex}
+	}
+	hits, err := qmd.Search(ctx, a.Query, collections, a.Mode, a.Limit)
 	if err != nil {
 		return toolResult(nil, &kernel.Conflict{
 			Code:      "search_unavailable",
