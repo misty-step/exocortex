@@ -203,7 +203,7 @@ func TestSyncFailureLeavesDirtyAndRecordsSyncError(t *testing.T) {
 	if sConf == nil || sConf.Code != "embed_failed" {
 		t.Fatalf("want embed_failed, got %#v", sConf)
 	}
-	if len(syncRes) != 1 || !syncRes[0].Updated || syncRes[0].Embedded {
+	if len(syncRes) != 1 || !syncRes[0].Updated || syncRes[0].Embedded || syncRes[0].IndexedCommit != res.Commit {
 		t.Fatalf("embed failure must report update-only partial result: %+v", syncRes)
 	}
 
@@ -217,6 +217,24 @@ func TestSyncFailureLeavesDirtyAndRecordsSyncError(t *testing.T) {
 	}
 	if !strings.Contains(st[0].LastSyncError, "simulated error in embed") {
 		t.Fatalf("last sync error = %q, want simulated error", st[0].LastSyncError)
+	}
+}
+
+func TestSyncUpdateFailureOmitsIndexedCommit(t *testing.T) {
+	f := newFixture(t)
+	logFile := filepath.Join(t.TempDir(), "qmd-calls.log")
+	setupSyncMockQMD(t, logFile, "update")
+	if _, conf := f.put("hosta", "notes/upd-fail.md", mkNote("note", "update fail")); conf != nil {
+		t.Fatal(conf)
+	}
+	alignMockCollection(t, f.cs[0])
+
+	syncRes, sConf := Sync(context.Background(), f.cs, "hosta")
+	if sConf == nil || sConf.Code != "sync_failed" {
+		t.Fatalf("want sync_failed, got %#v", sConf)
+	}
+	if len(syncRes) != 1 || syncRes[0].Updated || syncRes[0].IndexedCommit != "" {
+		t.Fatalf("update failure must not claim indexed: %+v", syncRes)
 	}
 }
 
@@ -491,9 +509,12 @@ func TestSyncFailsWhenCollectionPathMismatches(t *testing.T) {
 	}
 	t.Setenv("EXOCORTEX_TEST_QMD_ROOT", f.cs[0].Path)
 
-	_, sConf := Sync(context.Background(), f.cs, "hosta")
+	syncRes, sConf := Sync(context.Background(), f.cs, "hosta")
 	if sConf == nil || sConf.Code != "index_root_mismatch" {
 		t.Fatalf("want index_root_mismatch, got %#v", sConf)
+	}
+	if len(syncRes) != 1 || syncRes[0].Updated || syncRes[0].IndexedCommit != "" {
+		t.Fatalf("pre-update conflict must not claim indexed: %+v", syncRes)
 	}
 	if sConf.Detail["actual"] != f.cs[0].Path {
 		t.Fatalf("actual = %v, want registered path", sConf.Detail["actual"])
@@ -513,9 +534,12 @@ func TestSyncFailsWhenCollectionUnverified(t *testing.T) {
 		t.Fatal(conf)
 	}
 
-	_, sConf := Sync(context.Background(), f.cs, "hosta")
+	syncRes, sConf := Sync(context.Background(), f.cs, "hosta")
 	if sConf == nil || sConf.Code != "index_root_unverified" {
 		t.Fatalf("want index_root_unverified, got %#v", sConf)
+	}
+	if len(syncRes) != 1 || syncRes[0].Updated || syncRes[0].IndexedCommit != "" {
+		t.Fatalf("pre-update conflict must not claim indexed: %+v", syncRes)
 	}
 	st, _ := Status(f.cs, "hosta")
 	if !st[0].Dirty || st[0].DirtyCommit != res.Commit {
@@ -539,9 +563,12 @@ func TestSyncRejectsHumanCheckoutAfterWriterLoss(t *testing.T) {
 	}
 	t.Setenv("EXOCORTEX_TEST_QMD_ROOT", f.cs[0].Path)
 
-	_, sConf := Sync(context.Background(), f.cs, "hosta")
+	syncRes, sConf := Sync(context.Background(), f.cs, "hosta")
 	if sConf == nil || sConf.Code != "writer_unavailable" {
 		t.Fatalf("want writer_unavailable, got %#v", sConf)
+	}
+	if len(syncRes) != 1 || syncRes[0].Updated || syncRes[0].IndexedCommit != "" {
+		t.Fatalf("pre-update conflict must not claim indexed: %+v", syncRes)
 	}
 }
 

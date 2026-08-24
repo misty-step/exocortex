@@ -247,7 +247,7 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 		writeSyncError(c.Name, newestCommit, stage, detail)
 	}
 
-	out := &SyncResult{Cortex: c.Name, IndexedCommit: newestCommit}
+	out := &SyncResult{Cortex: c.Name}
 	var wantRoot string
 	if c.VCS == "daybook" {
 		w := writerDir(&c)
@@ -280,6 +280,7 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 		return out, conflict("sync_failed", "sync", c.Name, "qmd update failed; inspect cortex index", map[string]any{"detail": err.Error()})
 	}
 	out.Updated = true
+	out.IndexedCommit = newestCommit
 
 	if err := qmd.Embed(ctx, c.Name); err != nil {
 		recordError("embed", err.Error())
