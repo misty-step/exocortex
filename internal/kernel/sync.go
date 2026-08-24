@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/misty-step/exocortex/internal/qmd"
@@ -107,31 +106,43 @@ func markDirty(cortexName, commit string) error {
 	return atomicWrite(filepath.Join(dir, fileName), data)
 }
 
-func acquireSyncLock(name string) (*cortexLock, error) {
-	dir, err := ConfigDir()
-	if err != nil {
-		return nil, err
+func sameRoot(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if ea, err := filepath.EvalSymlinks(a); err == nil {
+		a = ea
 	}
-	dir = filepath.Join(dir, "locks")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
+	if eb, err := filepath.EvalSymlinks(b); err == nil {
+		b = eb
 	}
-	f, err := os.OpenFile(filepath.Join(dir, name+"-sync.lock"), os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		return nil, err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
-		return nil, err
-	}
-	return &cortexLock{f: f}, nil
+	return a == b
 }
 
 // syncHook is an optional test hook called right after qmd embed and before deleting snapshot markers.
 var syncHook func(cortexName string)
 
-// Sync executes qmd update and qmd embed under a single-owner lock,
-// advancing .synced and deleting only the snapshotted dirty markers.
+// Sync executes qmd update and qmd embed under the same per-cortex
+// write lock as Put, advancing synced.json and deleting only the
+// snapshotted dirty markers. It fail-closes if the QMD collection
+// does not point at the indexed root.
+
+func writeSyncError(name, commit, stage, detail string) {
+	if _, err := cortexStateDir(name); err != nil {
+		return
+	}
+	sDir, err := cortexStatePath(name)
+	if err != nil {
+		return
+	}
+	errData, _ := json.MarshalIndent(map[string]any{
+		"cortex": name,
+		"commit": commit,
+		"stage":  stage,
+		"error":  detail,
+		"at":     time.Now().UTC().Format(time.RFC3339),
+	}, "", "  ")
+	_ = atomicWrite(filepath.Join(sDir, "sync_error.json"), errData)
+}
+
 func Sync(ctx context.Context, cs []Cortex, nameFlag string) ([]SyncResult, *Conflict) {
 	var targets []Cortex
 	if nameFlag != "" {
@@ -171,9 +182,9 @@ func Sync(ctx context.Context, cs []Cortex, nameFlag string) ([]SyncResult, *Con
 }
 
 func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
-	lock, lerr := acquireSyncLock(c.Name)
+	lock, lerr := acquireLock(c.Name)
 	if lerr != nil {
-		return nil, conflict("lock_failed", "sync", c.Name, "fix sync lock access and retry", map[string]any{"detail": lerr.Error()})
+		return nil, conflict("lock_failed", "sync", c.Name, "fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
 	}
 	defer lock.release()
 
@@ -210,12 +221,14 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 		snapshotFiles = append(snapshotFiles, entry.Name())
 		b, err := os.ReadFile(filepath.Join(dDir, entry.Name()))
 		if err != nil {
+			writeSyncError(c.Name, newestCommit, "marker", err.Error())
 			return nil, conflict("state_failed", "sync", c.Name,
 				"failed to read dirty marker file; markers retained",
 				map[string]any{"file": entry.Name(), "detail": err.Error()})
 		}
 		var m SyncMarker
 		if err := json.Unmarshal(b, &m); err != nil || m.Commit == "" {
+			writeSyncError(c.Name, newestCommit, "marker", "malformed dirty marker file")
 			return nil, conflict("state_failed", "sync", c.Name,
 				"malformed dirty marker file; markers retained",
 				map[string]any{"file": entry.Name()})
@@ -228,17 +241,28 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 	}
 
 	recordError := func(stage, detail string) {
-		if _, derr := cortexStateDir(c.Name); derr != nil {
-			return
-		}
-		errData, _ := json.MarshalIndent(map[string]any{
-			"cortex": c.Name,
-			"commit": newestCommit,
-			"stage":  stage,
-			"error":  detail,
-			"at":     time.Now().UTC().Format(time.RFC3339),
-		}, "", "  ")
-		_ = atomicWrite(errorPath, errData)
+		writeSyncError(c.Name, newestCommit, stage, detail)
+	}
+
+	wantRoot, werr := effectiveRoot(&c)
+	if werr != nil {
+		recordError("root", werr.Error())
+		return nil, conflict("writer_unavailable", "sync", c.Name,
+			"failed to resolve the indexed root; markers retained",
+			map[string]any{"detail": werr.Error()})
+	}
+	gotRoot, rerr := qmd.CollectionPath(ctx, c.Name)
+	if rerr != nil {
+		recordError("collection", rerr.Error())
+		return nil, conflict("index_root_unverified", "sync", c.Name,
+			"qmd collection show failed; markers retained. Point the collection at the indexed root and retry",
+			map[string]any{"detail": rerr.Error(), "expected": wantRoot})
+	}
+	if !sameRoot(wantRoot, gotRoot) {
+		recordError("collection", fmt.Sprintf("collection path %s != indexed root %s", gotRoot, wantRoot))
+		return nil, conflict("index_root_mismatch", "sync", c.Name,
+			"qmd collection does not point at the indexed root; markers retained. Rebind the collection and retry",
+			map[string]any{"expected": wantRoot, "actual": gotRoot})
 	}
 
 	// 1. Run qmd update <cortex>
@@ -362,12 +386,16 @@ func Status(cs []Cortex, nameFlag string) ([]StatusResult, *Conflict) {
 			}
 		}
 
-		root := c.Path
-		if w := writerDir(&c); w != "" {
+		var root string
+		if c.VCS != "daybook" {
+			root = c.Path
+		} else if w := writerDir(&c); w != "" {
 			root = w
 		}
-		if head, gerr := git(root, "rev-parse", "HEAD"); gerr == nil {
-			st.HeadCommit = strings.TrimSpace(head)
+		if root != "" {
+			if head, gerr := git(root, "rev-parse", "HEAD"); gerr == nil {
+				st.HeadCommit = strings.TrimSpace(head)
+			}
 		}
 
 		results = append(results, st)

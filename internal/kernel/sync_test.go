@@ -27,6 +27,15 @@ if [ "$cmd" = "$fail" ]; then
   exit 1
 fi
 
+if [ "$cmd" = "collection" ]; then
+  if [ -z "$EXOCORTEX_TEST_QMD_ROOT" ]; then
+    echo "Collection not found: $3" >&2
+    exit 1
+  fi
+  printf 'Collection: %%s\n  Path:     %%s\n' "$3" "$EXOCORTEX_TEST_QMD_ROOT"
+  exit 0
+fi
+
 if [ "$cmd" = "update" ]; then
   exit 0
 fi
@@ -44,6 +53,15 @@ exit 0
 
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+origPath)
+}
+
+func alignMockCollection(t *testing.T, c Cortex) {
+	t.Helper()
+	root, err := effectiveRoot(&c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EXOCORTEX_TEST_QMD_ROOT", root)
 }
 
 func TestDirtyMarkerWrittenOnSuccessfulPutAndNote(t *testing.T) {
@@ -78,6 +96,7 @@ func TestSyncRunsUpdateAndEmbedClearingDirtySnapshot(t *testing.T) {
 	if conf != nil || !res.Pushed {
 		t.Fatalf("put failed: %v", conf)
 	}
+	alignMockCollection(t, f.cs[0])
 
 	syncRes, sConf := Sync(context.Background(), f.cs, "hosta")
 	if sConf != nil || len(syncRes) != 1 {
@@ -96,11 +115,19 @@ func TestSyncRunsUpdateAndEmbedClearingDirtySnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	callStr := string(calls)
+	if !strings.Contains(callStr, "collection show hosta") {
+		t.Fatalf("missing qmd collection show call: %s", callStr)
+	}
 	if !strings.Contains(callStr, "update hosta") {
 		t.Fatalf("missing qmd update call: %s", callStr)
 	}
 	if !strings.Contains(callStr, "embed -c hosta") {
 		t.Fatalf("missing qmd embed call: %s", callStr)
+	}
+	showAt := strings.Index(callStr, "collection show hosta")
+	updateAt := strings.Index(callStr, "update hosta")
+	if showAt < 0 || updateAt < 0 || showAt > updateAt {
+		t.Fatalf("collection show must precede update: %s", callStr)
 	}
 
 	// Status should now report clean (dirty=false) and synced_commit set
@@ -131,6 +158,7 @@ func TestSyncPreservesConcurrentDirtyMarkerArrivals(t *testing.T) {
 		_ = markDirty(cortexName, resBCommit)
 	}
 	defer func() { syncHook = nil }()
+	alignMockCollection(t, f.cs[0])
 
 	syncRes, sConf := Sync(context.Background(), f.cs, "hosta")
 	if sConf != nil {
@@ -159,6 +187,7 @@ func TestSyncFailureLeavesDirtyAndRecordsSyncError(t *testing.T) {
 	setupSyncMockQMD(t, logFile, "embed") // simulate failure on qmd embed
 
 	res, _ := f.put("hosta", "notes/fail-test.md", mkNote("note", "fail proof"))
+	alignMockCollection(t, f.cs[0])
 
 	_, sConf := Sync(context.Background(), f.cs, "hosta")
 	if sConf == nil || sConf.Code != "embed_failed" {
@@ -193,8 +222,10 @@ func TestMalformedDirtyMarkerFailsStateFailedAndRetainsMarkers(t *testing.T) {
 	if sConf == nil || sConf.Code != "state_failed" {
 		t.Fatalf("want state_failed, got %#v", sConf)
 	}
-
-	// Broken file must still exist on disk (never silently deleted)
+	st, _ := Status(f.cs, "hosta")
+	if !strings.Contains(st[0].LastSyncError, "malformed") {
+		t.Fatalf("last sync error = %q, want malformed", st[0].LastSyncError)
+	}
 	if _, err := os.Stat(brokenFile); err != nil {
 		t.Fatal("malformed marker file was deleted on error")
 	}
@@ -273,6 +304,7 @@ func TestNoopPutDoesNotMarkDirty(t *testing.T) {
 	if conf != nil {
 		t.Fatal(conf)
 	}
+	alignMockCollection(t, f.cs[0])
 	if _, sConf := Sync(context.Background(), f.cs, "hosta"); sConf != nil {
 		t.Fatal(sConf)
 	}
@@ -315,6 +347,7 @@ func TestSyncContinuesAfterSiblingFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	alignMockCollection(t, f.cs[1])
 	syncRes, sConf := Sync(context.Background(), f.cs, "")
 	if sConf == nil || sConf.Code != "state_failed" {
 		t.Fatalf("want state_failed, got %#v", sConf)
@@ -345,6 +378,9 @@ func TestStatusDoesNotCreateStateOrWriter(t *testing.T) {
 	if st[0].Dirty {
 		t.Fatal("untouched cortex must not report dirty")
 	}
+	if st[0].HeadCommit != "" {
+		t.Fatalf("status must not report human checkout HEAD: %q", st[0].HeadCommit)
+	}
 	cfg, err := ConfigDir()
 	if err != nil {
 		t.Fatal(err)
@@ -369,5 +405,115 @@ func TestUnreadableDirtyPathFailsStateFailed(t *testing.T) {
 	_, sConf := Sync(context.Background(), f.cs, "hosta")
 	if sConf == nil || sConf.Code != "state_failed" {
 		t.Fatalf("want state_failed, got %#v", sConf)
+	}
+}
+
+func TestSyncHoldsWriteLock(t *testing.T) {
+	f := newFixture(t)
+	logFile := filepath.Join(t.TempDir(), "qmd-calls.log")
+	setupSyncMockQMD(t, logFile, "")
+	if _, conf := f.put("hosta", "notes/lock-a.md", mkNote("note", "lock a")); conf != nil {
+		t.Fatal(conf)
+	}
+	alignMockCollection(t, f.cs[0])
+
+	putDone := make(chan string, 1)
+	syncHook = func(string) {
+		go func() {
+			_, conf := Put(context.Background(), f.cs, PutInput{
+				CortexName: "hosta",
+				Path:       "notes/lock-b.md",
+				Payload:    []byte(mkNote("note", "blocked by sync")),
+				Agent:      "test",
+				Via:        "test",
+			})
+			if conf != nil {
+				putDone <- conf.Code
+				return
+			}
+			putDone <- "ok"
+		}()
+		select {
+		case code := <-putDone:
+			t.Errorf("Put completed while Sync held the write lock: %s", code)
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	defer func() { syncHook = nil }()
+
+	if _, conf := Sync(context.Background(), f.cs, "hosta"); conf != nil {
+		t.Fatal(conf)
+	}
+	select {
+	case code := <-putDone:
+		if code != "ok" {
+			t.Fatalf("blocked Put failed: %s", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Put did not complete after Sync released the lock")
+	}
+}
+
+func TestSyncFailsWhenCollectionPathMismatches(t *testing.T) {
+	f := newFixture(t)
+	logFile := filepath.Join(t.TempDir(), "qmd-calls.log")
+	setupSyncMockQMD(t, logFile, "")
+	res, conf := f.put("hosta", "notes/mismatch.md", mkNote("note", "mismatch"))
+	if conf != nil {
+		t.Fatal(conf)
+	}
+	t.Setenv("EXOCORTEX_TEST_QMD_ROOT", f.cs[0].Path)
+
+	_, sConf := Sync(context.Background(), f.cs, "hosta")
+	if sConf == nil || sConf.Code != "index_root_mismatch" {
+		t.Fatalf("want index_root_mismatch, got %#v", sConf)
+	}
+	if sConf.Detail["actual"] != f.cs[0].Path {
+		t.Fatalf("actual = %v, want registered path", sConf.Detail["actual"])
+	}
+	st, _ := Status(f.cs, "hosta")
+	if !st[0].Dirty || st[0].DirtyCommit != res.Commit {
+		t.Fatalf("markers must be retained: %+v", st[0])
+	}
+}
+
+func TestSyncFailsWhenCollectionUnverified(t *testing.T) {
+	f := newFixture(t)
+	logFile := filepath.Join(t.TempDir(), "qmd-calls.log")
+	setupSyncMockQMD(t, logFile, "")
+	res, conf := f.put("hosta", "notes/unverified.md", mkNote("note", "unverified"))
+	if conf != nil {
+		t.Fatal(conf)
+	}
+
+	_, sConf := Sync(context.Background(), f.cs, "hosta")
+	if sConf == nil || sConf.Code != "index_root_unverified" {
+		t.Fatalf("want index_root_unverified, got %#v", sConf)
+	}
+	st, _ := Status(f.cs, "hosta")
+	if !st[0].Dirty || st[0].DirtyCommit != res.Commit {
+		t.Fatalf("markers must be retained: %+v", st[0])
+	}
+}
+
+func TestSyncRejectsHumanCheckoutAfterWriterLoss(t *testing.T) {
+	f := newFixture(t)
+	logFile := filepath.Join(t.TempDir(), "qmd-calls.log")
+	setupSyncMockQMD(t, logFile, "")
+	if _, conf := f.put("hosta", "notes/writer-loss.md", mkNote("note", "writer loss")); conf != nil {
+		t.Fatal(conf)
+	}
+	w := writerDir(&f.cs[0])
+	if w == "" {
+		t.Fatal("writer missing after put")
+	}
+	if err := os.RemoveAll(w); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EXOCORTEX_TEST_QMD_ROOT", f.cs[0].Path)
+
+	_, sConf := Sync(context.Background(), f.cs, "hosta")
+	if sConf == nil || (sConf.Code != "index_root_mismatch" && sConf.Code != "writer_unavailable") {
+		t.Fatalf("want fail-closed root check, got %#v", sConf)
 	}
 }

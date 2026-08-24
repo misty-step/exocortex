@@ -199,4 +199,33 @@ func TestSyncAndStatusCLI(t *testing.T) {
 		t.Fatalf("status after none-vcs put = %v, want dirty %s", st[0], rev)
 	}
 
+	binDir := t.TempDir()
+	fake := filepath.Join(binDir, "qmd")
+	script := `#!/bin/sh
+if [ "$1" = "collection" ]; then
+  printf 'Collection: %s\n  Path:     %s\n' "$3" "$EXOCORTEX_TEST_QMD_ROOT"
+  exit 0
+fi
+exit 0
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	t.Setenv("EXOCORTEX_TEST_QMD_ROOT", repo)
+
+	code, _, raw = runMain(t, "", "sync", "--cortex", "smoke")
+	if code != 0 {
+		t.Fatalf("sync failed: exit=%d %s", code, raw)
+	}
+	code, _, raw = runMain(t, "", "status", "--cortex", "smoke")
+	if code != 0 {
+		t.Fatalf("status after sync: exit=%d %s", code, raw)
+	}
+	if err := json.Unmarshal([]byte(raw), &st); err != nil || len(st) != 1 {
+		t.Fatalf("status after sync json: %v %s", err, raw)
+	}
+	if st[0]["dirty"] != false || st[0]["synced_commit"] != rev {
+		t.Fatalf("status after sync = %v, want clean %s", st[0], rev)
+	}
 }

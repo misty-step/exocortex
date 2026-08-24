@@ -92,3 +92,45 @@ echo "]"
 		t.Fatalf("unexpected hit fields: %+v", hits[0])
 	}
 }
+
+func TestCollectionPathParsesShowOutput(t *testing.T) {
+	binDir := t.TempDir()
+	fake := filepath.Join(binDir, "qmd")
+	script := `#!/bin/sh
+if [ "$1" != "collection" ] || [ "$2" != "show" ] || [ "$3" != "daybook" ]; then
+  echo "unexpected args: $*" >&2
+  exit 1
+fi
+printf 'Collection: daybook\n  Path:     /tmp/writer/daybook\n  Pattern:  **/*.md\n'
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	got, err := CollectionPath(context.Background(), "daybook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/tmp/writer/daybook" {
+		t.Fatalf("path = %q", got)
+	}
+}
+
+func TestCollectionPathFailsClosed(t *testing.T) {
+	binDir := t.TempDir()
+	fake := filepath.Join(binDir, "qmd")
+	script := `#!/bin/sh
+echo "Collection not found: missing" >&2
+exit 1
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	if _, err := CollectionPath(context.Background(), "missing"); err == nil {
+		t.Fatal("missing collection must fail")
+	}
+	if _, err := CollectionPath(context.Background(), ""); err == nil {
+		t.Fatal("empty name must fail")
+	}
+}
