@@ -40,7 +40,9 @@ fi
 if [ "$cmd" = "update" ] || [ "$cmd" = "embed" ]; then
   lock="$XDG_CONFIG_HOME/exocortex/locks/hosta.lock"
   if [ -n "$XDG_CONFIG_HOME" ] && [ -e "$lock" ]; then
-    if flock -n "$lock" true 2>/dev/null; then
+    if ! command -v flock >/dev/null 2>&1; then
+      echo "flock_missing $cmd" >> "$log"
+    elif flock -n "$lock" true 2>/dev/null; then
       echo "lock_free $cmd" >> "$log"
     else
       echo "lock_held $cmd" >> "$log"
@@ -462,6 +464,9 @@ func TestSyncHoldsWriteLock(t *testing.T) {
 	calls, err := os.ReadFile(logFile)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(string(calls), "flock_missing") {
+		t.Fatal("flock is required to prove the write lock is held during QMD")
 	}
 	if !strings.Contains(string(calls), "lock_held update") || !strings.Contains(string(calls), "lock_held embed") {
 		t.Fatalf("QMD stages must observe the write lock: %s", calls)
