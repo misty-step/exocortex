@@ -16,6 +16,7 @@ func setupSyncMockQMD(t *testing.T, logFile string, failStage string) {
 	fakeQMD := filepath.Join(binDir, "qmd")
 
 	script := fmt.Sprintf(`#!/bin/sh
+while [ "$1" = "--index" ]; do shift 2; done
 cmd="$1"
 log="%s"
 fail="%s"
@@ -36,11 +37,18 @@ if [ "$cmd" = "collection" ]; then
   exit 0
 fi
 
-if [ "$cmd" = "update" ]; then
-  exit 0
-fi
-
-if [ "$cmd" = "embed" ]; then
+if [ "$cmd" = "update" ] || [ "$cmd" = "embed" ]; then
+  lock="$XDG_CONFIG_HOME/exocortex/locks/hosta.lock"
+  if [ -n "$XDG_CONFIG_HOME" ] && [ -e "$lock" ]; then
+    if flock -n "$lock" true 2>/dev/null; then
+      echo "lock_free $cmd" >> "$log"
+    else
+      echo "lock_held $cmd" >> "$log"
+    fi
+  fi
+  if [ "$cmd" = "embed" ]; then
+    echo "Done!"
+  fi
   exit 0
 fi
 
@@ -189,9 +197,12 @@ func TestSyncFailureLeavesDirtyAndRecordsSyncError(t *testing.T) {
 	res, _ := f.put("hosta", "notes/fail-test.md", mkNote("note", "fail proof"))
 	alignMockCollection(t, f.cs[0])
 
-	_, sConf := Sync(context.Background(), f.cs, "hosta")
+	syncRes, sConf := Sync(context.Background(), f.cs, "hosta")
 	if sConf == nil || sConf.Code != "embed_failed" {
 		t.Fatalf("want embed_failed, got %#v", sConf)
+	}
+	if len(syncRes) != 1 || !syncRes[0].Updated || syncRes[0].Embedded {
+		t.Fatalf("embed failure must report update-only partial result: %+v", syncRes)
 	}
 
 	// Dirty marker must survive and sync_error must be recorded
@@ -406,6 +417,10 @@ func TestUnreadableDirtyPathFailsStateFailed(t *testing.T) {
 	if sConf == nil || sConf.Code != "state_failed" {
 		t.Fatalf("want state_failed, got %#v", sConf)
 	}
+	_, stConf := Status(f.cs, "hosta")
+	if stConf == nil || stConf.Code != "state_failed" {
+		t.Fatalf("status want state_failed, got %#v", stConf)
+	}
 }
 
 func TestSyncHoldsWriteLock(t *testing.T) {
@@ -443,6 +458,13 @@ func TestSyncHoldsWriteLock(t *testing.T) {
 
 	if _, conf := Sync(context.Background(), f.cs, "hosta"); conf != nil {
 		t.Fatal(conf)
+	}
+	calls, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(calls), "lock_held update") || !strings.Contains(string(calls), "lock_held embed") {
+		t.Fatalf("QMD stages must observe the write lock: %s", calls)
 	}
 	select {
 	case code := <-putDone:
@@ -513,8 +535,8 @@ func TestSyncRejectsHumanCheckoutAfterWriterLoss(t *testing.T) {
 	t.Setenv("EXOCORTEX_TEST_QMD_ROOT", f.cs[0].Path)
 
 	_, sConf := Sync(context.Background(), f.cs, "hosta")
-	if sConf == nil || (sConf.Code != "index_root_mismatch" && sConf.Code != "writer_unavailable") {
-		t.Fatalf("want fail-closed root check, got %#v", sConf)
+	if sConf == nil || sConf.Code != "writer_unavailable" {
+		t.Fatalf("want writer_unavailable, got %#v", sConf)
 	}
 }
 
@@ -555,7 +577,7 @@ func TestSyncCleanupFailureRecordsError(t *testing.T) {
 	if st[0].SyncedCommit != res.Commit {
 		t.Fatalf("synced commit = %s, want %s", st[0].SyncedCommit, res.Commit)
 	}
-	if !strings.Contains(st[0].LastSyncError, "snapshotted dirty markers") {
+	if !strings.Contains(st[0].LastSyncError, "permission denied") {
 		t.Fatalf("last sync error = %q", st[0].LastSyncError)
 	}
 }

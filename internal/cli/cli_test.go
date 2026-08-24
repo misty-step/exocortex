@@ -202,8 +202,13 @@ func TestSyncAndStatusCLI(t *testing.T) {
 	binDir := t.TempDir()
 	fake := filepath.Join(binDir, "qmd")
 	script := `#!/bin/sh
+while [ "$1" = "--index" ]; do shift 2; done
 if [ "$1" = "collection" ]; then
   printf 'Collection: %s\n  Path:     %s\n' "$3" "$EXOCORTEX_TEST_QMD_ROOT"
+  exit 0
+fi
+if [ "$1" = "embed" ]; then
+  echo "Done!"
   exit 0
 fi
 exit 0
