@@ -29,6 +29,8 @@ exocortex put <path> --from draft.md                    # create-only (fails if 
 exocortex put <path> --from draft.md --expects <sha>    # update: stored-revision hash REQUIRED
 exocortex log <path>                                   # git lineage
 exocortex lint [<path>]                                # frontmatter floor gate
+exocortex sync [--cortex <name>]                       # refresh QMD index and embeddings
+exocortex status [--cortex <name>]                     # dirty markers, last sync, last error
 ```
 
 ## Docs

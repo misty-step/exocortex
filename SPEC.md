@@ -92,15 +92,19 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     embed freshness. Reads prefer the writer once it exists, and staged /
     destination / foreign-staged state on the registered checkout
     remains terminal.
-  - `sync [--cortex <name>]` — snapshot dirty markers, run
-    `qmd update` then `qmd embed -c`, persist `synced.json`, and
+  - `sync [--cortex <name>]` — acquire the same per-cortex write lock
+    as `put`, snapshot dirty markers, require `qmd collection show`
+    Path to equal `effectiveRoot` (fail-closed:
+    `index_root_unverified` / `index_root_mismatch`, markers retained),
+    run `qmd update` then `qmd embed -c`, persist `synced.json`, and
     delete only the snapshotted markers. Missing `--cortex` walks every
     registered cortex and continues after a per-cortex failure.
   - `status [--cortex <name>]` — report dirty markers, last synced
     identity, and last sync error without creating state or clones.
   - `log <path>` — git lineage.
-- **MCP stdio server** — same operations; `put` is
-  `{path, content, expectedRevision?}` — content supplied in the call.
+- **MCP stdio server** — same operations. `put` is
+  `{path, content, expectedRevision?}`; `sync` and `status` are
+  `{cortex?}`. Content is supplied in the call.
   Preconditions are evaluated inside the cortex critical section (see VCS
   lifecycle), after refresh and immediately before the atomic write.
 

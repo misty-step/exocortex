@@ -146,6 +146,36 @@ func Embed(ctx context.Context, collection string) error {
 	return nil
 }
 
+// CollectionPath returns the on-disk root of a named QMD collection by
+// parsing `qmd collection show`. Missing collections and unparseable
+// output fail closed.
+func CollectionPath(ctx context.Context, name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("qmd collection show: empty collection name")
+	}
+	cmd := exec.CommandContext(ctx, "qmd", "collection", "show", name)
+	cmd.Env = sanitizeEnv()
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("qmd collection show %s: %s %w", name, strings.TrimSpace(stderr.String()), err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		rest, ok := strings.CutPrefix(line, "Path:")
+		if !ok {
+			continue
+		}
+		p := strings.TrimSpace(rest)
+		if p == "" {
+			return "", fmt.Errorf("qmd collection show %s: empty Path", name)
+		}
+		return p, nil
+	}
+	return "", fmt.Errorf("qmd collection show %s: Path field missing", name)
+}
+
 // SplitURI decomposes a qmd file URI into its collection and
 // collection-relative path ("qmd://daybook/misty-step/x.md" ->
 // "daybook", "misty-step/x.md").
