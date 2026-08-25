@@ -318,7 +318,10 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 		}, nil
 	}
 
-	cs, _ := loadRegistry()
+	cs, err := loadRegistry()
+	if err != nil && *typeFilter != "" {
+		return nil, nil, err
+	}
 	out := make([]map[string]any, 0)
 	for _, h := range hits {
 		collection, rel, isURI := qmd.SplitURI(h.File)

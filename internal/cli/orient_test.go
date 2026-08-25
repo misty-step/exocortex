@@ -172,3 +172,23 @@ func TestSearchTypeAndBriefUseCortexPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestTypedSearchFailsClosedOnBadRegistry(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	exo := filepath.Join(cfg, "exocortex")
+	if err := os.MkdirAll(exo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(exo, "cortices.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installFakeQMD(t, `[{"docid":"#1","file":"qmd://vault/daily/x.md","score":0.9,"line":1,"title":"m","context":"","snippet":"m"}]`)
+	code, body, raw := runMain(t, "", "search", "topic", "--type", "memo", "--mode", "bm25")
+	if code == 0 {
+		t.Fatalf("typed search must fail closed on a bad registry: %s", raw)
+	}
+	if body["error"] == nil || body["error"] == "" {
+		t.Fatalf("want an error payload, got %v", body)
+	}
+}
