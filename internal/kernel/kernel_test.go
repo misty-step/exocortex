@@ -201,6 +201,30 @@ func TestRegisterDuplicateConflictsAreTyped(t *testing.T) {
 
 }
 
+func TestRegisterRejectsSymlinkAliasOfExistingRoot(t *testing.T) {
+	testConfigEnv(t)
+	root := t.TempDir()
+	if _, err := Register("box", root, "none", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Register("other", alias, "none", "", "")
+	conf, ok := err.(*Conflict)
+	if !ok || conf.Code != "duplicate_path" {
+		t.Fatalf("symlink alias: %v (%T)", err, err)
+	}
+	if conf.Detail["name"] != "box" {
+		t.Fatalf("existing name=%v", conf.Detail["name"])
+	}
+	cs, err := LoadRegistry()
+	if err != nil || len(cs) != 1 || cs[0].Name != "box" {
+		t.Fatalf("registry=%v err=%v", cs, err)
+	}
+}
+
 func TestRegisterSameNameRaceLeavesOneEntry(t *testing.T) {
 	testConfigEnv(t)
 	dirA, dirB := t.TempDir(), t.TempDir()
