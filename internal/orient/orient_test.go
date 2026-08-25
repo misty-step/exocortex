@@ -15,6 +15,7 @@ func TestMatchTypeAndBriefTable(t *testing.T) {
 		rel     string
 		file    string
 		fm      map[string]any
+		fetched bool
 		filter  string
 		want    bool
 		briefOK bool
@@ -223,8 +224,18 @@ func TestMatchTypeAndBriefTable(t *testing.T) {
 			prefix:  vault,
 			rel:     "docs/adr/0001.md",
 			file:    "qmd://vault/docs/adr/0001.md",
+			fetched: true,
 			filter:  "decision",
 			want:    true,
+			briefOK: true,
+		},
+		{
+			name:    "get-failed orientation path is not decision",
+			prefix:  vault,
+			rel:     "projects/ghost.md",
+			file:    "qmd://vault/projects/ghost.md",
+			filter:  "decision",
+			want:    false,
 			briefOK: true,
 		},
 		{
@@ -281,7 +292,8 @@ func TestMatchTypeAndBriefTable(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := MatchType(tc.prefix, tc.rel, tc.file, tc.filter, tc.fm)
+			fetched := tc.fetched || tc.fm != nil
+			got := MatchType(tc.prefix, tc.rel, tc.file, tc.filter, tc.fm, fetched)
 			if got != tc.want {
 				t.Fatalf("MatchType(%s)=%v want %v", tc.filter, got, tc.want)
 			}

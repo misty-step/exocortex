@@ -230,7 +230,8 @@ cat <<'EOF'
 [
   {"docid":"#m","file":"qmd://emma/daily/2026-08-25/n.md","score":0.9,"line":1,"title":"memo","context":"","snippet":"memo"},
   {"docid":"#d","file":"qmd://emma/keep.md","score":0.8,"line":1,"title":"Keep","context":"","snippet":"keep"},
-  {"docid":"#x","file":"qmd://emma/keep.md","score":0.7,"line":1,"title":"Keep2","context":"","snippet":"keep2"}
+  {"docid":"#x","file":"qmd://emma/keep.md","score":0.7,"line":1,"title":"Keep2","context":"","snippet":"keep2"},
+  {"docid":"#g","file":"qmd://emma/projects/ghost.md","score":0.6,"line":1,"title":"Ghost","context":"","snippet":"ghost"}
 ]
 EOF
 `
@@ -280,5 +281,36 @@ EOF
 	}
 	if hits[0]["score"] != 0.9 || hits[0]["snippet"] != "memo" {
 		t.Fatalf("QMD fields lost: %v", hits[0])
+	}
+
+	res, err = session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "exocortex_search",
+		Arguments: map[string]any{
+			"query": "topic",
+			"type":  "decision",
+			"mode":  "bm25",
+			"limit": 10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("decision search: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("decision search error: %v", res.Content)
+	}
+	tc, ok = res.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("decision content %T", res.Content[0])
+	}
+	if err := json.Unmarshal([]byte(tc.Text), &hits); err != nil {
+		t.Fatalf("decision hits: %v\n%s", err, tc.Text)
+	}
+	for _, h := range hits {
+		if h["path"] == "projects/ghost.md" {
+			t.Fatalf("Get-miss path leaked into decision: %v", hits)
+		}
+	}
+	if len(hits) == 0 {
+		t.Fatal("decision filter dropped the live keep.md note")
 	}
 }

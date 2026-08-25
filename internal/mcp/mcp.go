@@ -185,9 +185,10 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 			"file":    h.File,
 		}
 		var (
-			c   *kernel.Cortex
-			rel string
-			fm  map[string]any
+			c       *kernel.Cortex
+			rel     string
+			fm      map[string]any
+			fetched bool
 		)
 		if collection, path, ok := qmd.SplitURI(h.File); ok {
 			entry["cortex"] = collection
@@ -197,10 +198,11 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 			if a.Type != "" && c != nil && path != "" {
 				if res, conf := kernel.Get(cs, collection, path); conf == nil && res != nil {
 					fm = res.Frontmatter
+					fetched = true
 				}
 			}
 		}
-		if a.Type != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, a.Type, fm) {
+		if a.Type != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, a.Type, fm, fetched) {
 			continue
 		}
 		out = append(out, entry)

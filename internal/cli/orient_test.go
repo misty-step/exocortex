@@ -98,7 +98,8 @@ func TestSearchTypeAndBriefUseCortexPolicy(t *testing.T) {
   {"docid":"#9","file":"qmd://emma/dead.md","score":0.1,"line":1,"title":"Dead","context":"","snippet":"dead"},
   {"docid":"#10","file":"qmd://omp-sessions/2026/x.jsonl","score":0.05,"line":1,"title":"sess","context":"","snippet":"sess"},
   {"docid":"#11","file":"qmd://vault/notes/shared.md","score":0.04,"line":1,"title":"Vault shared","context":"","snippet":"shared"},
-  {"docid":"#12","file":"qmd://emma/notes/shared.md","score":0.03,"line":1,"title":"Emma shared","context":"","snippet":"shared"}
+  {"docid":"#12","file":"qmd://emma/notes/shared.md","score":0.03,"line":1,"title":"Emma shared","context":"","snippet":"shared"},
+  {"docid":"#13","file":"qmd://vault/projects/ghost.md","score":0.02,"line":1,"title":"Ghost","context":"","snippet":"ghost"}
 ]`)
 
 	code, _, raw = runMain(t, "", "search", "topic", "--type", "memo", "--mode", "bm25", "--limit", "20")
@@ -123,8 +124,8 @@ func TestSearchTypeAndBriefUseCortexPolicy(t *testing.T) {
 	}
 	if hasPath(decPaths, "meta/agents-board/memo/2026-08-25/a.md") || hasPath(decPaths, "daily/2026-08-25/n.md") ||
 		hasPath(decPaths, "Clippings/book.md") || hasPath(decPaths, "meta/conversations/2026-08-25.md") ||
-		hasPath(decPaths, "projects/old.md") {
-		t.Fatalf("decision filter leaked noise or dead notes: %v", decPaths)
+		hasPath(decPaths, "projects/old.md") || hasPath(decPaths, "projects/ghost.md") {
+		t.Fatalf("decision filter leaked noise, dead notes, or unread paths: %v", decPaths)
 	}
 
 	code, _, raw = runMain(t, "", "search", "topic", "--type", "session", "--mode", "bm25", "--limit", "20")

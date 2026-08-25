@@ -30,8 +30,10 @@ var untypedDecisionPrefixes = []string{
 }
 
 // MatchType reports whether a search hit satisfies --type. Memo matching
-// uses journalPrefix, not a compiled Daybook path.
-func MatchType(journalPrefix, rel, fileURI, filter string, fm map[string]any) bool {
+// uses journalPrefix, not a compiled Daybook path. fetched is true only
+// when a canonical Get succeeded; untyped decision-path fallback
+// requires that, so a Get conflict cannot fail open.
+func MatchType(journalPrefix, rel, fileURI, filter string, fm map[string]any, fetched bool) bool {
 	f := strings.ToLower(strings.TrimSpace(filter))
 	if f == "" {
 		return true
@@ -50,7 +52,7 @@ func MatchType(journalPrefix, rel, fileURI, filter string, fm map[string]any) bo
 		if typ != "" {
 			return decisionType(typ, status)
 		}
-		return liveStatus(status) && decisionPath(rel)
+		return fetched && liveStatus(status) && decisionPath(rel)
 	default:
 		return typ != "" && strings.EqualFold(typ, f)
 	}

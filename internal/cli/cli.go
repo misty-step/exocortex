@@ -339,7 +339,7 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 				}
 			}
 		}
-		if *typeFilter != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, *typeFilter, fm) {
+		if *typeFilter != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, *typeFilter, fm, res != nil) {
 			continue
 		}
 
