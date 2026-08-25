@@ -79,13 +79,6 @@ func Search(ctx context.Context, query string, collections []string, mode string
 		limit = 20
 	}
 	run := func(cmdName string) ([]Hit, error) {
-		tmpFile, err := os.CreateTemp("", "qmd-search-*.json")
-		if err != nil {
-			return nil, err
-		}
-		tmpPath := tmpFile.Name()
-		defer os.Remove(tmpPath)
-
 		args := qmdArgs(cmdName, "--format", "json", "-n", strconv.Itoa(limit))
 		for _, c := range collections {
 			if c != "" {
@@ -95,35 +88,45 @@ func Search(ctx context.Context, query string, collections []string, mode string
 		args = append(args, query)
 		cmd := exec.CommandContext(ctx, "qmd", args...)
 		cmd.Env = sanitizeEnv()
-		cmd.Stdout = tmpFile
 		var stderr strings.Builder
 		cmd.Stderr = &stderr
 
-		if err := cmd.Run(); err != nil {
-			tmpFile.Close()
+		data, err := cmd.Output()
+		if err != nil {
 			return nil, fmt.Errorf("qmd %s failed: %s: %w", cmdName, strings.TrimSpace(stderr.String()), err)
 		}
-		tmpFile.Close()
 
-		data, err := os.ReadFile(tmpPath)
-		if err != nil {
-			return nil, err
-		}
-		start := bytes.IndexByte(data, '[')
-		if start < 0 {
-			return nil, fmt.Errorf("qmd %s returned non-JSON output: %s", cmdName, strings.TrimSpace(string(data)))
-		}
-		var hits []Hit
-		if err := json.Unmarshal(data[start:], &hits); err != nil {
-			return nil, fmt.Errorf("qmd returned unparseable JSON: %w", err)
-		}
-		return hits, nil
+		return parseJSONHits(cmdName, data)
 	}
 	hits, err := run(sub)
 	if err != nil && mode == "hybrid" {
 		return run("search")
 	}
 	return hits, err
+}
+
+// parseJSONHits scans data in-memory for the starting bracket of a valid JSON
+// hit array, tolerating arbitrary non-JSON logging or preamble lines preceding it.
+func parseJSONHits(cmdName string, data []byte) ([]Hit, error) {
+	var lastErr error
+	for offset := 0; offset < len(data); {
+		idx := bytes.IndexByte(data[offset:], '[')
+		if idx < 0 {
+			break
+		}
+		start := offset + idx
+		var hits []Hit
+		if err := json.Unmarshal(data[start:], &hits); err == nil {
+			return hits, nil
+		} else {
+			lastErr = err
+		}
+		offset = start + 1
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("qmd returned unparseable JSON: %w", lastErr)
+	}
+	return nil, fmt.Errorf("qmd %s returned non-JSON output: %s", cmdName, strings.TrimSpace(string(data)))
 }
 
 // Update runs `qmd update <collection>`.
