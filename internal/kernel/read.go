@@ -13,25 +13,6 @@ import (
 	"github.com/misty-step/exocortex/internal/fm"
 )
 
-// Conflict is an operation failure returned as data (CR-04): a stable
-// machine-readable code, the operation and input it names, structured
-// detail, and a recovery hint.
-type Conflict struct {
-	Code      string
-	Operation string
-	Path      string
-	Detail    map[string]any
-	Hint      string
-}
-
-func (c *Conflict) Error() string {
-	return fmt.Sprintf("%s (%s op=%s path=%s)", c.Code, c.Code, c.Operation, c.Path)
-}
-
-func conflict(code, op, path, hint string, detail map[string]any) *Conflict {
-	return &Conflict{Code: code, Operation: op, Path: path, Hint: hint, Detail: detail}
-}
-
 // GetResult is the pinned `get` output.
 type GetResult struct {
 	Cortex      string         `json:"cortex"`
