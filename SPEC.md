@@ -80,18 +80,18 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     payload on every terminal conflict. Memo notes are silent under the
     daybook profile. Journal files are
     append-only: generic `put` updates under the journal prefix abort
-    `journal_immutable` (ADR-0002/0003). When the registered checkout
-    carries unrelated foreign UNSTAGED dirt (the heartbeat pattern),
-    daybook-cortex writes fall back to a persistent per-cortex
-    CLEAN-WRITER clone under
-    `<config>/exocortex/writers/<name>` (created on demand from the
-    checkout's origin, ff-synced): the write lands there and pushes.
-    The writer tree is the authoritative indexed root; the QMD
-    collection named for the cortex must point at that tree (or, for
+    `journal_immutable` (ADR-0002/0003). For `vcs=daybook`, the kernel
+    never writes, scans, stashes, or commits the registered human
+    checkout. The sole publisher is a persistent clone under
+    `<config>/exocortex/writers/<name>`, provisioned from the checkout's
+    origin and fail-closed (`writer_unavailable`) if origin or clone
+    setup fails. Preflight, refresh, CAS, and the VCS tail all run on
+    that clone. The writer tree is the authoritative indexed root; the
+    QMD collection named for the cortex must point at that tree (or, for
     `caller`/`none`, at the registered path). `sync` owns index and
-    embed freshness. Reads prefer the writer once it exists, and staged /
-    destination / foreign-staged state on the registered checkout
-    remains terminal.
+    embed freshness. `get`/`log`/`lint` read the writer once it exists
+    (`git show HEAD:<path>` for daybook). Human-checkout dirt is
+    invisible to the kernel.
   - `sync [--cortex <name>]` — acquire the same per-cortex write lock
     as `put`, snapshot dirty markers, require `qmd collection show`
     Path to equal `effectiveRoot` (fail-closed:
@@ -138,27 +138,26 @@ acquired BEFORE any state is read and released only at the end. The VCS
 policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
 
 1. lock;
-2. pre-flight — `daybook` only, all three aborts conflict-as-data, run
-   BEFORE refresh: with the tree already clean, the mandated
-   `pull --rebase --autostash` has no in-flight work to cycle through a
-   stash/pop conflict window. The create-mode existence fast-path also
-   reads here — under the lock (step 1), never before it, so a peer's
-   transient file mid-put cannot answer `exists` and then vanish with
-   its unwind;
+2. pre-flight — `daybook` only, on the writer clone, all three aborts
+   conflict-as-data, run BEFORE refresh. There is no
+   `--autostash`: the writer is kernel-owned and must stay clean, so
+   `git pull --rebase` has no in-flight human work. The create-mode
+   existence check is NOT a working-tree stat; CAS later answers
+   existence from `HEAD:<path>` only. Preflight still runs under the
+   lock (step 1), never before it:
    - staged paths outside this operation's touched set
      (`foreign_staged_state`) — never commit, stash away, or discard
      another worker's staged state;
    - destination staged or unstaged-dirty vs HEAD (updates only; a
-     create overwrites nothing, so CAS existence answers it) →
+     create overwrites nothing in HEAD, so CAS existence answers it) →
      `dirty_destination`;
    - unstaged modifications outside the touched set
      (`foreign_unstaged_state`) — untracked files are allowed; modified
      or deleted tracked files belong to another worker, and the step-8
      unwind must never be able to reach them;
-3. refresh — `daybook`: `git pull --rebase --autostash` (per the
-   operator decision record; normally inert behind step 2's clean-scan),
-   then REPEAT step 2's scan against post-refresh state (the pull window
-   may have changed things); `caller`/`none`: nothing;
+3. refresh — `daybook`: `git pull --rebase` on the writer clone (no
+   `--autostash`), then REPEAT step 2's scan against post-refresh
+   state; `caller`/`none`: nothing;
 4. CAS: re-read the stored destination revision; evaluate `--expects` or
    create-absence against fresh state;
 5. validate the payload under the cortex profile — invalid payloads fail
@@ -282,12 +281,14 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
 
 ### v0 acceptance proofs
 
-1. Bare put on any existing path — tracked, staged, or untracked — exits
-   nonzero with `exists` and a hint directing get → `--expects`. There is
-   no intent inference and no `missing_expects` code (operator decision
-   2026-08-21): overwriting without a stored-revision hash is impossible
-   in every mode, and a stale or malformed hash falls out as an ordinary
-   `revision_conflict`.
+1. Bare put on a path that exists in HEAD (the committed snapshot)
+   exits nonzero with `exists` and a hint directing get → `--expects`.
+   Existence is `git show HEAD:<path>` for daybook, not a working-tree
+   stat: an untracked leftover in the writer clone is crash residue and
+   create overwrites it. There is no intent inference and no
+   `missing_expects` code (operator decision 2026-08-21): overwriting a
+   committed note without a stored-revision hash is impossible, and a
+   stale or malformed hash falls out as an ordinary `revision_conflict`.
 2. Bare put on existing path: `exists`. Create race under concurrency:
    exactly one creator wins; the loser gets `exists` and leaves no trace.
 3. `--expects` mismatch: `revision_conflict` carrying actual revision.
