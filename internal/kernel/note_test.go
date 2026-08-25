@@ -77,6 +77,80 @@ func TestNoteCreatesImmutableJournalFiles(t *testing.T) {
 	}
 }
 
+func TestNoteUsesEffectiveJournalPrefix(t *testing.T) {
+	testConfigEnv(t)
+	root := t.TempDir()
+	c, err := Register("board", root, "none", "", "meta/agents-board/memo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := []Cortex{*c}
+	res, conf := Note(nil, cs, NoteInput{CortexName: "board", Text: "custom prefix", Agent: "pref", Via: "cli"})
+	if conf != nil {
+		t.Fatal(conf.Code)
+	}
+	if !strings.HasPrefix(res.Path, "meta/agents-board/memo/") {
+		t.Fatalf("path=%s, want custom prefix", res.Path)
+	}
+	if _, err := os.Stat(filepath.Join(root, res.Path)); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "journal")); len(entries) != 0 {
+		t.Fatalf("default journal/ must stay empty: %v", entries)
+	}
+}
+
+func TestNoteAmbiguousMultiCortexFailsBeforePut(t *testing.T) {
+	testConfigEnv(t)
+	a := t.TempDir()
+	b := t.TempDir()
+	ca, err := Register("alpha", a, "none", "", "meta/board")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb, err := Register("beta", b, "none", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := []Cortex{*ca, *cb}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := os.Chdir(a); err != nil {
+		t.Fatal(err)
+	}
+
+	res, conf := Note(nil, cs, NoteInput{Text: "should not land", Agent: "x", Via: "cli"})
+	if res != nil {
+		t.Fatalf("ambiguous note returned %s", res.Path)
+	}
+	if conf == nil || conf.Code != "resolve_failed" || conf.Operation != "note" {
+		t.Fatalf("want resolve_failed note, got %+v", conf)
+	}
+	for _, root := range []string{a, b} {
+		if walkHasMarkdown(t, root) {
+			t.Fatalf("ambiguous note wrote under %s", root)
+		}
+	}
+}
+
+func walkHasMarkdown(t *testing.T, root string) bool {
+	t.Helper()
+	found := false
+	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".md") {
+			found = true
+		}
+		return nil
+	})
+	return found
+}
+
 // Proof 14: two journal writers racing across clones BOTH land. A's
 // push is genuinely rejected after B's different-path note lands; the
 // retry finds A's unique path still free and publishes on top of B's

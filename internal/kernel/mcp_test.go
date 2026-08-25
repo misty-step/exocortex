@@ -172,3 +172,36 @@ func TestMCPSyncAndStatus(t *testing.T) {
 		t.Fatalf("status after sync: isErr=%v body=%v", isErr, st)
 	}
 }
+
+func TestMCPRegisterDuplicateIsConflict(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "kernel-test", Version: "v0"}, nil)
+	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: exec.Command(binPath, "mcp")}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer session.Close()
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "exocortex_register",
+		Arguments: map[string]any{"name": "hosta", "path": f.a},
+	})
+	if err != nil {
+		t.Fatalf("register call: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("duplicate register must be a tool error result")
+	}
+	tc, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("content %T", res.Content[0])
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(tc.Text), &body); err != nil {
+		t.Fatalf("body: %v\n%s", err, tc.Text)
+	}
+	if body["error"] != "duplicate_cortex" {
+		t.Fatalf("body=%v", body)
+	}
+}

@@ -197,20 +197,11 @@ func cmdRegister(args []string) (any, *kernel.Conflict, error) {
 		return nil, inputErr("register", "register requires <name> <path>",
 			"exocortex register <name> <path> [--vcs daybook|caller|none]"), nil
 	}
-	// Duplicate detection as data, before the domain error.
-	cs, err := loadRegistry()
-	if err != nil {
-		return nil, nil, err
-	}
-	for i := range cs {
-		if cs[i].Name == pos[0] {
-			return nil, &kernel.Conflict{Code: "duplicate_cortex", Operation: "register",
-				Path: pos[0], Hint: "pick a new name or inspect the existing cortex with get/search",
-				Detail: map[string]any{"path": cs[i].Path}}, nil
-		}
-	}
 	c, err := kernel.Register(pos[0], pos[1], *vcs, *profile, *jprefix)
 	if err != nil {
+		if conf, ok := err.(*kernel.Conflict); ok {
+			return nil, conf, nil
+		}
 		return nil, &kernel.Conflict{Code: "registration_failed", Operation: "register",
 			Path: pos[1], Hint: "fix the name (lowercase slug), path, vcs, or profile and retry",
 			Detail: map[string]any{"detail": err.Error()}}, nil

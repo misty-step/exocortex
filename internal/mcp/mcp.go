@@ -220,7 +220,16 @@ func lint(ctx context.Context, req *mcp.CallToolRequest, a lintArgs) (*mcp.CallT
 func register(ctx context.Context, req *mcp.CallToolRequest, a registerArgs) (*mcp.CallToolResult, any, error) {
 	c, err := kernel.Register(a.Name, a.Path, a.VCS, a.Profile, a.JournalPrefix)
 	if err != nil {
-		return nil, nil, err
+		if conf, ok := err.(*kernel.Conflict); ok {
+			return toolResult(nil, conf)
+		}
+		return toolResult(nil, &kernel.Conflict{
+			Code:      "registration_failed",
+			Operation: "register",
+			Path:      a.Path,
+			Hint:      "fix the name (lowercase slug), path, vcs, or profile and retry",
+			Detail:    map[string]any{"detail": err.Error()},
+		})
 	}
 	return toolResult(map[string]any{"registered": c}, nil)
 }

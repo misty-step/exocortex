@@ -17,21 +17,25 @@ type NoteInput struct {
 }
 
 // Note writes a journal micro-memory as an IMMUTABLE file,
-// journal/YYYY-MM-DD/<ulid>-<agent>.md, through the standard put
-// pipeline (create-only; the path is unique by construction). One file
-// per memory keeps concurrent writers out of a whole-file CAS hotspot:
-// no two agents ever touch the same revision. Reflection compiles the
-// journal later; the journal itself is append-only.
+// <journal_prefix>/YYYY-MM-DD/<ulid>-<agent>.md, through the standard
+// put pipeline (create-only; the path is unique by construction). One
+// file per memory keeps concurrent writers out of a whole-file CAS
+// hotspot: no two agents ever touch the same revision. Reflection
+// compiles the journal later; the journal itself is append-only.
+
 func Note(ctx context.Context, cs []Cortex, in NoteInput) (*PutResult, *Conflict) {
-	prefix := "journal"
-	if i := cortexByName(cs, in.CortexName); i != nil && i.JournalPrefix != "" {
-		prefix = i.JournalPrefix // legacy registry entries default to journal/
-	}
 	text := strings.TrimSpace(in.Text)
 	if text == "" {
 		return nil, conflict("empty_note", "note", "",
 			"pass the thought worth remembering as the argument", nil)
 	}
+	c, err := ResolveCortex(cs, in.CortexName)
+	if err != nil {
+		return nil, conflict("resolve_failed", "note", in.CortexName,
+			"register a cortex or pass --cortex <name>",
+			map[string]any{"detail": err.Error()})
+	}
+	prefix := effectiveJournalPrefix(c)
 
 	// Journal captures must never lose a memory to remote movement.
 	// Paths are unique, so every cross-host push race is benign: after
@@ -46,7 +50,7 @@ func Note(ctx context.Context, cs []Cortex, in NoteInput) (*PutResult, *Conflict
 		rel := fmt.Sprintf("%s/%s/%s-%s.md", prefix, now.Format("2006-01-02"), newULID(now), slug(agentID(in.Agent)))
 		payload = []byte(fmt.Sprintf("---\ntype: memo\ncreated: %s\n---\n\n%s\n", now.Format(time.RFC3339), text))
 		res, conf := Put(ctx, cs, PutInput{
-			CortexName: in.CortexName,
+			CortexName: c.Name,
 			Path:       rel,
 			Payload:    payload,
 			Agent:      in.Agent,
@@ -101,23 +105,6 @@ func newULID(now time.Time) string {
 		out = append(out, enc[(acc<<(5-bits))&31])
 	}
 	return string(out)
-}
-
-// cortexByName finds a cortex without path resolution (Note needs the
-// journal prefix before the put pipeline resolves anything).
-func cortexByName(cs []Cortex, name string) *Cortex {
-	if name == "" {
-		if len(cs) == 1 {
-			return &cs[0]
-		}
-		return nil
-	}
-	for i := range cs {
-		if cs[i].Name == name {
-			return &cs[i]
-		}
-	}
-	return nil
 }
 
 // slug reduces an agent id to filename-safe characters.
