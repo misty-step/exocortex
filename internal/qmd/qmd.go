@@ -68,12 +68,9 @@ func qmdArgs(args ...string) []string {
 // Search runs one qmd retrieval with a sanitized environment and returns raw hits.
 // If hybrid query expansion fails, it falls back to deterministic BM25 search.
 func Search(ctx context.Context, query string, collections []string, mode string, limit int) ([]Hit, error) {
-	if mode == "" {
-		mode = "hybrid"
-	}
-	sub, ok := subcommand[mode]
-	if !ok {
-		return nil, fmt.Errorf("mode %q must be hybrid, bm25, or vector", mode)
+	sub, err := subcommandFor(mode)
+	if err != nil {
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 20
@@ -99,34 +96,60 @@ func Search(ctx context.Context, query string, collections []string, mode string
 		return parseJSONHits(cmdName, data)
 	}
 	hits, err := run(sub)
-	if err != nil && mode == "hybrid" {
+	if err != nil && (mode == "hybrid" || (mode == "" && sub == "query")) && ctx.Err() == nil {
 		return run("search")
 	}
 	return hits, err
 }
 
-// parseJSONHits scans data in-memory for the starting bracket of a valid JSON
-// hit array, tolerating arbitrary non-JSON logging or preamble lines preceding it.
-func parseJSONHits(cmdName string, data []byte) ([]Hit, error) {
-	var lastErr error
+// findJSONArrayStart locates the offset of a top-level JSON array opener in data.
+// It skips non-JSON logging preambles (e.g. "[info] ...") by requiring the '[' to
+// appear at a line boundary followed by valid array contents ('{' or ']').
+func findJSONArrayStart(data []byte) (int, bool) {
 	for offset := 0; offset < len(data); {
-		idx := bytes.IndexByte(data[offset:], '[')
-		if idx < 0 {
+		// Skip leading line-break and whitespace bytes
+		for offset < len(data) && (data[offset] == ' ' || data[offset] == '\t' || data[offset] == '\r' || data[offset] == '\n') {
+			offset++
+		}
+		if offset >= len(data) {
 			break
 		}
-		start := offset + idx
-		var hits []Hit
-		if err := json.Unmarshal(data[start:], &hits); err == nil {
-			return hits, nil
-		} else {
-			lastErr = err
+		if data[offset] == '[' {
+			rest := data[offset+1:]
+			for len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\r' || rest[0] == '\n') {
+				rest = rest[1:]
+			}
+			if len(rest) > 0 && (rest[0] == '{' || rest[0] == ']') {
+				return offset, true
+			}
 		}
-		offset = start + 1
+		nl := bytes.IndexByte(data[offset:], '\n')
+		if nl < 0 {
+			break
+		}
+		offset += nl + 1
 	}
-	if lastErr != nil {
-		return nil, fmt.Errorf("qmd returned unparseable JSON: %w", lastErr)
+	return -1, false
+}
+
+// parseJSONHits parses stdout into a slice of Hit records in memory.
+func parseJSONHits(cmdName string, data []byte) ([]Hit, error) {
+	start, ok := findJSONArrayStart(data)
+	if !ok {
+		preview := strings.TrimSpace(string(data))
+		if len(preview) > 256 {
+			preview = preview[:256] + "..."
+		}
+		return nil, fmt.Errorf("qmd %s returned non-JSON output: %s", cmdName, preview)
 	}
-	return nil, fmt.Errorf("qmd %s returned non-JSON output: %s", cmdName, strings.TrimSpace(string(data)))
+	var hits []Hit
+	if err := json.Unmarshal(data[start:], &hits); err != nil {
+		return nil, fmt.Errorf("qmd returned unparseable JSON: %w", err)
+	}
+	if hits == nil {
+		hits = []Hit{}
+	}
+	return hits, nil
 }
 
 // Update runs `qmd update <collection>`.

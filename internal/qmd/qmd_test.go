@@ -98,21 +98,21 @@ func TestSearchLargeJSONScaleWithoutTempFiles(t *testing.T) {
 	binDir := t.TempDir()
 	fakeQMD := filepath.Join(binDir, "qmd")
 
-	// Generate a script that outputs 500 items (>500 KB) of JSON
+	// Generate a script that outputs 600 items (>512 KB) of JSON
 	script := `#!/bin/sh
 echo "["
-for i in $(seq 1 500); do
+for i in $(seq 1 600); do
   comma=","
-  if [ "$i" -eq 500 ]; then comma=""; fi
+  if [ "$i" -eq 600 ]; then comma=""; fi
   cat <<ITEM
   {
     "docid": "#scale$i",
     "file": "qmd://col1/notes/scale-$i.md",
     "score": 0.88,
     "line": $i,
-    "title": "Scale Test Note $i with extensive title payload",
-    "context": "Extended context field for item $i designed to ensure high memory throughput and stream buffer drainage.",
-    "snippet": "@@ -10,20 @@ Very large snippet content section $i containing multiple lines of text, symbols, and structured Markdown formatting for stream verification."
+    "title": "Scale Test Note $i with extensive title payload padded to guarantee substantial memory stream throughput",
+    "context": "Extended context field for item $i designed to ensure high memory throughput and stream buffer drainage across all platforms.",
+    "snippet": "@@ -10,20 @@ Very large snippet content section $i containing multiple lines of text, symbols, and structured Markdown formatting for stream verification without OS pipe buffer deadlocks."
   }$comma
 ITEM
 done
@@ -123,31 +123,18 @@ echo "]"
 	}
 
 	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	// Point TMPDIR at a nonexistent directory: any attempt to use os.CreateTemp will fail immediately
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "nonexistent_dir", "no_tmp"))
 
-	// Assert no lingering qmd-search temp files before query
-	matchesBefore, err := filepath.Glob(filepath.Join(os.TempDir(), "qmd-search-*.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	hits, err := Search(context.Background(), "scale-query", []string{"col1"}, "bm25", 500)
+	hits, err := Search(context.Background(), "scale-query", []string{"col1"}, "bm25", 600)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
-	if len(hits) != 500 {
-		t.Fatalf("got %d hits, want 500", len(hits))
+	if len(hits) != 600 {
+		t.Fatalf("got %d hits, want 600", len(hits))
 	}
-	if hits[0].DocID != "#scale1" || hits[499].DocID != "#scale500" {
-		t.Fatalf("unexpected bounds: first=%s, last=%s", hits[0].DocID, hits[499].DocID)
-	}
-
-	// Assert no qmd-search temp files were created on disk
-	matchesAfter, err := filepath.Glob(filepath.Join(os.TempDir(), "qmd-search-*.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matchesAfter) > len(matchesBefore) {
-		t.Fatalf("found %d temporary files created by Search: %v", len(matchesAfter)-len(matchesBefore), matchesAfter)
+	if hits[0].DocID != "#scale1" || hits[599].DocID != "#scale600" {
+		t.Fatalf("unexpected bounds: first=%s, last=%s", hits[0].DocID, hits[599].DocID)
 	}
 }
 
@@ -155,9 +142,11 @@ func TestSearchHandlesLeadingNonJSONPreamble(t *testing.T) {
 	binDir := t.TempDir()
 	fakeQMD := filepath.Join(binDir, "qmd")
 
+	// Preamble contains bracketed logs including empty brackets "[info] candidates=[]"
 	script := `#!/bin/sh
 echo "[info] model loaded in 12ms"
-echo "[warning] collection cache cold, loading metadata..."
+echo "[warning] candidates=[]"
+echo "[debug] cache=[cold]"
 cat <<EOF
 [
   {
@@ -183,6 +172,51 @@ EOF
 	}
 	if len(hits) != 1 || hits[0].DocID != "#doc-preamble" {
 		t.Fatalf("unexpected hits: %+v", hits)
+	}
+}
+
+func TestSearchTruncatedJSONFailsCleanly(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	// Emit truncated JSON array with bracket inside string
+	script := `#!/bin/sh
+echo '[{"docid":"#partial","snippet":"[ ]'
+exit 0
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	_, err := Search(context.Background(), "truncated", []string{"daybook"}, "bm25", 10)
+	if err == nil {
+		t.Fatal("expected error on truncated JSON output")
+	}
+	if !strings.Contains(err.Error(), "unparseable JSON") {
+		t.Fatalf("expected unparseable JSON error, got: %v", err)
+	}
+}
+
+func TestSearchContextCancellationNoFallback(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	script := `#!/bin/sh
+sleep 10
+exit 0
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	_, err := Search(ctx, "cancel-query", []string{"daybook"}, "hybrid", 10)
+	if err == nil {
+		t.Fatal("expected error on cancelled context")
 	}
 }
 
