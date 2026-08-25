@@ -55,6 +55,16 @@ func sanitizeEnv() []string {
 	return env
 }
 
+// DefaultSearchLimit is the standard number of hits returned when limit is unspecified or <= 0.
+const DefaultSearchLimit = 20
+
+// MaxSearchLimit is the hard ceiling on requested search hits to guarantee
+// bounded memory consumption during stream decoding.
+const MaxSearchLimit = 100
+
+// MaxSearchOutputBytes is the maximum allowed stdout byte size for a single QMD query (2 MiB).
+const MaxSearchOutputBytes = 2 * 1024 * 1024
+
 // indexFlag pins the global QMD index so cwd-local .qmd trees cannot
 // steal search or sync from the fleet collection database.
 var indexFlag = []string{"--index", "index"}
@@ -73,7 +83,9 @@ func Search(ctx context.Context, query string, collections []string, mode string
 		return nil, err
 	}
 	if limit <= 0 {
-		limit = 20
+		limit = DefaultSearchLimit
+	} else if limit > MaxSearchLimit {
+		limit = MaxSearchLimit
 	}
 	run := func(cmdName string) ([]Hit, error) {
 		args := qmdArgs(cmdName, "--format", "json", "-n", strconv.Itoa(limit))
@@ -85,15 +97,19 @@ func Search(ctx context.Context, query string, collections []string, mode string
 		args = append(args, query)
 		cmd := exec.CommandContext(ctx, "qmd", args...)
 		cmd.Env = sanitizeEnv()
+		stdoutBuf := limitedBuffer{max: MaxSearchOutputBytes}
+		cmd.Stdout = &stdoutBuf
 		var stderr strings.Builder
 		cmd.Stderr = &stderr
 
-		data, err := cmd.Output()
-		if err != nil {
+		if err := cmd.Run(); err != nil {
 			return nil, fmt.Errorf("qmd %s failed: %s: %w", cmdName, strings.TrimSpace(stderr.String()), err)
 		}
+		if stdoutBuf.total > MaxSearchOutputBytes {
+			return nil, fmt.Errorf("qmd %s output exceeded safety limit of %d bytes", cmdName, MaxSearchOutputBytes)
+		}
 
-		return parseJSONHits(cmdName, data)
+		return parseJSONHits(cmdName, stdoutBuf.Bytes())
 	}
 	hits, err := run(sub)
 	if err != nil && (mode == "hybrid" || (mode == "" && sub == "query")) && ctx.Err() == nil {
@@ -150,6 +166,31 @@ func parseJSONHits(cmdName string, data []byte) ([]Hit, error) {
 		hits = []Hit{}
 	}
 	return hits, nil
+}
+
+// limitedBuffer captures up to max bytes in memory, discarding any excess
+// bytes while continuing to drain the stream and counting total received bytes.
+type limitedBuffer struct {
+	buf   bytes.Buffer
+	max   int
+	total int
+}
+
+func (l *limitedBuffer) Write(p []byte) (int, error) {
+	l.total += len(p)
+	if l.buf.Len() < l.max {
+		remaining := l.max - l.buf.Len()
+		if len(p) <= remaining {
+			l.buf.Write(p)
+		} else {
+			l.buf.Write(p[:remaining])
+		}
+	}
+	return len(p), nil
+}
+
+func (l *limitedBuffer) Bytes() []byte {
+	return l.buf.Bytes()
 }
 
 // Update runs `qmd update <collection>`.

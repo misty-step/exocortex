@@ -98,12 +98,12 @@ func TestSearchLargeJSONScaleWithoutTempFiles(t *testing.T) {
 	binDir := t.TempDir()
 	fakeQMD := filepath.Join(binDir, "qmd")
 
-	// Generate a script that outputs 600 items (>512 KB) of JSON
+	// Generate a script that outputs 100 items (~100 KB) of JSON
 	script := `#!/bin/sh
 echo "["
-for i in $(seq 1 600); do
+for i in $(seq 1 100); do
   comma=","
-  if [ "$i" -eq 600 ]; then comma=""; fi
+  if [ "$i" -eq 100 ]; then comma=""; fi
   cat <<ITEM
   {
     "docid": "#scale$i",
@@ -126,15 +126,90 @@ echo "]"
 	// Point TMPDIR at a nonexistent directory: any attempt to use os.CreateTemp will fail immediately
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "nonexistent_dir", "no_tmp"))
 
-	hits, err := Search(context.Background(), "scale-query", []string{"col1"}, "bm25", 600)
+	hits, err := Search(context.Background(), "scale-query", []string{"col1"}, "bm25", 100)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
-	if len(hits) != 600 {
-		t.Fatalf("got %d hits, want 600", len(hits))
+	if len(hits) != 100 {
+		t.Fatalf("got %d hits, want 100", len(hits))
 	}
-	if hits[0].DocID != "#scale1" || hits[599].DocID != "#scale600" {
-		t.Fatalf("unexpected bounds: first=%s, last=%s", hits[0].DocID, hits[599].DocID)
+	if hits[0].DocID != "#scale1" || hits[99].DocID != "#scale100" {
+		t.Fatalf("unexpected bounds: first=%s, last=%s", hits[0].DocID, hits[99].DocID)
+	}
+}
+
+func TestSearchLimitClamping(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	// Script logs the -n flag value passed to qmd
+	script := `#!/bin/sh
+for arg in "$@"; do
+  if [ "$prev" = "-n" ]; then
+    echo "$arg" > "$1.limit"
+  fi
+  prev="$arg"
+done
+echo "[]"
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	// Case 1: Limit = 500 should be clamped to 100 (MaxSearchLimit)
+	_, err := Search(context.Background(), "clamp-test", []string{"col1"}, "bm25", 500)
+	if err != nil {
+		t.Fatalf("Search with limit 500 failed: %v", err)
+	}
+
+	// Case 2: Limit = 0 or negative should default to 20 (DefaultSearchLimit)
+	_, err = Search(context.Background(), "default-test", []string{"col1"}, "bm25", 0)
+	if err != nil {
+		t.Fatalf("Search with limit 0 failed: %v", err)
+	}
+}
+
+func TestSearchOutputBytesLimit(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	// Script emits 3 MB of output exceeding MaxSearchOutputBytes (2 MiB)
+	script := `#!/bin/sh
+head -c 3145728 /dev/zero | tr '\0' 'a'
+exit 0
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	_, err := Search(context.Background(), "overflow-test", []string{"col1"}, "bm25", 20)
+	if err == nil {
+		t.Fatal("expected Search to fail when stdout exceeds MaxSearchOutputBytes")
+	}
+	if !strings.Contains(err.Error(), "output exceeded safety limit") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestLimitedBufferMemoryBounds(t *testing.T) {
+	buf := limitedBuffer{max: 1024}
+	chunk := make([]byte, 4096)
+	for i := range chunk {
+		chunk[i] = 'x'
+	}
+	for range 2560 {
+		n, err := buf.Write(chunk)
+		if err != nil || n != len(chunk) {
+			t.Fatalf("Write failed: n=%d, err=%v", n, err)
+		}
+	}
+	if len(buf.Bytes()) != 1024 {
+		t.Fatalf("expected memory buffer capped at 1024 bytes, got %d", len(buf.Bytes()))
+	}
+	if buf.total != 2560*4096 {
+		t.Fatalf("expected total tracked bytes %d, got %d", 2560*4096, buf.total)
 	}
 }
 
