@@ -184,7 +184,7 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 			map[string]any{"detail": fmt.Sprintf("profile %q must be daybook or strict", profile)})
 	}
 	for _, c := range cs {
-		if c.Path == abs {
+		if sameRoot(c.Path, abs) {
 			return nil, conflict("duplicate_path", "register", abs,
 				"pick a new path or use the existing cortex",
 				map[string]any{"name": c.Name})
