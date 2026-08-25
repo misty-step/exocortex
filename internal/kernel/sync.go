@@ -201,14 +201,14 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 
 	// Snapshot all pending dirty markers at the start of sync
 	entries, rerr := os.ReadDir(dDir)
-	if errors.Is(rerr, fs.ErrNotExist) {
+	if errors.Is(rerr, fs.ErrNotExist) || (rerr == nil && len(entries) == 0) {
+		if err := os.Remove(errorPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, conflict("state_failed", "sync", c.Name, "failed to clear last_sync_error; inspect state and retry", map[string]any{"detail": err.Error()})
+		}
 		return &SyncResult{Cortex: c.Name, Updated: false, Embedded: false}, nil
 	}
 	if rerr != nil {
 		return nil, conflict("state_failed", "sync", c.Name, "failed to read dirty markers", map[string]any{"detail": rerr.Error()})
-	}
-	if len(entries) == 0 {
-		return &SyncResult{Cortex: c.Name, Updated: false, Embedded: false}, nil
 	}
 
 	var snapshotFiles []string

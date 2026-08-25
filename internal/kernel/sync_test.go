@@ -650,3 +650,20 @@ func TestDirtyMarkerFailedWarningOnUnwritableState(t *testing.T) {
 		t.Fatal("status must stay clean when marker write failed")
 	}
 }
+
+func TestSyncClearsStaleErrorWhenClean(t *testing.T) {
+	f := newFixture(t)
+	writeSyncError("hosta", "deadbeef", "cleanup", "stale leftover")
+	st, _ := Status(f.cs, "hosta")
+	if !strings.Contains(st[0].LastSyncError, "stale leftover") {
+		t.Fatalf("precondition: leftover error missing: %+v", st[0])
+	}
+	res, conf := Sync(context.Background(), f.cs, "hosta")
+	if conf != nil || len(res) != 1 || res[0].Updated {
+		t.Fatalf("clean sync = %+v / %v", res, conf)
+	}
+	st, _ = Status(f.cs, "hosta")
+	if st[0].LastSyncError != "" || st[0].Dirty {
+		t.Fatalf("stale last_sync_error survived: %+v", st[0])
+	}
+}
