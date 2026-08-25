@@ -234,3 +234,44 @@ exit 0
 		t.Fatalf("status after sync = %v, want clean %s", st[0], rev)
 	}
 }
+
+func TestCLIAbsolutePathAndRegisterConflicts(t *testing.T) {
+	repo := setupCortex(t)
+	code, body, raw := runMain(t, "", "register", "box", repo, "--vcs", "none")
+	if code != 0 {
+		t.Fatalf("register: exit=%d %s", code, raw)
+	}
+
+	payload := "---\ntype: note\nstatus: active\ncreated: 2026-08-21T00:00:00Z\n---\n\nabs\n"
+	abs := filepath.Join(repo, "notes", "abs.md")
+	code, body, raw = runMain(t, payload, "put", abs, "--from", "-", "--cortex", "box")
+	if code != 0 {
+		t.Fatalf("explicit abs put: exit=%d %s", code, raw)
+	}
+	if body["path"] != "notes/abs.md" {
+		t.Fatalf("explicit abs path=%v", body["path"])
+	}
+	code, body, raw = runMain(t, "", "get", abs, "--cortex", "box")
+	if code != 0 || !strings.Contains(fmtString(body["content"]), "abs") {
+		t.Fatalf("explicit abs get: exit=%d %v", code, body)
+	}
+	code, body, raw = runMain(t, "", "get", abs)
+	if code != 0 || body["path"] != "notes/abs.md" {
+		t.Fatalf("implicit abs get: exit=%d %v", code, body)
+	}
+
+	other := t.TempDir()
+	code, body, _ = runMain(t, "", "register", "box", other, "--vcs", "none")
+	if code == 0 || body["error"] != "duplicate_cortex" {
+		t.Fatalf("name dup: exit=%d body=%v", code, body)
+	}
+	code, body, _ = runMain(t, "", "register", "other", repo, "--vcs", "none")
+	if code == 0 || body["error"] != "duplicate_path" {
+		t.Fatalf("path dup: exit=%d body=%v", code, body)
+	}
+}
+
+func fmtString(v any) string {
+	s, _ := v.(string)
+	return s
+}

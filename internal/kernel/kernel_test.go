@@ -117,3 +117,125 @@ func TestResolveCortex(t *testing.T) {
 		t.Fatalf("named selection: %v %v", c, err)
 	}
 }
+
+func TestResolveAbsoluteInRootMatchesImplicit(t *testing.T) {
+	testConfigEnv(t)
+	root := t.TempDir()
+	cs := []Cortex{{Name: "box", Path: root, VCS: "none", Profile: "daybook"}}
+	abs := filepath.Join(root, "notes", "x.md")
+
+	named, namedRel, err := Resolve(cs, "box", abs)
+	if err != nil {
+		t.Fatalf("explicit abs-in-root: %v", err)
+	}
+	implied, impliedRel, err := Resolve(cs, "", abs)
+	if err != nil {
+		t.Fatalf("implicit abs-in-root: %v", err)
+	}
+	if named.Name != "box" || implied.Name != "box" {
+		t.Fatalf("cortex: named=%s implied=%s", named.Name, implied.Name)
+	}
+	if namedRel != "notes/x.md" && namedRel != filepath.Join("notes", "x.md") {
+		t.Fatalf("named rel=%q", namedRel)
+	}
+	if namedRel != impliedRel {
+		t.Fatalf("explicit rel %q != implicit rel %q", namedRel, impliedRel)
+	}
+}
+
+func TestResolveRejectsEscapes(t *testing.T) {
+	testConfigEnv(t)
+	root := t.TempDir()
+	sibling := root + "-evil"
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cs := []Cortex{{Name: "box", Path: root, VCS: "none", Profile: "daybook"}}
+	evil := filepath.Join(sibling, "x.md")
+
+	for _, tc := range []struct {
+		name, p string
+	}{
+		{"box", "../escape.md"},
+		{"box", evil},
+		{"", evil},
+		{"box", root},
+		{"", root},
+	} {
+		if _, _, err := Resolve(cs, tc.name, tc.p); err == nil {
+			t.Fatalf("expected escape for cortex=%q path=%s", tc.name, tc.p)
+		}
+	}
+}
+
+func TestRegisterDuplicateConflictsAreTyped(t *testing.T) {
+	testConfigEnv(t)
+	root := t.TempDir()
+	other := t.TempDir()
+	if _, err := Register("box", root, "none", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Register("box", other, "none", "", "")
+	conf, ok := err.(*Conflict)
+	if !ok || conf.Code != "duplicate_cortex" {
+		t.Fatalf("name collision: %v (%T)", err, err)
+	}
+	if conf.Operation != "register" {
+		t.Fatalf("operation=%q", conf.Operation)
+	}
+	_, err = Register("other", root, "none", "", "")
+	conf, ok = err.(*Conflict)
+	if !ok || conf.Code != "duplicate_path" {
+		t.Fatalf("path collision: %v (%T)", err, err)
+	}
+	_, err = Register("Bad_Name", other, "none", "", "")
+	conf, ok = err.(*Conflict)
+	if !ok || conf.Code != "registration_failed" {
+		t.Fatalf("invalid name: %v (%T)", err, err)
+	}
+	_, err = Register("box", filepath.Join(other, "missing"), "none", "", "")
+	conf, ok = err.(*Conflict)
+	if !ok || conf.Code != "duplicate_cortex" {
+		t.Fatalf("taken name with missing path: %v (%T)", err, err)
+	}
+
+}
+
+func TestRegisterSameNameRaceLeavesOneEntry(t *testing.T) {
+	testConfigEnv(t)
+	dirA, dirB := t.TempDir(), t.TempDir()
+	start := make(chan struct{})
+	type outcome struct {
+		c   *Cortex
+		err error
+	}
+	out := make(chan outcome, 2)
+	for _, dir := range []string{dirA, dirB} {
+		go func(path string) {
+			<-start
+			c, err := Register("racer", path, "none", "", "")
+			out <- outcome{c, err}
+		}(dir)
+	}
+	close(start)
+	var won, lost int
+	for range 2 {
+		o := <-out
+		if o.err == nil {
+			won++
+			continue
+		}
+		lost++
+		conf, ok := o.err.(*Conflict)
+		if !ok || conf.Code != "duplicate_cortex" {
+			t.Fatalf("loser: %v (%T)", o.err, o.err)
+		}
+	}
+	if won != 1 || lost != 1 {
+		t.Fatalf("won=%d lost=%d", won, lost)
+	}
+	cs, err := LoadRegistry()
+	if err != nil || len(cs) != 1 || cs[0].Name != "racer" {
+		t.Fatalf("registry=%v err=%v", cs, err)
+	}
+}

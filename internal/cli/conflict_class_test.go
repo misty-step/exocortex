@@ -30,6 +30,7 @@ func TestEmitMapsConflictClassToExit(t *testing.T) {
 		{"journal_immutable", 1},
 		{"not_found", 1},
 		{"duplicate_cortex", 1},
+		{"duplicate_path", 1},
 		{"search_unavailable", 1},
 		{"writer_unavailable", 1},
 		{"cortex_unavailable", 1},

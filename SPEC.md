@@ -246,6 +246,9 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
   {"error":"foreign_unstaged_state","paths":["…"]}
   {"error":"created_immutable","operation":"update","path":"…","stored":"…","submitted":"…"}
   {"error":"journal_immutable","operation":"update","path":"…"}
+  {"error":"duplicate_cortex","operation":"register","path":"…"}
+  {"error":"duplicate_path","operation":"register","path":"…","name":"…"}
+
   ```
 
   Input-class failures (`invalid_input`, `unknown_command`,

@@ -25,6 +25,7 @@ func TestConflictClassTable(t *testing.T) {
 		{"journal_immutable", ClassOperation},
 		{"not_found", ClassOperation},
 		{"duplicate_cortex", ClassOperation},
+		{"duplicate_path", ClassOperation},
 		{"search_unavailable", ClassUnavailable},
 		{"writer_unavailable", ClassUnavailable},
 		{"cortex_unavailable", ClassUnavailable},

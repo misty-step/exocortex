@@ -113,21 +113,56 @@ func saveRegistry(cs []Cortex) error {
 // Register binds a cortex into the registry.
 func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 	if !nameRe.MatchString(name) {
-		return nil, fmt.Errorf("cortex name %q must match %s", name, nameRe)
+		return nil, conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": fmt.Sprintf("cortex name %q must match %s", name, nameRe)})
 	}
 	if path == "" {
-		return nil, errors.New("path is required")
+		return nil, conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": "path is required"})
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return nil, err
+		return nil, conflict("registration_failed", "register", path,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": err.Error()})
 	}
+
+	// Name collisions are answered from the locked registry before
+	// the replacement path is validated: a taken name stays
+	// duplicate_cortex even when the new path is missing or not a
+	// directory.
+	regLock, lerr := acquireLock("registry")
+	if lerr != nil {
+		return nil, conflict("registration_failed", "register", name,
+			"fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
+	}
+	defer regLock.release()
+	cs, err := LoadRegistry()
+	if err != nil {
+		return nil, conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": err.Error()})
+	}
+	for _, c := range cs {
+		if c.Name == name {
+			return nil, conflict("duplicate_cortex", "register", name,
+				"pick a new name or inspect the existing cortex with get/search",
+				map[string]any{"path": c.Path})
+		}
+	}
+
 	st, err := os.Stat(abs)
 	if err != nil {
-		return nil, fmt.Errorf("cortex path %s: %w", abs, err)
+		return nil, conflict("registration_failed", "register", abs,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": fmt.Sprintf("cortex path %s: %v", abs, err)})
 	}
 	if !st.IsDir() {
-		return nil, fmt.Errorf("cortex path %s is not a directory", abs)
+		return nil, conflict("registration_failed", "register", abs,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": fmt.Sprintf("cortex path %s is not a directory", abs)})
 	}
 	if vcs == "" {
 		vcs = "none"
@@ -136,33 +171,26 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 		}
 	}
 	if !validVCS[vcs] {
-		return nil, fmt.Errorf("vcs %q must be daybook, caller, or none", vcs)
+		return nil, conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": fmt.Sprintf("vcs %q must be daybook, caller, or none", vcs)})
 	}
 	if profile == "" {
 		profile = "daybook"
 	}
 	if !profiles[profile] {
-		return nil, fmt.Errorf("profile %q must be daybook or strict", profile)
-	}
-	// The whole load/check/save transaction runs under one registry
-	// lock: concurrent CLI/MCP registrations must never lose entries.
-	regLock, lerr := acquireLock("registry")
-	if lerr != nil {
-		return nil, lerr
-	}
-	defer regLock.release()
-	cs, err := LoadRegistry()
-	if err != nil {
-		return nil, err
+		return nil, conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": fmt.Sprintf("profile %q must be daybook or strict", profile)})
 	}
 	for _, c := range cs {
-		if c.Name == name {
-			return nil, fmt.Errorf("cortex %q is already registered", name)
-		}
 		if c.Path == abs {
-			return nil, fmt.Errorf("path %s is already registered as cortex %q", abs, c.Name)
+			return nil, conflict("duplicate_path", "register", abs,
+				"pick a new path or use the existing cortex",
+				map[string]any{"name": c.Name})
 		}
 	}
+
 	jp := filepath.ToSlash(filepath.Clean(journalPrefix))
 	if jp == "." {
 		jp = "journal"
@@ -171,7 +199,9 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 	cs = append(cs, *c)
 	sort.Slice(cs, func(i, j int) bool { return cs[i].Name < cs[j].Name })
 	if err := saveRegistry(cs); err != nil {
-		return nil, err
+		return nil, conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": err.Error()})
 	}
 	return c, nil
 }
@@ -180,6 +210,7 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 // destination. An explicit cortex name wins; otherwise the longest
 // registered root containing the (cwd-resolved) path wins; otherwise a
 // sole registered cortex interprets the path relative to itself.
+// After selection, relUnderRoot is the only destination rule.
 func Resolve(cs []Cortex, nameFlag, p string) (*Cortex, string, error) {
 	if p == "" {
 		return nil, "", errors.New("path is required")
@@ -187,7 +218,7 @@ func Resolve(cs []Cortex, nameFlag, p string) (*Cortex, string, error) {
 	if nameFlag != "" {
 		for i := range cs {
 			if cs[i].Name == nameFlag {
-				rel, err := jail(cs[i].Path, p)
+				rel, err := relUnderRoot(cs[i].Path, p)
 				if err != nil {
 					return nil, "", err
 				}
@@ -215,7 +246,7 @@ func Resolve(cs []Cortex, nameFlag, p string) (*Cortex, string, error) {
 		}
 	}
 	if best >= 0 {
-		rel, err := filepath.Rel(filepath.Clean(cs[best].Path), abs)
+		rel, err := relUnderRoot(cs[best].Path, abs)
 		if err != nil {
 			return nil, "", err
 		}
@@ -225,7 +256,7 @@ func Resolve(cs []Cortex, nameFlag, p string) (*Cortex, string, error) {
 	case 0:
 		return nil, "", errors.New("no cortices are registered; run: exocortex register <name> <path>")
 	case 1:
-		rel, err := jail(cs[0].Path, p)
+		rel, err := relUnderRoot(cs[0].Path, p)
 		if err != nil {
 			return nil, "", err
 		}
@@ -240,10 +271,22 @@ func Resolve(cs []Cortex, nameFlag, p string) (*Cortex, string, error) {
 	}
 }
 
-// jail rejects destinations that escape the cortex root.
-func jail(root, p string) (string, error) {
-	rel := filepath.Clean(p)
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+// relUnderRoot maps p onto a destination under root. Absolute paths
+// inside root Rel the same way implicit longest-prefix Resolve does.
+// ".", "..", and paths outside root fail.
+func relUnderRoot(root, p string) (string, error) {
+	root = filepath.Clean(root)
+	var rel string
+	if filepath.IsAbs(p) {
+		var err error
+		rel, err = filepath.Rel(root, filepath.Clean(p))
+		if err != nil {
+			return "", err
+		}
+	} else {
+		rel = filepath.Clean(p)
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("path %s escapes cortex root %s", p, root)
 	}
 	return rel, nil
