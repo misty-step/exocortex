@@ -302,7 +302,7 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
-	limit := fs.Int("limit", 20, "max hits")
+	limit := fs.Int("limit", 20, "max hits (default 20, max 100)")
 	mode := fs.String("mode", "hybrid", "retrieval mode: hybrid (default) | bm25 | vector")
 	typeFilter := fs.String("type", "", "filter by content kind: decision | memo | session | note | scratch")
 	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "limit": true, "mode": true, "type": true, "agent": true})

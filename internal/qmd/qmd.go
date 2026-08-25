@@ -55,6 +55,16 @@ func sanitizeEnv() []string {
 	return env
 }
 
+// DefaultSearchLimit is the standard number of hits returned when limit is unspecified or <= 0.
+const DefaultSearchLimit = 20
+
+// MaxSearchLimit is the hard ceiling on requested search hits to guarantee
+// bounded memory consumption during stream decoding.
+const MaxSearchLimit = 100
+
+// MaxSearchOutputBytes is the maximum allowed stdout byte size for a single QMD query (2 MiB).
+const MaxSearchOutputBytes = 2 * 1024 * 1024
+
 // indexFlag pins the global QMD index so cwd-local .qmd trees cannot
 // steal search or sync from the fleet collection database.
 var indexFlag = []string{"--index", "index"}
@@ -68,24 +78,16 @@ func qmdArgs(args ...string) []string {
 // Search runs one qmd retrieval with a sanitized environment and returns raw hits.
 // If hybrid query expansion fails, it falls back to deterministic BM25 search.
 func Search(ctx context.Context, query string, collections []string, mode string, limit int) ([]Hit, error) {
-	if mode == "" {
-		mode = "hybrid"
-	}
-	sub, ok := subcommand[mode]
-	if !ok {
-		return nil, fmt.Errorf("mode %q must be hybrid, bm25, or vector", mode)
+	sub, err := subcommandFor(mode)
+	if err != nil {
+		return nil, err
 	}
 	if limit <= 0 {
-		limit = 20
+		limit = DefaultSearchLimit
+	} else if limit > MaxSearchLimit {
+		limit = MaxSearchLimit
 	}
 	run := func(cmdName string) ([]Hit, error) {
-		tmpFile, err := os.CreateTemp("", "qmd-search-*.json")
-		if err != nil {
-			return nil, err
-		}
-		tmpPath := tmpFile.Name()
-		defer os.Remove(tmpPath)
-
 		args := qmdArgs(cmdName, "--format", "json", "-n", strconv.Itoa(limit))
 		for _, c := range collections {
 			if c != "" {
@@ -95,35 +97,100 @@ func Search(ctx context.Context, query string, collections []string, mode string
 		args = append(args, query)
 		cmd := exec.CommandContext(ctx, "qmd", args...)
 		cmd.Env = sanitizeEnv()
-		cmd.Stdout = tmpFile
+		stdoutBuf := limitedBuffer{max: MaxSearchOutputBytes}
+		cmd.Stdout = &stdoutBuf
 		var stderr strings.Builder
 		cmd.Stderr = &stderr
 
 		if err := cmd.Run(); err != nil {
-			tmpFile.Close()
 			return nil, fmt.Errorf("qmd %s failed: %s: %w", cmdName, strings.TrimSpace(stderr.String()), err)
 		}
-		tmpFile.Close()
+		if stdoutBuf.total > MaxSearchOutputBytes {
+			return nil, fmt.Errorf("qmd %s output exceeded safety limit of %d bytes", cmdName, MaxSearchOutputBytes)
+		}
 
-		data, err := os.ReadFile(tmpPath)
-		if err != nil {
-			return nil, err
-		}
-		start := bytes.IndexByte(data, '[')
-		if start < 0 {
-			return nil, fmt.Errorf("qmd %s returned non-JSON output: %s", cmdName, strings.TrimSpace(string(data)))
-		}
-		var hits []Hit
-		if err := json.Unmarshal(data[start:], &hits); err != nil {
-			return nil, fmt.Errorf("qmd returned unparseable JSON: %w", err)
-		}
-		return hits, nil
+		return parseJSONHits(cmdName, stdoutBuf.Bytes())
 	}
 	hits, err := run(sub)
-	if err != nil && mode == "hybrid" {
+	if err != nil && (mode == "hybrid" || (mode == "" && sub == "query")) && ctx.Err() == nil {
 		return run("search")
 	}
 	return hits, err
+}
+
+// findJSONArrayStart locates the offset of a top-level JSON array opener in data.
+// It skips non-JSON logging preambles (e.g. "[info] ...") by requiring the '[' to
+// appear at a line boundary followed by valid array contents ('{' or ']').
+func findJSONArrayStart(data []byte) (int, bool) {
+	for offset := 0; offset < len(data); {
+		// Skip leading line-break and whitespace bytes
+		for offset < len(data) && (data[offset] == ' ' || data[offset] == '\t' || data[offset] == '\r' || data[offset] == '\n') {
+			offset++
+		}
+		if offset >= len(data) {
+			break
+		}
+		if data[offset] == '[' {
+			rest := data[offset+1:]
+			for len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\r' || rest[0] == '\n') {
+				rest = rest[1:]
+			}
+			if len(rest) > 0 && (rest[0] == '{' || rest[0] == ']') {
+				return offset, true
+			}
+		}
+		nl := bytes.IndexByte(data[offset:], '\n')
+		if nl < 0 {
+			break
+		}
+		offset += nl + 1
+	}
+	return -1, false
+}
+
+// parseJSONHits parses stdout into a slice of Hit records in memory.
+func parseJSONHits(cmdName string, data []byte) ([]Hit, error) {
+	start, ok := findJSONArrayStart(data)
+	if !ok {
+		preview := strings.TrimSpace(string(data))
+		if len(preview) > 256 {
+			preview = preview[:256] + "..."
+		}
+		return nil, fmt.Errorf("qmd %s returned non-JSON output: %s", cmdName, preview)
+	}
+	var hits []Hit
+	if err := json.Unmarshal(data[start:], &hits); err != nil {
+		return nil, fmt.Errorf("qmd returned unparseable JSON: %w", err)
+	}
+	if hits == nil {
+		hits = []Hit{}
+	}
+	return hits, nil
+}
+
+// limitedBuffer captures up to max bytes in memory, discarding any excess
+// bytes while continuing to drain the stream and counting total received bytes.
+type limitedBuffer struct {
+	buf   bytes.Buffer
+	max   int
+	total int
+}
+
+func (l *limitedBuffer) Write(p []byte) (int, error) {
+	l.total += len(p)
+	if l.buf.Len() < l.max {
+		remaining := l.max - l.buf.Len()
+		if len(p) <= remaining {
+			l.buf.Write(p)
+		} else {
+			l.buf.Write(p[:remaining])
+		}
+	}
+	return len(p), nil
+}
+
+func (l *limitedBuffer) Bytes() []byte {
+	return l.buf.Bytes()
 }
 
 // Update runs `qmd update <collection>`.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -90,6 +91,296 @@ echo "]"
 	}
 	if hits[0].Title != "Large Test Note 1" || hits[0].Line != 42 {
 		t.Fatalf("unexpected hit fields: %+v", hits[0])
+	}
+}
+
+func TestSearchLargeJSONScaleWithoutTempFiles(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	// Generate a script that outputs 100 items (~100 KB) of JSON
+	script := `#!/bin/sh
+echo "["
+for i in $(seq 1 100); do
+  comma=","
+  if [ "$i" -eq 100 ]; then comma=""; fi
+  cat <<ITEM
+  {
+    "docid": "#scale$i",
+    "file": "qmd://col1/notes/scale-$i.md",
+    "score": 0.88,
+    "line": $i,
+    "title": "Scale Test Note $i with extensive title payload padded to guarantee substantial memory stream throughput",
+    "context": "Extended context field for item $i designed to ensure high memory throughput and stream buffer drainage across all platforms.",
+    "snippet": "@@ -10,20 @@ Very large snippet content section $i containing multiple lines of text, symbols, and structured Markdown formatting for stream verification without OS pipe buffer deadlocks."
+  }$comma
+ITEM
+done
+echo "]"
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	// Point TMPDIR at a nonexistent directory: any attempt to use os.CreateTemp will fail immediately
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "nonexistent_dir", "no_tmp"))
+
+	hits, err := Search(context.Background(), "scale-query", []string{"col1"}, "bm25", 100)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(hits) != 100 {
+		t.Fatalf("got %d hits, want 100", len(hits))
+	}
+	if hits[0].DocID != "#scale1" || hits[99].DocID != "#scale100" {
+		t.Fatalf("unexpected bounds: first=%s, last=%s", hits[0].DocID, hits[99].DocID)
+	}
+}
+
+func TestSearchLimitClamping(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	// Script logs the -n flag value passed to qmd
+	script := `#!/bin/sh
+for arg in "$@"; do
+  if [ "$prev" = "-n" ]; then
+    echo "$arg" > "$1.limit"
+  fi
+  prev="$arg"
+done
+echo "[]"
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	// Case 1: Limit = 500 should be clamped to 100 (MaxSearchLimit)
+	_, err := Search(context.Background(), "clamp-test", []string{"col1"}, "bm25", 500)
+	if err != nil {
+		t.Fatalf("Search with limit 500 failed: %v", err)
+	}
+
+	// Case 2: Limit = 0 or negative should default to 20 (DefaultSearchLimit)
+	_, err = Search(context.Background(), "default-test", []string{"col1"}, "bm25", 0)
+	if err != nil {
+		t.Fatalf("Search with limit 0 failed: %v", err)
+	}
+}
+
+func TestSearchOutputBytesLimit(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	// Script emits 3 MB of output exceeding MaxSearchOutputBytes (2 MiB)
+	script := `#!/bin/sh
+head -c 3145728 /dev/zero | tr '\0' 'a'
+exit 0
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	_, err := Search(context.Background(), "overflow-test", []string{"col1"}, "bm25", 20)
+	if err == nil {
+		t.Fatal("expected Search to fail when stdout exceeds MaxSearchOutputBytes")
+	}
+	if !strings.Contains(err.Error(), "output exceeded safety limit") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestLimitedBufferMemoryBounds(t *testing.T) {
+	buf := limitedBuffer{max: 1024}
+	chunk := make([]byte, 4096)
+	for i := range chunk {
+		chunk[i] = 'x'
+	}
+	for range 2560 {
+		n, err := buf.Write(chunk)
+		if err != nil || n != len(chunk) {
+			t.Fatalf("Write failed: n=%d, err=%v", n, err)
+		}
+	}
+	if len(buf.Bytes()) != 1024 {
+		t.Fatalf("expected memory buffer capped at 1024 bytes, got %d", len(buf.Bytes()))
+	}
+	if buf.total != 2560*4096 {
+		t.Fatalf("expected total tracked bytes %d, got %d", 2560*4096, buf.total)
+	}
+}
+
+func TestSearchHandlesLeadingNonJSONPreamble(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	// Preamble contains bracketed logs including empty brackets "[info] candidates=[]"
+	script := `#!/bin/sh
+echo "[info] model loaded in 12ms"
+echo "[warning] candidates=[]"
+echo "[debug] cache=[cold]"
+cat <<EOF
+[
+  {
+    "docid": "#doc-preamble",
+    "file": "qmd://daybook/notes/preamble.md",
+    "score": 0.92,
+    "line": 10,
+    "title": "Preamble Test",
+    "context": "Testing preamble skip",
+    "snippet": "@@ -1,5 @@ snippet"
+  }
+]
+EOF
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	hits, err := Search(context.Background(), "preamble-test", []string{"daybook"}, "bm25", 10)
+	if err != nil {
+		t.Fatalf("Search failed with preamble: %v", err)
+	}
+	if len(hits) != 1 || hits[0].DocID != "#doc-preamble" {
+		t.Fatalf("unexpected hits: %+v", hits)
+	}
+}
+
+func TestSearchTruncatedJSONFailsCleanly(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	// Emit truncated JSON array with bracket inside string
+	script := `#!/bin/sh
+echo '[{"docid":"#partial","snippet":"[ ]'
+exit 0
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	_, err := Search(context.Background(), "truncated", []string{"daybook"}, "bm25", 10)
+	if err == nil {
+		t.Fatal("expected error on truncated JSON output")
+	}
+	if !strings.Contains(err.Error(), "unparseable JSON") {
+		t.Fatalf("expected unparseable JSON error, got: %v", err)
+	}
+}
+
+func TestSearchContextCancellationNoFallback(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	script := `#!/bin/sh
+sleep 10
+exit 0
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	_, err := Search(ctx, "cancel-query", []string{"daybook"}, "hybrid", 10)
+	if err == nil {
+		t.Fatal("expected error on cancelled context")
+	}
+}
+
+func TestSearchNonZeroExitIncludesStderr(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	script := `#!/bin/sh
+echo "error: GPU memory exhausted (failed to allocate 2048MB)" >&2
+exit 1
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	_, err := Search(context.Background(), "fail-query", []string{"daybook"}, "bm25", 10)
+	if err == nil {
+		t.Fatal("expected Search to fail on non-zero exit")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "GPU memory exhausted") {
+		t.Fatalf("error should contain stderr diagnostics: %q", errStr)
+	}
+}
+
+func TestSearchHybridFallbackToBM25(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	// Fail when cmdName is query, succeed when cmdName is search
+	script := `#!/bin/sh
+while [ "$1" = "--index" ]; do shift 2; done
+cmd="$1"
+if [ "$cmd" = "query" ]; then
+  echo "error: query expansion failed (Ollama connection refused)" >&2
+  exit 1
+fi
+if [ "$cmd" = "search" ]; then
+  cat <<EOF
+[
+  {
+    "docid": "#bm25-fallback",
+    "file": "qmd://daybook/notes/bm25.md",
+    "score": 0.85,
+    "line": 4,
+    "title": "Fallback BM25 Note",
+    "context": "Context for fallback",
+    "snippet": "@@ -1,4 @@ fallback snippet"
+  }
+]
+EOF
+  exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	hits, err := Search(context.Background(), "fallback-query", []string{"daybook"}, "hybrid", 10)
+	if err != nil {
+		t.Fatalf("hybrid fallback failed: %v", err)
+	}
+	if len(hits) != 1 || hits[0].DocID != "#bm25-fallback" {
+		t.Fatalf("unexpected fallback hits: %+v", hits)
+	}
+}
+
+func TestSearchInvalidJSONOutput(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+
+	script := `#!/bin/sh
+echo "fatal: database corrupted at offset 0x40"
+exit 0
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	_, err := Search(context.Background(), "invalid-json", []string{"daybook"}, "bm25", 10)
+	if err == nil {
+		t.Fatal("expected error on non-JSON output")
+	}
+	if !strings.Contains(err.Error(), "non-JSON output") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
 }
 
