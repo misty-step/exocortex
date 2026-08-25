@@ -16,10 +16,7 @@ func runMain(t *testing.T, stdin string, args ...string) (int, map[string]any, s
 	var body map[string]any
 	raw := out.String()
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
-		var arr []any
-		if aerr := json.Unmarshal([]byte(raw), &arr); aerr != nil {
-			t.Fatalf("stdout is not JSON (exit %d):\n%s\nstderr: %s", code, raw, errb.String())
-		}
+		t.Fatalf("stdout is not JSON (exit %d):\n%s\nstderr: %s", code, raw, errb.String())
 	}
 	return code, body, raw
 }
@@ -158,79 +155,5 @@ func TestSearchAndBriefCLI(t *testing.T) {
 	code, body, _ = runMain(t, "", "search", "topic", "--invalid-flag")
 	if code != 2 || body["error"] != "invalid_input" {
 		t.Fatalf("search invalid flag: exit=%d body=%v", code, body)
-	}
-}
-
-func TestSyncAndStatusCLI(t *testing.T) {
-	repo := setupCortex(t)
-	code, body, _ := runMain(t, "", "register", "smoke", repo, "--json")
-	if code != 0 {
-		t.Fatalf("register failed: %v", body)
-	}
-
-	code, body, _ = runMain(t, "", "sync", "daybok")
-	if code != 2 || body["error"] != "invalid_input" {
-		t.Fatalf("sync positional: exit=%d body=%v", code, body)
-	}
-	code, body, _ = runMain(t, "", "status", "daybok")
-	if code != 2 || body["error"] != "invalid_input" {
-		t.Fatalf("status positional: exit=%d body=%v", code, body)
-	}
-
-	note := "---\ntype: note\ncreated: 2026-08-21T00:00:00Z\n---\n\ncli dirty marker\n"
-	code, body, _ = runMain(t, note, "put", "notes/x.md", "--from", "-", "--cortex", "smoke")
-	if code != 0 {
-		t.Fatalf("put failed: exit=%d body=%v", code, body)
-	}
-	rev, _ := body["revision"].(string)
-	if rev == "" {
-		t.Fatal("put missing revision")
-	}
-
-	code, _, raw := runMain(t, "", "status", "--cortex", "smoke")
-	if code != 0 {
-		t.Fatalf("status failed: exit=%d %s", code, raw)
-	}
-	var st []map[string]any
-	if err := json.Unmarshal([]byte(raw), &st); err != nil || len(st) != 1 {
-		t.Fatalf("status json: %v %s", err, raw)
-	}
-	if st[0]["dirty"] != true || st[0]["dirty_commit"] != rev {
-		t.Fatalf("status after none-vcs put = %v, want dirty %s", st[0], rev)
-	}
-
-	binDir := t.TempDir()
-	fake := filepath.Join(binDir, "qmd")
-	script := `#!/bin/sh
-while [ "$1" = "--index" ]; do shift 2; done
-if [ "$1" = "collection" ]; then
-  printf 'Collection: %s\n  Path:     %s\n' "$3" "$EXOCORTEX_TEST_QMD_ROOT"
-  exit 0
-fi
-if [ "$1" = "embed" ]; then
-  echo "Done!"
-  exit 0
-fi
-exit 0
-`
-	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
-	t.Setenv("EXOCORTEX_TEST_QMD_ROOT", repo)
-
-	code, _, raw = runMain(t, "", "sync", "--cortex", "smoke")
-	if code != 0 {
-		t.Fatalf("sync failed: exit=%d %s", code, raw)
-	}
-	code, _, raw = runMain(t, "", "status", "--cortex", "smoke")
-	if code != 0 {
-		t.Fatalf("status after sync: exit=%d %s", code, raw)
-	}
-	if err := json.Unmarshal([]byte(raw), &st); err != nil || len(st) != 1 {
-		t.Fatalf("status after sync json: %v %s", err, raw)
-	}
-	if st[0]["dirty"] != false || st[0]["synced_commit"] != rev {
-		t.Fatalf("status after sync = %v, want clean %s", st[0], rev)
 	}
 }

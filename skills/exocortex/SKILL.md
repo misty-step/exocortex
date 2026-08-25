@@ -33,8 +33,6 @@ exocortex put misty-step/new-decision.md --from draft.md              # create-o
 exocortex put misty-step/decision.md --from draft.md --expects <sha>  # update: stored-revision hash REQUIRED
 exocortex log misty-step/new-decision.md                # git lineage
 exocortex lint misty-step/new-decision.md               # frontmatter floor gate
-exocortex sync [--cortex <name>]                     # refresh QMD index + embeddings after writes
-exocortex status [--cortex <name>]                   # dirty markers, last synced commit, last error
 ```
 
 ## Write often, write small

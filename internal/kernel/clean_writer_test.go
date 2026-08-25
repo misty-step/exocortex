@@ -49,8 +49,8 @@ func TestProof15SolePublisherIsolatesFromHumanCheckout(t *testing.T) {
 	// Put succeeds independently through the publisher clone.
 	res, conf := Put(nil, f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/real.md",
-		Payload: []byte(mkNote("note", "v1 via sole publisher")),
-		Agent:   "a", Via: "cli", OwnPayload: true,
+		Payload:    []byte(mkNote("note", "v1 via sole publisher")),
+		Agent:      "a", Via: "cli", OwnPayload: true,
 	})
 	if conf != nil {
 		t.Fatalf("sole publisher put failed: %s detail=%v", conf.Code, conf.Detail)
@@ -127,8 +127,8 @@ func TestPublisherPinsNonDefaultTrackedBranch(t *testing.T) {
 
 	res, conf := Put(nil, f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/branch-test.md",
-		Payload: []byte(mkNote("note", "landed on feature-vault")),
-		Agent:   "a", Via: "cli", OwnPayload: true,
+		Payload:    []byte(mkNote("note", "landed on feature-vault")),
+		Agent:      "a", Via: "cli", OwnPayload: true,
 	})
 	if conf != nil || !res.Pushed {
 		t.Fatalf("put failed on non-default branch: %v / %v", conf, res)
@@ -265,7 +265,7 @@ func TestProof19MissingOriginFailsClosedAcrossReadsAndWrites(t *testing.T) {
 	_, pconf := Put(nil, []Cortex{*c}, PutInput{
 		CortexName: "no-origin", Path: "notes/secret.md",
 		Payload: []byte(mkNote("note", "must not write")),
-		Agent:   "a", Via: "cli", OwnPayload: true,
+		Agent: "a", Via: "cli", OwnPayload: true,
 	})
 	if pconf == nil || pconf.Code != "writer_unavailable" {
 		t.Fatalf("want writer_unavailable on put with missing origin, got %#v", pconf)

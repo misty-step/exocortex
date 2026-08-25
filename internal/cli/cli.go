@@ -44,10 +44,6 @@ func Main(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		payload, conf, err = cmdNote(rest, stdin)
 	case "lint":
 		payload, conf, err = cmdLint(rest)
-	case "sync":
-		payload, conf, err = cmdSync(rest)
-	case "status":
-		payload, conf, err = cmdStatus(rest)
 	case "mcp":
 		return mcp.Run(stdin, stdout, stderr)
 	case "help", "-h", "--help":
@@ -115,8 +111,6 @@ Usage:
   exocortex search "<query>" [--cortex <name>] [--mode hybrid|bm25|vector] [--type <kind>] [--limit <n>]
   exocortex brief "<topic>" [--cortex <name>] [--limit <n>]
   exocortex note "<thought>" [--cortex <name>] [--agent <id>]
-  exocortex sync [--cortex <name>]
-  exocortex status [--cortex <name>]
   exocortex log <path> [--cortex <name>] [--limit <n>]
   exocortex lint [<path>] [--cortex <name>]
   exocortex mcp
@@ -670,51 +664,5 @@ func cmdNote(args []string, stdin io.Reader) (any, *kernel.Conflict, error) {
 		Agent:      agentFlag(fs),
 		Via:        "cli",
 	})
-	return res, conf, nil
-}
-
-func cmdSync(args []string) (any, *kernel.Conflict, error) {
-	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	cortex := commonFlags(fs)
-	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
-	if err := fs.Parse(flags); err != nil {
-		return nil, inputErr("sync", err.Error(), "run `exocortex help` for sync usage"), nil
-	}
-	if len(pos) != 0 {
-		return nil, inputErr("sync", "sync takes no positional arguments",
-			"exocortex sync [--cortex <name>]"), nil
-	}
-	cs, err := loadRegistry()
-	if err != nil {
-		return nil, nil, err
-	}
-	res, conf := kernel.Sync(context.Background(), cs, *cortex)
-	if conf != nil && res != nil {
-		if conf.Detail == nil {
-			conf.Detail = map[string]any{}
-		}
-		conf.Detail["results"] = res
-	}
-	return res, conf, nil
-}
-
-func cmdStatus(args []string) (any, *kernel.Conflict, error) {
-	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	cortex := commonFlags(fs)
-	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
-	if err := fs.Parse(flags); err != nil {
-		return nil, inputErr("status", err.Error(), "run `exocortex help` for status usage"), nil
-	}
-	if len(pos) != 0 {
-		return nil, inputErr("status", "status takes no positional arguments",
-			"exocortex status [--cortex <name>]"), nil
-	}
-	cs, err := loadRegistry()
-	if err != nil {
-		return nil, nil, err
-	}
-	res, conf := kernel.Status(cs, *cortex)
 	return res, conf, nil
 }

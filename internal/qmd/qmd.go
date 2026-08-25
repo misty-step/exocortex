@@ -31,7 +31,6 @@ var subcommand = map[string]string{
 	"bm25":   "search",
 	"vector": "vsearch",
 }
-
 func subcommandFor(mode string) (string, error) {
 	if mode == "" {
 		mode = "bm25"
@@ -46,23 +45,11 @@ func subcommandFor(mode string) (string, error) {
 func sanitizeEnv() []string {
 	var env []string
 	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "CI=") || strings.HasPrefix(e, "CI_") ||
-			strings.HasPrefix(e, "INDEX_PATH=") || strings.HasPrefix(e, "QMD_CONFIG_DIR=") {
-			continue
+		if !strings.HasPrefix(e, "CI=") && !strings.HasPrefix(e, "CI_") {
+			env = append(env, e)
 		}
-		env = append(env, e)
 	}
 	return env
-}
-
-// indexFlag pins the global QMD index so cwd-local .qmd trees cannot
-// steal search or sync from the fleet collection database.
-var indexFlag = []string{"--index", "index"}
-
-func qmdArgs(args ...string) []string {
-	out := make([]string, 0, len(indexFlag)+len(args))
-	out = append(out, indexFlag...)
-	return append(out, args...)
 }
 
 // Search runs one qmd retrieval with a sanitized environment and returns raw hits.
@@ -86,7 +73,7 @@ func Search(ctx context.Context, query string, collections []string, mode string
 		tmpPath := tmpFile.Name()
 		defer os.Remove(tmpPath)
 
-		args := qmdArgs(cmdName, "--format", "json", "-n", strconv.Itoa(limit))
+		args := []string{cmdName, "--format", "json", "-n", strconv.Itoa(limit)}
 		for _, c := range collections {
 			if c != "" {
 				args = append(args, "-c", c)
@@ -119,84 +106,12 @@ func Search(ctx context.Context, query string, collections []string, mode string
 		}
 		return hits, nil
 	}
+
 	hits, err := run(sub)
 	if err != nil && mode == "hybrid" {
 		return run("search")
 	}
 	return hits, err
-}
-
-// Update runs `qmd update <collection>`.
-func Update(ctx context.Context, collection string) error {
-	args := qmdArgs("update")
-	if collection != "" {
-		args = append(args, collection)
-	}
-	cmd := exec.CommandContext(ctx, "qmd", args...)
-	cmd.Env = sanitizeEnv()
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if out, err := cmd.Output(); err != nil {
-		return fmt.Errorf("qmd update failed: %s %s: %w", strings.TrimSpace(stderr.String()), strings.TrimSpace(string(out)), err)
-	}
-	return nil
-}
-
-// Embed runs `qmd embed -c <collection>`. Exit 0 is not enough:
-// installed QMD can skip remaining batches or leave failed chunks and
-// still return success. We require a completion banner and reject the
-// known incomplete banners.
-func Embed(ctx context.Context, collection string) error {
-	args := qmdArgs("embed")
-	if collection != "" {
-		args = append(args, "-c", collection)
-	}
-	cmd := exec.CommandContext(ctx, "qmd", args...)
-	cmd.Env = sanitizeEnv()
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("qmd embed failed: %s %s: %w", strings.TrimSpace(stderr.String()), strings.TrimSpace(stdout.String()), err)
-	}
-	out := stdout.String() + "\n" + stderr.String()
-	if strings.Contains(out, "chunks still failed after retries") || strings.Contains(out, "Session expired") {
-		return fmt.Errorf("qmd embed incomplete: %s", strings.TrimSpace(out))
-	}
-	if !strings.Contains(out, "Done!") && !strings.Contains(out, "No non-empty documents to embed") {
-		return fmt.Errorf("qmd embed incomplete: missing completion banner")
-	}
-	return nil
-}
-
-// CollectionPath returns the on-disk root of a named QMD collection by
-// parsing `qmd collection show`. Missing collections and unparseable
-// output fail closed.
-func CollectionPath(ctx context.Context, name string) (string, error) {
-	if name == "" {
-		return "", fmt.Errorf("qmd collection show: empty collection name")
-	}
-	cmd := exec.CommandContext(ctx, "qmd", qmdArgs("collection", "show", name)...)
-	cmd.Env = sanitizeEnv()
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("qmd collection show %s: collection must exist and expose a non-empty Path: %s %w", name, strings.TrimSpace(stderr.String()), err)
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		rest, ok := strings.CutPrefix(line, "Path:")
-		if !ok {
-			continue
-		}
-		p := strings.TrimSpace(rest)
-		if p == "" {
-			return "", fmt.Errorf("qmd collection show %s: collection must expose a non-empty Path", name)
-		}
-		return p, nil
-	}
-	return "", fmt.Errorf("qmd collection show %s: collection must exist and expose a non-empty Path", name)
 }
 
 // SplitURI decomposes a qmd file URI into its collection and
