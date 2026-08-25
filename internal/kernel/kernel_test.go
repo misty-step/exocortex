@@ -225,6 +225,40 @@ func TestRegisterRejectsSymlinkAliasOfExistingRoot(t *testing.T) {
 	}
 }
 
+func TestRegisterStoresCanonicalRootForResolve(t *testing.T) {
+	testConfigEnv(t)
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Register("box", alias, "none", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Path != root {
+		t.Fatalf("stored path=%s want %s", c.Path, root)
+	}
+	cs := []Cortex{*c}
+	note := filepath.Join(root, "n.md")
+	named, rel, err := Resolve(cs, "box", note)
+	if err != nil || named.Name != "box" || rel != "n.md" {
+		t.Fatalf("explicit real path: %v %q %v", named, rel, err)
+	}
+	implied, rel, err := Resolve(cs, "", note)
+	if err != nil || implied.Name != "box" || rel != "n.md" {
+		t.Fatalf("implicit real path: %v %q %v", implied, rel, err)
+	}
+	viaAlias := filepath.Join(alias, "n.md")
+	_, rel, err = Resolve(cs, "box", viaAlias)
+	if err != nil || rel != "n.md" {
+		t.Fatalf("explicit alias path: %q %v", rel, err)
+	}
+}
+
 func TestRegisterSameNameRaceLeavesOneEntry(t *testing.T) {
 	testConfigEnv(t)
 	dirA, dirB := t.TempDir(), t.TempDir()
