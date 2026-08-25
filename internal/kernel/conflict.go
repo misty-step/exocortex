@@ -15,7 +15,8 @@ const (
 	// ClassInternal is an unexpected kernel failure (internal_error).
 	ClassInternal
 	// ClassUnavailable is an expected dependency or publisher outage
-	// (search_unavailable, writer_unavailable, cortex_unavailable).
+	// (search_unavailable, writer_unavailable, cortex_unavailable,
+	// log_unavailable).
 	ClassUnavailable
 )
 
@@ -32,6 +33,7 @@ var codeClass = map[string]Class{
 	"search_unavailable":  ClassUnavailable,
 	"writer_unavailable":  ClassUnavailable,
 	"cortex_unavailable":  ClassUnavailable,
+	"log_unavailable":     ClassUnavailable,
 }
 
 // Conflict is an operation failure returned as data (CR-04): a stable

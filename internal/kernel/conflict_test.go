@@ -28,6 +28,7 @@ func TestConflictClassTable(t *testing.T) {
 		{"search_unavailable", ClassUnavailable},
 		{"writer_unavailable", ClassUnavailable},
 		{"cortex_unavailable", ClassUnavailable},
+		{"log_unavailable", ClassUnavailable},
 		{"empty_note", ClassOperation},
 		{"resolve_failed", ClassOperation},
 		{"lock_failed", ClassOperation},
