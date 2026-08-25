@@ -92,6 +92,14 @@ type lintArgs struct {
 	Cortex string `json:"cortex,omitempty" jsonschema:"explicit cortex name"`
 }
 
+type syncArgs struct {
+	Cortex string `json:"cortex,omitempty" jsonschema:"optional cortex name; omit to walk every registered cortex"`
+}
+
+type statusArgs struct {
+	Cortex string `json:"cortex,omitempty" jsonschema:"optional cortex name; omit to report every registered cortex"`
+}
+
 type registerArgs struct {
 	Name          string `json:"name" jsonschema:"cortex name (lowercase slug)"`
 	Path          string `json:"path" jsonschema:"absolute path of the corpus root"`
@@ -108,6 +116,8 @@ func addTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_log", Description: "Git lineage of one note."}, logTool)
 	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_lint", Description: "Frontmatter floor gate; tiered findings, only errors block."}, lint)
 	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_register", Description: "Register a cortex (markdown+git corpus) for full read/write/search/lint."}, register)
+	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_sync", Description: "Refresh the QMD index and embeddings for dirty cortices. Fail-closed if the collection does not point at the kernel indexed root."}, syncTool)
+	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_status", Description: "Report dirty markers, last synced identity, and last sync error without creating state or clones."}, statusTool)
 }
 
 func get(ctx context.Context, req *mcp.CallToolRequest, a getArgs) (*mcp.CallToolResult, any, error) {
@@ -220,4 +230,31 @@ func register(ctx context.Context, req *mcp.CallToolRequest, a registerArgs) (*m
 		return nil, nil, err
 	}
 	return toolResult(map[string]any{"registered": c}, nil)
+}
+
+func syncTool(ctx context.Context, req *mcp.CallToolRequest, a syncArgs) (*mcp.CallToolResult, any, error) {
+	cs, err := kernel.LoadRegistry()
+	if err != nil {
+		return nil, nil, err
+	}
+	res, conf := kernel.Sync(ctx, cs, a.Cortex)
+	if conf != nil && res != nil {
+		if conf.Detail == nil {
+			conf.Detail = map[string]any{}
+		}
+		conf.Detail["results"] = res
+	}
+	if conf != nil {
+		return toolResult(nil, conf)
+	}
+	return toolResult(res, nil)
+}
+
+func statusTool(ctx context.Context, req *mcp.CallToolRequest, a statusArgs) (*mcp.CallToolResult, any, error) {
+	cs, err := kernel.LoadRegistry()
+	if err != nil {
+		return nil, nil, err
+	}
+	res, conf := kernel.Status(cs, a.Cortex)
+	return toolResult(res, conf)
 }

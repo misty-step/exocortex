@@ -256,6 +256,7 @@ func TestProof4ConcurrentUpdatesAndForeignStaged(t *testing.T) {
 		t.Fatalf("foreign file no longer staged: %q", status)
 	}
 }
+
 // Proof 5: dirty destination aborts; local edits survive byte-for-byte.
 func TestProof5DirtyDestination(t *testing.T) {
 	f := newFixture(t)
@@ -345,6 +346,7 @@ func TestProof6SingleCommitPushedThenNoop(t *testing.T) {
 		t.Fatal("get-content retry must be a no-op")
 	}
 }
+
 // Proof 8: profile conformance — type-only frontmatter passes; created immutable.
 func TestProof8ProfileConformance(t *testing.T) {
 	f := newFixture(t)

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Exocortex search and vector sync periodically
+Documentation=https://github.com/misty-step/exocortex
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
