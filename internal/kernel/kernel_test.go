@@ -193,6 +193,12 @@ func TestRegisterDuplicateConflictsAreTyped(t *testing.T) {
 	if !ok || conf.Code != "registration_failed" {
 		t.Fatalf("invalid name: %v (%T)", err, err)
 	}
+	_, err = Register("box", filepath.Join(other, "missing"), "none", "", "")
+	conf, ok = err.(*Conflict)
+	if !ok || conf.Code != "duplicate_cortex" {
+		t.Fatalf("taken name with missing path: %v (%T)", err, err)
+	}
+
 }
 
 func TestRegisterSameNameRaceLeavesOneEntry(t *testing.T) {

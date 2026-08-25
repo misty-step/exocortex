@@ -128,6 +128,31 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 			"fix the name (lowercase slug), path, vcs, or profile and retry",
 			map[string]any{"detail": err.Error()})
 	}
+
+	// Name collisions are answered from the locked registry before
+	// the replacement path is validated: a taken name stays
+	// duplicate_cortex even when the new path is missing or not a
+	// directory.
+	regLock, lerr := acquireLock("registry")
+	if lerr != nil {
+		return nil, conflict("registration_failed", "register", name,
+			"fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
+	}
+	defer regLock.release()
+	cs, err := LoadRegistry()
+	if err != nil {
+		return nil, conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": err.Error()})
+	}
+	for _, c := range cs {
+		if c.Name == name {
+			return nil, conflict("duplicate_cortex", "register", name,
+				"pick a new name or inspect the existing cortex with get/search",
+				map[string]any{"path": c.Path})
+		}
+	}
+
 	st, err := os.Stat(abs)
 	if err != nil {
 		return nil, conflict("registration_failed", "register", abs,
@@ -158,33 +183,14 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 			"fix the name (lowercase slug), path, vcs, or profile and retry",
 			map[string]any{"detail": fmt.Sprintf("profile %q must be daybook or strict", profile)})
 	}
-
-	// The whole load/check/save transaction runs under one registry
-	// lock: concurrent CLI/MCP registrations must never lose entries.
-	regLock, lerr := acquireLock("registry")
-	if lerr != nil {
-		return nil, conflict("registration_failed", "register", name,
-			"fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
-	}
-	defer regLock.release()
-	cs, err := LoadRegistry()
-	if err != nil {
-		return nil, conflict("registration_failed", "register", name,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": err.Error()})
-	}
 	for _, c := range cs {
-		if c.Name == name {
-			return nil, conflict("duplicate_cortex", "register", name,
-				"pick a new name or inspect the existing cortex with get/search",
-				map[string]any{"path": c.Path})
-		}
 		if c.Path == abs {
 			return nil, conflict("duplicate_path", "register", abs,
 				"pick a new path or use the existing cortex",
 				map[string]any{"name": c.Name})
 		}
 	}
+
 	jp := filepath.ToSlash(filepath.Clean(journalPrefix))
 	if jp == "." {
 		jp = "journal"
