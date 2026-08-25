@@ -141,12 +141,13 @@ echo "]"
 func TestSearchLimitClamping(t *testing.T) {
 	binDir := t.TempDir()
 	fakeQMD := filepath.Join(binDir, "qmd")
+	logFile := filepath.Join(t.TempDir(), "limit.txt")
 
-	// Script logs the -n flag value passed to qmd
+	// Script logs the -n flag value passed to qmd to the path in env var
 	script := `#!/bin/sh
 for arg in "$@"; do
   if [ "$prev" = "-n" ]; then
-    echo "$arg" > "$1.limit"
+    echo "$arg" > "$EXOCORTEX_TEST_LIMIT_LOG"
   fi
   prev="$arg"
 done
@@ -156,17 +157,32 @@ echo "[]"
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	t.Setenv("EXOCORTEX_TEST_LIMIT_LOG", logFile)
 
 	// Case 1: Limit = 500 should be clamped to 100 (MaxSearchLimit)
 	_, err := Search(context.Background(), "clamp-test", []string{"col1"}, "bm25", 500)
 	if err != nil {
 		t.Fatalf("Search with limit 500 failed: %v", err)
 	}
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("failed to read limit log: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "100" {
+		t.Fatalf("clamped limit = %q, want %q", got, "100")
+	}
 
 	// Case 2: Limit = 0 or negative should default to 20 (DefaultSearchLimit)
 	_, err = Search(context.Background(), "default-test", []string{"col1"}, "bm25", 0)
 	if err != nil {
 		t.Fatalf("Search with limit 0 failed: %v", err)
+	}
+	data, err = os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("failed to read limit log: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "20" {
+		t.Fatalf("default limit = %q, want %q", got, "20")
 	}
 }
 
