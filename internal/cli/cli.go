@@ -14,6 +14,7 @@ import (
 
 	"github.com/misty-step/exocortex/internal/kernel"
 	"github.com/misty-step/exocortex/internal/mcp"
+	"github.com/misty-step/exocortex/internal/orient"
 	"github.com/misty-step/exocortex/internal/qmd"
 )
 
@@ -303,7 +304,7 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 	if *cortex != "" {
 		collections = []string{*cortex}
 	} else if strings.EqualFold(*typeFilter, "session") {
-		collections = []string{"omp-sessions", "claude-sessions", "pi-sessions"}
+		collections = sessionCollections
 	}
 
 	hits, err := qmd.Search(context.Background(), pos[0], collections, *mode, fetchLimit)
@@ -321,10 +322,22 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 	out := make([]map[string]any, 0)
 	for _, h := range hits {
 		collection, rel, isURI := qmd.SplitURI(h.File)
-		if *typeFilter != "" {
-			if !matchTypeFilter(cs, collection, rel, h.File, *typeFilter) {
-				continue
+		var (
+			c   *kernel.Cortex
+			fm  map[string]any
+			res *kernel.GetResult
+		)
+		if isURI {
+			c = kernel.CortexNamed(cs, collection)
+			if c != nil && rel != "" {
+				if got, conf := kernel.Get(cs, collection, rel); conf == nil {
+					res = got
+					fm = got.Frontmatter
+				}
 			}
+		}
+		if *typeFilter != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, *typeFilter, fm) {
+			continue
 		}
 
 		entry := map[string]any{
@@ -339,7 +352,7 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 		if isURI {
 			entry["cortex"] = collection
 			entry["path"] = rel
-			if res, conf := kernel.Get(cs, collection, rel); conf == nil && res != nil {
+			if res != nil {
 				if d, ok := res.Frontmatter["description"].(string); ok && d != "" && entry["context"] == "" {
 					entry["context"] = d
 				}
@@ -368,62 +381,10 @@ func extractTitle(content string) string {
 	return ""
 }
 
-func extractSnippetAndLine(content, query string) (string, int) {
-	terms := strings.Fields(strings.ToLower(query))
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		lower := strings.ToLower(line)
-		for _, term := range terms {
-			if len(term) > 2 && strings.Contains(lower, term) {
-				// Capture context around line
-				start := max(0, i-1)
-				end := min(len(lines), i+3)
-				snippet := strings.Join(lines[start:end], "\n")
-				return snippet, i + 1
-			}
-		}
-	}
-	return "", 1
-}
-
-func matchTypeFilter(cs []kernel.Cortex, cortex, rel, fileURI, filter string) bool {
-	f := strings.ToLower(filter)
-	switch f {
-	case "session":
-		return strings.Contains(fileURI, "sessions") || strings.HasSuffix(rel, ".jsonl") || strings.Contains(rel, "conversations/")
-	case "memo":
-		return strings.HasPrefix(rel, "meta/agents-board/memo/")
-	case "decision":
-		// Exclude conversational logs, clippings, reading texts, and memos
-		if strings.HasPrefix(rel, "meta/conversations/") || strings.HasPrefix(rel, "meta/reviews/") ||
-			strings.HasPrefix(rel, "Clippings/") || strings.HasPrefix(rel, "resources/reading/") ||
-			strings.HasPrefix(rel, "meta/agents-board/memo/") || strings.HasSuffix(rel, ".jsonl") {
-			return false
-		}
-		if cortex != "" && rel != "" {
-			if res, conf := kernel.Get(cs, cortex, rel); conf == nil && res != nil {
-				t, _ := res.Frontmatter["type"].(string)
-				st, _ := res.Frontmatter["status"].(string)
-				if strings.EqualFold(t, "decision") {
-					return true
-				}
-				if strings.EqualFold(t, "note") && (st == "" || strings.EqualFold(st, "active") || strings.EqualFold(st, "complete")) {
-					return true
-				}
-			}
-		}
-		return strings.HasPrefix(rel, "projects/") || strings.HasPrefix(rel, "misty-step/") ||
-			strings.HasPrefix(rel, "docs/adr/") || strings.HasPrefix(rel, "standards/")
-	default:
-		if cortex != "" && rel != "" {
-			if res, conf := kernel.Get(cs, cortex, rel); conf == nil && res != nil {
-				t, _ := res.Frontmatter["type"].(string)
-				return strings.EqualFold(t, f)
-			}
-		}
-		return false
-	}
-}
+// sessionCollections is the search-only product policy for --type session
+// when no --cortex is given. Classification of a hit as session lives in
+// orient.MatchType.
+var sessionCollections = []string{"omp-sessions", "claude-sessions", "pi-sessions"}
 
 func cmdBrief(args []string) (any, *kernel.Conflict, error) {
 	fs := flag.NewFlagSet("brief", flag.ContinueOnError)
@@ -469,25 +430,19 @@ func cmdBrief(args []string) (any, *kernel.Conflict, error) {
 		if !ok || seen[rel] {
 			continue
 		}
-		// Filter for canonical decision notes (exclude conversations, reading texts, memos, raw jsonl)
-		if strings.HasPrefix(rel, "meta/conversations/") || strings.HasPrefix(rel, "meta/reviews/") ||
-			strings.HasPrefix(rel, "Clippings/") || strings.HasPrefix(rel, "resources/reading/") ||
-			strings.HasPrefix(rel, "meta/agents-board/memo/") || strings.HasSuffix(rel, ".jsonl") {
-			continue
-		}
-		seen[rel] = true
-
+		c := kernel.CortexNamed(cs, cName)
 		res, conf := kernel.Get(cs, cName, rel)
 		if conf != nil || res == nil {
 			continue
 		}
+		if !orient.BriefOK(kernel.JournalPrefix(c), rel, h.File, res.Frontmatter) {
+			continue
+		}
+		seen[rel] = true
 
 		status := ""
 		if s, ok := res.Frontmatter["status"].(string); ok {
 			status = s
-		}
-		if strings.EqualFold(status, "deprecated") || strings.EqualFold(status, "archived") || strings.EqualFold(status, "superseded") {
-			continue
 		}
 
 		desc := ""
