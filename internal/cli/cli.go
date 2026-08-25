@@ -79,20 +79,23 @@ func emit(stdout io.Writer, payload any, conf *kernel.Conflict) int {
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	if conf != nil {
-		code := 1
-		switch conf.Code {
-		case "unknown_command", "invalid_input", "registration_failed",
-			"payload_unreadable", "internal_error":
-			code = 2
-		}
-		_ = enc.Encode(conflictBody(conf))
-		return code
+		_ = enc.Encode(conf.Body())
+		return exitFor(conf.Class())
 	}
 	if err := enc.Encode(payload); err != nil {
 		fmt.Fprintf(os.Stderr, "exocortex: encoding output: %v\n", err)
 		return 2
 	}
 	return 0
+}
+
+func exitFor(c kernel.Class) int {
+	switch c {
+	case kernel.ClassInput, kernel.ClassInternal:
+		return 2
+	default:
+		return 1
+	}
 }
 
 // inputErr builds an invalid_input conflict for usage-level failures.
@@ -124,24 +127,6 @@ Usage:
 Every command returns a JSON document on stdout. Failures speak JSON (CR-04)
 naming the error, operation, path, and recovery hint.
 `)
-}
-
-// conflictBody renders a Conflict as its pinned JSON shape.
-func conflictBody(c *kernel.Conflict) map[string]any {
-	body := map[string]any{
-		"error": c.Code,
-		"hint":  c.Hint,
-	}
-	if c.Operation != "" {
-		body["operation"] = c.Operation
-	}
-	if c.Path != "" {
-		body["path"] = c.Path
-	}
-	for k, v := range c.Detail {
-		body[k] = v
-	}
-	return body
 }
 
 // splitArgs separates flag tokens from positional arguments regardless

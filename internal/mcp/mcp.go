@@ -30,17 +30,10 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 // conflict as an error result carrying the pinned conflict body.
 func toolResult(payload any, conf *kernel.Conflict) (*mcp.CallToolResult, any, error) {
 	if conf != nil {
-		body := map[string]any{"error": conf.Code, "hint": conf.Hint}
-		if conf.Operation != "" {
-			body["operation"] = conf.Operation
+		raw, err := json.Marshal(conf.Body())
+		if err != nil {
+			return nil, nil, err
 		}
-		if conf.Path != "" {
-			body["path"] = conf.Path
-		}
-		for k, v := range conf.Detail {
-			body[k] = v
-		}
-		raw, _ := json.Marshal(body)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}},
 			IsError: true,
