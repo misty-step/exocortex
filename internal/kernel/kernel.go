@@ -164,6 +164,8 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 			"fix the name (lowercase slug), path, vcs, or profile and retry",
 			map[string]any{"detail": fmt.Sprintf("cortex path %s is not a directory", abs)})
 	}
+	abs = canon(abs)
+
 	if vcs == "" {
 		vcs = "none"
 		if _, err := os.Stat(filepath.Join(abs, ".git")); err == nil {
@@ -235,16 +237,17 @@ func Resolve(cs []Cortex, nameFlag, p string) (*Cortex, string, error) {
 		}
 		abs = filepath.Join(wd, p)
 	}
-	abs = filepath.Clean(abs)
+	abs = canon(abs)
 	best := -1
 	for i := range cs {
-		root := filepath.Clean(cs[i].Path)
+		root := canon(cs[i].Path)
 		if abs == root || strings.HasPrefix(abs, root+string(filepath.Separator)) {
-			if best < 0 || len(root) > len(filepath.Clean(cs[best].Path)) {
+			if best < 0 || len(root) > len(canon(cs[best].Path)) {
 				best = i
 			}
 		}
 	}
+
 	if best >= 0 {
 		rel, err := relUnderRoot(cs[best].Path, abs)
 		if err != nil {
@@ -275,11 +278,10 @@ func Resolve(cs []Cortex, nameFlag, p string) (*Cortex, string, error) {
 // inside root Rel the same way implicit longest-prefix Resolve does.
 // ".", "..", and paths outside root fail.
 func relUnderRoot(root, p string) (string, error) {
-	root = filepath.Clean(root)
 	var rel string
 	if filepath.IsAbs(p) {
 		var err error
-		rel, err = filepath.Rel(root, filepath.Clean(p))
+		rel, err = filepath.Rel(canon(root), canon(p))
 		if err != nil {
 			return "", err
 		}
@@ -290,6 +292,20 @@ func relUnderRoot(root, p string) (string, error) {
 		return "", fmt.Errorf("path %s escapes cortex root %s", p, root)
 	}
 	return rel, nil
+}
+
+// canon returns p with existing symlink parents evaluated. A missing
+// final element keeps its base name under the canonical parent.
+func canon(p string) string {
+	p = filepath.Clean(p)
+	if e, err := filepath.EvalSymlinks(p); err == nil {
+		return e
+	}
+	dir := filepath.Dir(p)
+	if dir == p {
+		return p
+	}
+	return filepath.Join(canon(dir), filepath.Base(p))
 }
 
 // GitError carries git's stderr so conflicts can quote real diagnostics.
