@@ -74,6 +74,8 @@ func TestSearchTypeAndBriefUseCortexPolicy(t *testing.T) {
 	writeNote(t, emma, "daily/2026-08-25/n.md", "---\ntype: memo\n---\nemma memo\n")
 	writeNote(t, emma, "keep.md", "---\ntype: decision\nstatus: active\ndescription: keep this\n---\n# Keep\n- second cortex\n")
 	writeNote(t, emma, "dead.md", "---\ntype: decision\nstatus: archived\n---\n# Dead\n")
+	writeNote(t, vault, "notes/shared.md", "---\ntype: decision\nstatus: active\n---\n# Vault shared\n")
+	writeNote(t, emma, "notes/shared.md", "---\ntype: decision\nstatus: active\n---\n# Emma shared\n")
 
 	code, body, raw := runMain(t, "", "register", "vault", vault, "--vcs", "none", "--journal-prefix", "meta/agents-board/memo")
 	if code != 0 {
@@ -94,7 +96,9 @@ func TestSearchTypeAndBriefUseCortexPolicy(t *testing.T) {
   {"docid":"#7","file":"qmd://emma/daily/2026-08-25/n.md","score":0.3,"line":1,"title":"emma memo","context":"","snippet":"emma"},
   {"docid":"#8","file":"qmd://emma/keep.md","score":0.2,"line":1,"title":"Keep","context":"","snippet":"keep"},
   {"docid":"#9","file":"qmd://emma/dead.md","score":0.1,"line":1,"title":"Dead","context":"","snippet":"dead"},
-  {"docid":"#10","file":"qmd://omp-sessions/2026/x.jsonl","score":0.05,"line":1,"title":"sess","context":"","snippet":"sess"}
+  {"docid":"#10","file":"qmd://omp-sessions/2026/x.jsonl","score":0.05,"line":1,"title":"sess","context":"","snippet":"sess"},
+  {"docid":"#11","file":"qmd://vault/notes/shared.md","score":0.04,"line":1,"title":"Vault shared","context":"","snippet":"shared"},
+  {"docid":"#12","file":"qmd://emma/notes/shared.md","score":0.03,"line":1,"title":"Emma shared","context":"","snippet":"shared"}
 ]`)
 
 	code, _, raw = runMain(t, "", "search", "topic", "--type", "memo", "--mode", "bm25", "--limit", "20")
@@ -138,15 +142,22 @@ func TestSearchTypeAndBriefUseCortexPolicy(t *testing.T) {
 	}
 	notes, _ := body["canonical_notes"].([]any)
 	var briefPaths []string
+	sharedCortices := map[string]bool{}
 	for _, n := range notes {
 		m, _ := n.(map[string]any)
 		briefPaths = append(briefPaths, fmtString(m["path"]))
 		if fmtString(m["path"]) == "misty-step/kernel.md" && fmtString(m["cortex"]) != "vault" {
 			t.Fatalf("brief cortex not canonical: %v", m)
 		}
+		if fmtString(m["path"]) == "notes/shared.md" {
+			sharedCortices[fmtString(m["cortex"])] = true
+		}
 	}
 	if !hasPath(briefPaths, "misty-step/kernel.md") || !hasPath(briefPaths, "keep.md") {
 		t.Fatalf("brief missed live decisions: %v", briefPaths)
+	}
+	if !sharedCortices["vault"] || !sharedCortices["emma"] {
+		t.Fatalf("brief same-rel must keep both cortices: %v notes=%v", sharedCortices, briefPaths)
 	}
 	for _, banned := range []string{
 		"meta/agents-board/memo/2026-08-25/a.md",

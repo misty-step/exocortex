@@ -72,8 +72,11 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     is environment-dependent (disabled under `CI=true`). `--type
     decision|memo|session|note|scratch` filters hits after retrieval.
     Memo matching uses the resolved cortex `journal_prefix`. Decision
-    and `brief` share one exclusion and lifecycle owner; brief keeps a
-    looser type policy (any live non-noise note).
+    and `brief` share one exclusion list and one `liveStatus` helper.
+    `--type decision` matches kind (`type: decision`, or live
+    `type: note`, or a live untyped orientation path). `brief` applies
+    `liveStatus` to every candidate and keeps a looser type policy
+    (any live non-noise note, including archived decisions excluded).
   - `brief "<topic>"` — orientation packet of live canonical notes.
     CLI-only. MCP search accepts the same optional `type` filter.
   - `note "<thought>"` — journal micro-memory as an IMMUTABLE file

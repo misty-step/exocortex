@@ -50,7 +50,7 @@ func MatchType(journalPrefix, rel, fileURI, filter string, fm map[string]any) bo
 		if typ != "" {
 			return decisionType(typ, status)
 		}
-		return decisionPath(rel)
+		return liveStatus(status) && decisionPath(rel)
 	default:
 		return typ != "" && strings.EqualFold(typ, f)
 	}

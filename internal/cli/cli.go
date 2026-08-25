@@ -427,7 +427,8 @@ func cmdBrief(args []string) (any, *kernel.Conflict, error) {
 
 	for _, h := range hits {
 		cName, rel, ok := qmd.SplitURI(h.File)
-		if !ok || seen[rel] {
+		key := cName + "\x00" + rel
+		if !ok || seen[key] {
 			continue
 		}
 		c := kernel.CortexNamed(cs, cName)
@@ -438,7 +439,7 @@ func cmdBrief(args []string) (any, *kernel.Conflict, error) {
 		if !orient.BriefOK(kernel.JournalPrefix(c), rel, h.File, res.Frontmatter) {
 			continue
 		}
-		seen[rel] = true
+		seen[key] = true
 
 		status := ""
 		if s, ok := res.Frontmatter["status"].(string); ok {
