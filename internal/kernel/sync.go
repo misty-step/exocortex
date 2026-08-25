@@ -315,9 +315,14 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 			return out, conflict("state_failed", "sync", c.Name, "index advanced but snapshotted markers were not deleted; inspect state and retry", map[string]any{"detail": err.Error()})
 		}
 	}
-	_ = os.Remove(errorPath)
-
-	remaining, _ := os.ReadDir(dDir)
+	remaining, rerr := os.ReadDir(dDir)
+	if rerr != nil {
+		writeSyncError(c.Name, newestCommit, "cleanup", rerr.Error())
+		return out, conflict("state_failed", "sync", c.Name, "index advanced but remaining dirty markers could not be read; inspect state and retry", map[string]any{"detail": rerr.Error()})
+	}
+	if err := os.Remove(errorPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return out, conflict("state_failed", "sync", c.Name, "index advanced but last_sync_error could not be cleared; inspect state and retry", map[string]any{"detail": err.Error()})
+	}
 	out.DirtyCleared = len(remaining) == 0
 	return out, nil
 
