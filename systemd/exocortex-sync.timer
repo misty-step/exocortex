@@ -3,9 +3,11 @@ Description=Run Exocortex search and vector sync periodically
 Documentation=https://github.com/misty-step/exocortex
 
 [Timer]
-OnBootSec=1min
-OnUnitActiveSec=5min
+# OnUnitActiveSec does not reschedule after enable --now on a long-up
+# host (Trigger: n/a, active/elapsed). Calendar always arms NEXT.
+OnCalendar=*:0/5
 Persistent=true
+AccuracySec=30s
 
 [Install]
 WantedBy=timers.target
