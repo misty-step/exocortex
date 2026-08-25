@@ -14,17 +14,24 @@ const (
 	ClassInput
 	// ClassInternal is an unexpected kernel failure (internal_error).
 	ClassInternal
+	// ClassUnavailable is an expected dependency or publisher outage
+	// (search_unavailable, writer_unavailable, cortex_unavailable).
+	ClassUnavailable
 )
 
-// input-class and internal codes named by SPEC.md. Every other code,
-// including search_unavailable / writer_unavailable, stays ClassOperation
-// so CLI exit codes remain 1 unless SPEC lists them as exit 2.
+// SPEC input-class and internal_error keep their named classes.
+// Named availability codes are ClassUnavailable. Every other current
+// code stays ClassOperation so CLI exits remain 1 unless SPEC lists
+// them as exit 2.
 var codeClass = map[string]Class{
 	"invalid_input":       ClassInput,
 	"unknown_command":     ClassInput,
 	"registration_failed": ClassInput,
 	"payload_unreadable":  ClassInput,
 	"internal_error":      ClassInternal,
+	"search_unavailable":  ClassUnavailable,
+	"writer_unavailable":  ClassUnavailable,
+	"cortex_unavailable":  ClassUnavailable,
 }
 
 // Conflict is an operation failure returned as data (CR-04): a stable

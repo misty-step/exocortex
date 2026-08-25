@@ -93,6 +93,8 @@ func exitFor(c kernel.Class) int {
 	switch c {
 	case kernel.ClassInput, kernel.ClassInternal:
 		return 2
+	case kernel.ClassOperation, kernel.ClassUnavailable:
+		return 1
 	default:
 		return 1
 	}
