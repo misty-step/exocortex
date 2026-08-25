@@ -48,19 +48,13 @@ type Conflict struct {
 }
 
 func (c *Conflict) Error() string {
-	if c == nil {
-		return ""
-	}
-	return fmt.Sprintf("%s (%s op=%s path=%s)", c.Code, c.Code, c.Operation, c.Path)
+	return fmt.Sprintf("%s (op=%s path=%s)", c.Code, c.Operation, c.Path)
 }
 
 // Class reports the semantic class owned by this conflict. Unknown
 // codes default to ClassOperation, matching the historical CLI default
 // of exit 1.
 func (c *Conflict) Class() Class {
-	if c == nil {
-		return ClassInternal
-	}
 	if class, ok := codeClass[c.Code]; ok {
 		return class
 	}
@@ -71,9 +65,6 @@ func (c *Conflict) Class() Class {
 // omitted; Detail keys flatten into the object. This is the only
 // serializer: CLI and MCP must not rebuild the map.
 func (c *Conflict) Body() map[string]any {
-	if c == nil {
-		return map[string]any{"error": "internal_error", "hint": "retry"}
-	}
 	body := map[string]any{
 		"error": c.Code,
 		"hint":  c.Hint,
