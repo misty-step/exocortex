@@ -27,7 +27,9 @@ Source artifact: daybook `misty-step/exocortex-kernel.md`.
 - Fleet delivery: the CLI (`exocortex`) and bundled skill (`skill://exocortex`)
   is the official, universal fleet interface. The fleet runs on OMP; per-harness
   MCP fleet installations (Slice 2) were retired by operator decision (2026-08-24)
-  as unnecessary complexity.
+  as unnecessary complexity. Skill source is `skills/exocortex/SKILL.md`;
+  omp-config and live installs are generated (`scripts/install-skill.sh`).
+  Do not hand-edit generated copies.
 ## Open decisions
 
 - Language: Go recommended (velocity, single-binary fleet distribution);
