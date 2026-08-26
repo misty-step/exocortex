@@ -149,14 +149,7 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 	if limit <= 0 {
 		limit = qmd.DefaultSearchLimit
 	}
-	fetchLimit := limit
-	if a.Type != "" && fetchLimit < qmd.MaxSearchLimit {
-		fetchLimit = limit * 5
-		if fetchLimit > qmd.MaxSearchLimit {
-			fetchLimit = qmd.MaxSearchLimit
-		}
-	}
-	hits, err := qmd.Search(ctx, a.Query, collections, a.Mode, fetchLimit)
+	hits, err := qmd.Search(ctx, a.Query, collections, a.Mode, mcpFetchLimit(limit, a.Type))
 	if err != nil {
 		return toolResult(nil, &kernel.Conflict{
 			Code:      "search_unavailable",
@@ -173,36 +166,25 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 			return nil, nil, err
 		}
 	}
+	return toolResult(projectMCPHits(hits, cs, a.Type, limit), nil)
+}
+
+func mcpFetchLimit(limit int, typeFilter string) int {
+	if typeFilter == "" || limit >= qmd.MaxSearchLimit {
+		return limit
+	}
+	fetchLimit := limit * 5
+	if fetchLimit > qmd.MaxSearchLimit {
+		return qmd.MaxSearchLimit
+	}
+	return fetchLimit
+}
+
+func projectMCPHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, limit int) []map[string]any {
 	out := make([]map[string]any, 0, len(hits))
 	for _, h := range hits {
-		entry := map[string]any{
-			"docid":   h.DocID,
-			"score":   h.Score,
-			"line":    h.Line,
-			"title":   h.Title,
-			"context": h.Context,
-			"snippet": h.Snippet,
-			"file":    h.File,
-		}
-		var (
-			c       *kernel.Cortex
-			rel     string
-			fm      map[string]any
-			fetched bool
-		)
-		if collection, path, ok := qmd.SplitURI(h.File); ok {
-			entry["cortex"] = collection
-			entry["path"] = path
-			rel = path
-			c = kernel.CortexNamed(cs, collection)
-			if a.Type != "" && c != nil && path != "" {
-				if res, conf := kernel.Get(cs, collection, path); conf == nil && res != nil {
-					fm = res.Frontmatter
-					fetched = true
-				}
-			}
-		}
-		if a.Type != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, a.Type, fm, fetched) {
+		entry, keep := projectMCPHit(h, cs, typeFilter)
+		if !keep {
 			continue
 		}
 		out = append(out, entry)
@@ -210,7 +192,41 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 			break
 		}
 	}
-	return toolResult(out, nil)
+	return out
+}
+
+func projectMCPHit(h qmd.Hit, cs []kernel.Cortex, typeFilter string) (map[string]any, bool) {
+	entry := map[string]any{
+		"docid":   h.DocID,
+		"score":   h.Score,
+		"line":    h.Line,
+		"title":   h.Title,
+		"context": h.Context,
+		"snippet": h.Snippet,
+		"file":    h.File,
+	}
+	var (
+		c       *kernel.Cortex
+		rel     string
+		fm      map[string]any
+		fetched bool
+	)
+	if collection, path, ok := qmd.SplitURI(h.File); ok {
+		entry["cortex"] = collection
+		entry["path"] = path
+		rel = path
+		c = kernel.CortexNamed(cs, collection)
+		if typeFilter != "" && c != nil && path != "" {
+			if res, conf := kernel.Get(cs, collection, path); conf == nil && res != nil {
+				fm = res.Frontmatter
+				fetched = true
+			}
+		}
+	}
+	if typeFilter != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, typeFilter, fm, fetched) {
+		return nil, false
+	}
+	return entry, true
 }
 
 func noteTool(ctx context.Context, req *mcp.CallToolRequest, a noteArgs) (*mcp.CallToolResult, any, error) {

@@ -112,27 +112,13 @@ func saveRegistry(cs []Cortex) error {
 
 // Register binds a cortex into the registry.
 func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
-	if !nameRe.MatchString(name) {
-		return nil, conflict("registration_failed", "register", name,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": fmt.Sprintf("cortex name %q must match %s", name, nameRe)})
+	if err := checkRegisterName(name); err != nil {
+		return nil, err
 	}
-	if path == "" {
-		return nil, conflict("registration_failed", "register", name,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": "path is required"})
-	}
-	abs, err := filepath.Abs(path)
+	abs, err := absRegisterPath(name, path)
 	if err != nil {
-		return nil, conflict("registration_failed", "register", path,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": err.Error()})
+		return nil, err
 	}
-
-	// Name collisions are answered from the locked registry before
-	// the replacement path is validated: a taken name stays
-	// duplicate_cortex even when the new path is missing or not a
-	// directory.
 	regLock, lerr := acquireLock("registry")
 	if lerr != nil {
 		return nil, conflict("registration_failed", "register", name,
@@ -152,38 +138,13 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 				map[string]any{"path": c.Path})
 		}
 	}
-
-	st, err := os.Stat(abs)
+	abs, err = statRegisterDir(abs)
 	if err != nil {
-		return nil, conflict("registration_failed", "register", abs,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": fmt.Sprintf("cortex path %s: %v", abs, err)})
+		return nil, err
 	}
-	if !st.IsDir() {
-		return nil, conflict("registration_failed", "register", abs,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": fmt.Sprintf("cortex path %s is not a directory", abs)})
-	}
-	abs = canon(abs)
-
-	if vcs == "" {
-		vcs = "none"
-		if _, err := os.Stat(filepath.Join(abs, ".git")); err == nil {
-			vcs = "daybook"
-		}
-	}
-	if !validVCS[vcs] {
-		return nil, conflict("registration_failed", "register", name,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": fmt.Sprintf("vcs %q must be daybook, caller, or none", vcs)})
-	}
-	if profile == "" {
-		profile = "daybook"
-	}
-	if !profiles[profile] {
-		return nil, conflict("registration_failed", "register", name,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": fmt.Sprintf("profile %q must be daybook or strict", profile)})
+	vcs, profile, err = registerPolicy(name, abs, vcs, profile)
+	if err != nil {
+		return nil, err
 	}
 	for _, c := range cs {
 		if sameRoot(c.Path, abs) {
@@ -192,7 +153,6 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 				map[string]any{"name": c.Name})
 		}
 	}
-
 	jp := filepath.ToSlash(filepath.Clean(journalPrefix))
 	if jp == "." {
 		jp = "journal"
@@ -208,6 +168,68 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 	return c, nil
 }
 
+func checkRegisterName(name string) error {
+	if !nameRe.MatchString(name) {
+		return conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": fmt.Sprintf("cortex name %q must match %s", name, nameRe)})
+	}
+	return nil
+}
+
+func absRegisterPath(name, path string) (string, error) {
+	if path == "" {
+		return "", conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": "path is required"})
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", conflict("registration_failed", "register", path,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": err.Error()})
+	}
+	return abs, nil
+}
+
+func statRegisterDir(abs string) (string, error) {
+	st, err := os.Stat(abs)
+	if err != nil {
+		return "", conflict("registration_failed", "register", abs,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": fmt.Sprintf("cortex path %s: %v", abs, err)})
+	}
+	if !st.IsDir() {
+		return "", conflict("registration_failed", "register", abs,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": fmt.Sprintf("cortex path %s is not a directory", abs)})
+	}
+	return canon(abs), nil
+}
+
+func registerPolicy(name, abs, vcs, profile string) (string, string, error) {
+	if vcs == "" {
+		vcs = "none"
+		if _, err := os.Stat(filepath.Join(abs, ".git")); err == nil {
+			vcs = "daybook"
+		}
+	}
+	if !validVCS[vcs] {
+		return "", "", conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": fmt.Sprintf("vcs %q must be daybook, caller, or none", vcs)})
+	}
+	if profile == "" {
+		profile = "daybook"
+	}
+	if !profiles[profile] {
+		return "", "", conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": fmt.Sprintf("profile %q must be daybook or strict", profile)})
+	}
+	return vcs, profile, nil
+}
+
 // Resolve maps a user-supplied path onto a cortex and a cortex-relative
 // destination. An explicit cortex name wins; otherwise the longest
 // registered root containing the (cwd-resolved) path wins; otherwise a
@@ -218,22 +240,33 @@ func Resolve(cs []Cortex, nameFlag, p string) (*Cortex, string, error) {
 		return nil, "", errors.New("path is required")
 	}
 	if nameFlag != "" {
-		for i := range cs {
-			if cs[i].Name == nameFlag {
-				rel, err := relUnderRoot(cs[i].Path, p)
-				if err != nil {
-					return nil, "", err
-				}
-				return &cs[i], rel, nil
-			}
-		}
-		return nil, "", fmt.Errorf("no cortex named %q is registered", nameFlag)
+		return resolveNamed(cs, nameFlag, p)
 	}
+	if c, rel, err, ok := resolveLongestRoot(cs, p); ok {
+		return c, rel, err
+	}
+	return resolveSoleOrAmbiguous(cs, p)
+}
+
+func resolveNamed(cs []Cortex, nameFlag, p string) (*Cortex, string, error) {
+	for i := range cs {
+		if cs[i].Name == nameFlag {
+			rel, err := relUnderRoot(cs[i].Path, p)
+			if err != nil {
+				return nil, "", err
+			}
+			return &cs[i], rel, nil
+		}
+	}
+	return nil, "", fmt.Errorf("no cortex named %q is registered", nameFlag)
+}
+
+func resolveLongestRoot(cs []Cortex, p string) (*Cortex, string, error, bool) {
 	abs := p
 	if !filepath.IsAbs(abs) {
 		wd, err := os.Getwd()
 		if err != nil {
-			return nil, "", err
+			return nil, "", err, true
 		}
 		abs = filepath.Join(wd, p)
 	}
@@ -247,14 +280,17 @@ func Resolve(cs []Cortex, nameFlag, p string) (*Cortex, string, error) {
 			}
 		}
 	}
-
-	if best >= 0 {
-		rel, err := relUnderRoot(cs[best].Path, abs)
-		if err != nil {
-			return nil, "", err
-		}
-		return &cs[best], rel, nil
+	if best < 0 {
+		return nil, "", nil, false
 	}
+	rel, err := relUnderRoot(cs[best].Path, abs)
+	if err != nil {
+		return nil, "", err, true
+	}
+	return &cs[best], rel, nil, true
+}
+
+func resolveSoleOrAmbiguous(cs []Cortex, p string) (*Cortex, string, error) {
 	switch len(cs) {
 	case 0:
 		return nil, "", errors.New("no cortices are registered; run: exocortex register <name> <path>")
