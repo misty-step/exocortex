@@ -1,0 +1,11 @@
+# name	include	budget
+# Packed-output tokens via repomix --no-file-summary --no-directory-structure.
+# Raise only with a recorded reason after delete-or-split.
+kernel	internal/kernel	54000
+cli	internal/cli	16000
+fm	internal/fm	8000
+mcp	internal/mcp	5000
+orient	internal/orient	4500
+qmd	internal/qmd	9000
+cmd	cmd/exocortex	500
+skillsrc	internal/skillsrc	2000

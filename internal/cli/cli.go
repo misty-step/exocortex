@@ -25,45 +25,11 @@ func Main(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			"run `exocortex help` for the command list"))
 	}
 	cmd, rest := argv[0], argv[1:]
-	var payload any
-	var conf *kernel.Conflict
-	var err error
-	switch cmd {
-	case "register":
-		payload, conf, err = cmdRegister(rest)
-	case "put":
-		payload, conf, err = cmdPut(rest, stdin)
-	case "get":
-		payload, conf, err = cmdGet(rest)
-	case "search":
-		payload, conf, err = cmdSearch(rest)
-	case "brief":
-		payload, conf, err = cmdBrief(rest)
-	case "log":
-		payload, conf, err = cmdLog(rest)
-	case "note":
-		payload, conf, err = cmdNote(rest, stdin)
-	case "lint":
-		payload, conf, err = cmdLint(rest)
-	case "sync":
-		payload, conf, err = cmdSync(rest)
-	case "status":
-		payload, conf, err = cmdStatus(rest)
-	case "mcp":
-		return mcp.Run(stdin, stdout, stderr)
-	case "help", "-h", "--help":
-		usage(stdout)
-		return 0
-	default:
-		conf = &kernel.Conflict{
-			Code:      "unknown_command",
-			Operation: cmd,
-			Hint:      "run `exocortex help` for the command list",
-		}
-		return emit(stdout, nil, conf) // input error: exit 2
+	if code, handled := dispatchSpecial(cmd, stdin, stdout, stderr); handled {
+		return code
 	}
+	payload, conf, err := dispatch(cmd, rest, stdin)
 	if err != nil {
-		// Residual internal failures also speak JSON (CR-04).
 		conf = &kernel.Conflict{
 			Code:      "internal_error",
 			Operation: cmd,
@@ -72,6 +38,49 @@ func Main(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 	return emit(stdout, payload, conf)
+}
+
+func dispatchSpecial(cmd string, stdin io.Reader, stdout, stderr io.Writer) (int, bool) {
+	switch cmd {
+	case "mcp":
+		return mcp.Run(stdin, stdout, stderr), true
+	case "help", "-h", "--help":
+		usage(stdout)
+		return 0, true
+	default:
+		return 0, false
+	}
+}
+
+func dispatch(cmd string, rest []string, stdin io.Reader) (any, *kernel.Conflict, error) {
+	switch cmd {
+	case "register":
+		return cmdRegister(rest)
+	case "put":
+		return cmdPut(rest, stdin)
+	case "get":
+		return cmdGet(rest)
+	case "search":
+		return cmdSearch(rest)
+	case "brief":
+		return cmdBrief(rest)
+	case "log":
+		return cmdLog(rest)
+	case "note":
+		return cmdNote(rest, stdin)
+	case "lint":
+		return cmdLint(rest)
+	case "sync":
+		return cmdSync(rest)
+	case "status":
+		return cmdStatus(rest)
+	default:
+		return nil, &kernel.Conflict{
+			Code:      "unknown_command",
+			Operation: cmd,
+			Hint:      "run `exocortex help` for the command list",
+		}, nil
+	}
 }
 
 // emit writes the JSON document and returns the exit code: 0 success,
@@ -291,23 +300,8 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 	if len(pos) != 1 {
 		return nil, inputErr("search", `search requires one "<query>"`, `exocortex search "<query>"`), nil
 	}
-
-	fetchLimit := *limit
-	if *typeFilter != "" && fetchLimit < 100 {
-		fetchLimit = *limit * 5
-		if fetchLimit > 100 {
-			fetchLimit = 100
-		}
-	}
-
-	var collections []string
-	if *cortex != "" {
-		collections = []string{*cortex}
-	} else if strings.EqualFold(*typeFilter, "session") {
-		collections = sessionCollections
-	}
-
-	hits, err := qmd.Search(context.Background(), pos[0], collections, *mode, fetchLimit)
+	collections := searchCollections(*cortex, *typeFilter)
+	hits, err := qmd.Search(context.Background(), pos[0], collections, *mode, searchFetchLimit(*limit, *typeFilter))
 	if err != nil {
 		return nil, &kernel.Conflict{
 			Code:      "search_unavailable",
@@ -317,61 +311,97 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 			Detail:    map[string]any{"detail": err.Error()},
 		}, nil
 	}
-
 	cs, err := loadRegistry()
 	if err != nil && *typeFilter != "" {
 		return nil, nil, err
 	}
+	return projectSearchHits(hits, cs, *typeFilter, *limit), nil, nil
+}
+
+func searchCollections(cortex, typeFilter string) []string {
+	if cortex != "" {
+		return []string{cortex}
+	}
+	if strings.EqualFold(typeFilter, "session") {
+		return sessionCollections
+	}
+	return nil
+}
+
+func searchFetchLimit(limit int, typeFilter string) int {
+	if typeFilter == "" || limit >= 100 {
+		return limit
+	}
+	fetchLimit := limit * 5
+	if fetchLimit > 100 {
+		return 100
+	}
+	return fetchLimit
+}
+
+func projectSearchHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, limit int) []map[string]any {
 	out := make([]map[string]any, 0)
 	for _, h := range hits {
-		collection, rel, isURI := qmd.SplitURI(h.File)
-		var (
-			c   *kernel.Cortex
-			fm  map[string]any
-			res *kernel.GetResult
-		)
-		if isURI {
-			c = kernel.CortexNamed(cs, collection)
-			if c != nil && rel != "" {
-				if got, conf := kernel.Get(cs, collection, rel); conf == nil {
-					res = got
-					fm = got.Frontmatter
-				}
-			}
-		}
-		if *typeFilter != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, *typeFilter, fm, res != nil) {
+		entry, keep := projectSearchHit(h, cs, typeFilter)
+		if !keep {
 			continue
 		}
-
-		entry := map[string]any{
-			"docid":   h.DocID,
-			"score":   h.Score,
-			"file":    h.File,
-			"title":   h.Title,
-			"line":    h.Line,
-			"context": h.Context,
-			"snippet": h.Snippet,
-		}
-		if isURI {
-			entry["cortex"] = collection
-			entry["path"] = rel
-			if res != nil {
-				if d, ok := res.Frontmatter["description"].(string); ok && d != "" && entry["context"] == "" {
-					entry["context"] = d
-				}
-				if entry["title"] == "" {
-					if t := extractTitle(res.Content); t != "" {
-						entry["title"] = t
-					}
-				}
-			}
-		}
 		out = append(out, entry)
-		if len(out) >= *limit {
+		if len(out) >= limit {
 			break
 		}
 	}
-	return out, nil, nil
+	return out
+}
+
+func projectSearchHit(h qmd.Hit, cs []kernel.Cortex, typeFilter string) (map[string]any, bool) {
+	collection, rel, isURI := qmd.SplitURI(h.File)
+	var (
+		c   *kernel.Cortex
+		fm  map[string]any
+		res *kernel.GetResult
+	)
+	if isURI {
+		c = kernel.CortexNamed(cs, collection)
+		if c != nil && rel != "" {
+			if got, conf := kernel.Get(cs, collection, rel); conf == nil {
+				res = got
+				fm = got.Frontmatter
+			}
+		}
+	}
+	if typeFilter != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, typeFilter, fm, res != nil) {
+		return nil, false
+	}
+	entry := map[string]any{
+		"docid":   h.DocID,
+		"score":   h.Score,
+		"file":    h.File,
+		"title":   h.Title,
+		"line":    h.Line,
+		"context": h.Context,
+		"snippet": h.Snippet,
+	}
+	if isURI {
+		entry["cortex"] = collection
+		entry["path"] = rel
+		enrichSearchHit(entry, res)
+	}
+	return entry, true
+}
+
+func enrichSearchHit(entry map[string]any, res *kernel.GetResult) {
+	if res == nil {
+		return
+	}
+	if d, ok := res.Frontmatter["description"].(string); ok && d != "" && entry["context"] == "" {
+		entry["context"] = d
+	}
+	if entry["title"] == "" {
+		if t := extractTitle(res.Content); t != "" {
+			entry["title"] = t
+		}
+	}
 }
 
 func extractTitle(content string) string {
@@ -405,7 +435,6 @@ func cmdBrief(args []string) (any, *kernel.Conflict, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-
 	topic := pos[0]
 	var collections []string
 	if *cortex != "" {
@@ -421,111 +450,126 @@ func cmdBrief(args []string) (any, *kernel.Conflict, error) {
 			Detail:    map[string]any{"detail": err.Error()},
 		}, nil
 	}
-
-	var canonicalNotes []map[string]any
-	seen := map[string]bool{}
-
-	for _, h := range hits {
-		cName, rel, ok := qmd.SplitURI(h.File)
-		key := cName + "\x00" + rel
-		if !ok || seen[key] {
-			continue
-		}
-		c := kernel.CortexNamed(cs, cName)
-		res, conf := kernel.Get(cs, cName, rel)
-		if conf != nil || res == nil {
-			continue
-		}
-		if !orient.BriefOK(kernel.JournalPrefix(c), rel, h.File, res.Frontmatter) {
-			continue
-		}
-		seen[key] = true
-
-		status := ""
-		if s, ok := res.Frontmatter["status"].(string); ok {
-			status = s
-		}
-
-		desc := ""
-		if d, ok := res.Frontmatter["description"].(string); ok {
-			desc = d
-		}
-
-		var tags []any
-		if t, ok := res.Frontmatter["tags"].([]any); ok {
-			tags = t
-		}
-
-		// Extract key decision points or summary paragraphs
-		takeaways := extractTakeaways(res.Content)
-
-		canonicalNotes = append(canonicalNotes, map[string]any{
-			"title":       h.Title,
-			"path":        res.Path,
-			"cortex":      res.Cortex,
-			"status":      status,
-			"description": desc,
-			"takeaways":   takeaways,
-			"tags":        tags,
-			"revision":    res.Revision,
-		})
-
-		if len(canonicalNotes) >= *limit {
-			break
-		}
-	}
-
+	notes := collectBriefNotes(cs, hits, *limit)
 	return map[string]any{
 		"topic":           topic,
-		"canonical_notes": canonicalNotes,
-		"count":           len(canonicalNotes),
+		"canonical_notes": notes,
+		"count":           len(notes),
 	}, nil, nil
 }
 
-// extractTakeaways extracts key decision bullets, headers, or leading summary lines.
+func collectBriefNotes(cs []kernel.Cortex, hits []qmd.Hit, limit int) []map[string]any {
+	var notes []map[string]any
+	seen := map[string]bool{}
+	for _, h := range hits {
+		note, ok := briefNoteFromHit(cs, h, seen)
+		if !ok {
+			continue
+		}
+		notes = append(notes, note)
+		if len(notes) >= limit {
+			break
+		}
+	}
+	return notes
+}
+
+func briefNoteFromHit(cs []kernel.Cortex, h qmd.Hit, seen map[string]bool) (map[string]any, bool) {
+	cName, rel, ok := qmd.SplitURI(h.File)
+	key := cName + "\x00" + rel
+	if !ok || seen[key] {
+		return nil, false
+	}
+	c := kernel.CortexNamed(cs, cName)
+	res, conf := kernel.Get(cs, cName, rel)
+	if conf != nil || res == nil {
+		return nil, false
+	}
+	if !orient.BriefOK(kernel.JournalPrefix(c), rel, h.File, res.Frontmatter) {
+		return nil, false
+	}
+	seen[key] = true
+	status, _ := res.Frontmatter["status"].(string)
+	desc, _ := res.Frontmatter["description"].(string)
+	tags, _ := res.Frontmatter["tags"].([]any)
+	return map[string]any{
+		"title":       h.Title,
+		"path":        res.Path,
+		"cortex":      res.Cortex,
+		"status":      status,
+		"description": desc,
+		"takeaways":   extractTakeaways(res.Content),
+		"tags":        tags,
+		"revision":    res.Revision,
+	}, true
+}
+
 func extractTakeaways(content string) []string {
 	lines := strings.Split(content, "\n")
+	if takeaways := takeawaysFromDecisionSection(lines); len(takeaways) > 0 {
+		return takeaways
+	}
+	return takeawaysFallback(lines)
+}
+
+func takeawaysFromDecisionSection(lines []string) []string {
 	var takeaways []string
 	inDecisionSection := false
-
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "---") {
 			continue
 		}
 		lower := strings.ToLower(trimmed)
-		if strings.HasPrefix(lower, "## decision") || strings.HasPrefix(lower, "## verdict") ||
-			strings.HasPrefix(lower, "## model") || strings.HasPrefix(lower, "## architecture") {
+		if isDecisionHeading(lower) {
 			inDecisionSection = true
 			continue
 		}
 		if inDecisionSection && strings.HasPrefix(trimmed, "## ") {
 			inDecisionSection = false
 		}
-		if inDecisionSection && (strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ")) {
-			takeaways = append(takeaways, strings.TrimPrefix(strings.TrimPrefix(trimmed, "- "), "* "))
-			if len(takeaways) >= 4 {
-				break
-			}
-		}
-	}
-
-	// If no structured section found, pick leading non-header bullet points or paragraphs
-	if len(takeaways) == 0 {
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" || strings.HasPrefix(trimmed, "---") || strings.HasPrefix(trimmed, "#") {
-				continue
-			}
-			if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
-				takeaways = append(takeaways, strings.TrimPrefix(strings.TrimPrefix(trimmed, "- "), "* "))
-				if len(takeaways) >= 3 {
+		if inDecisionSection {
+			if item, ok := bulletItem(trimmed); ok {
+				takeaways = append(takeaways, item)
+				if len(takeaways) >= 4 {
 					break
 				}
 			}
 		}
 	}
 	return takeaways
+}
+
+func isDecisionHeading(lower string) bool {
+	return strings.HasPrefix(lower, "## decision") || strings.HasPrefix(lower, "## verdict") ||
+		strings.HasPrefix(lower, "## model") || strings.HasPrefix(lower, "## architecture")
+}
+
+func takeawaysFallback(lines []string) []string {
+	var takeaways []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "---") || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if item, ok := bulletItem(trimmed); ok {
+			takeaways = append(takeaways, item)
+			if len(takeaways) >= 3 {
+				break
+			}
+		}
+	}
+	return takeaways
+}
+
+func bulletItem(trimmed string) (string, bool) {
+	if strings.HasPrefix(trimmed, "- ") {
+		return strings.TrimPrefix(trimmed, "- "), true
+	}
+	if strings.HasPrefix(trimmed, "* ") {
+		return strings.TrimPrefix(trimmed, "* "), true
+	}
+	return "", false
 }
 func cmdLog(args []string) (any, *kernel.Conflict, error) {
 	fs := flag.NewFlagSet("log", flag.ContinueOnError)

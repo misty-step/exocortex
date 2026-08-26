@@ -33,6 +33,34 @@ exocortex sync [--cortex <name>]                       # refresh QMD index and e
 exocortex status [--cortex <name>]                     # dirty markers, last sync, last error
 ```
 
+## Develop
+
+Clone-to-green:
+
+```sh
+./scripts/check.sh
+```
+
+That is the owned gate: `gofmt`, `go vet`, `golangci-lint` (cyclop ≤ 15),
+gitleaks, govulncheck, module token budgets, `go test -race`, and a CLI
+smoke (`register` → `put` → `get` → `lint` on a temp cortex). Go 1.26.6
+is required (`go.mod`); 1.26.5 stdlib is govulncheck-red.
+
+
+Install the binary so `go version -m` names this module:
+
+```sh
+go install -trimpath ./cmd/exocortex
+```
+
+The user timer runs `~/.local/bin/exocortex`. Rebuild after merge. Roll
+back by installing the previous commit the same way.
+
+```sh
+./scripts/install-hooks.sh   # core.hooksPath=.githooks
+```
+
+
 ## Docs
 
 - [SPEC.md](SPEC.md) — full design: decisions, contracts, delivery plan

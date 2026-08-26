@@ -53,6 +53,8 @@ Source artifact: daybook `misty-step/exocortex-kernel.md`.
 - Trunk-based on `master`; semantic commits (`type(scope): subject`).
 - Never force-push. Stage only files you touched; concurrent agents work in
   this repo.
+- Clone-to-green is `./scripts/check.sh`. CI runs the same command.
+
 - Org defaults apply: Go or Rust (CR-01), minimal docs surface (DC-01), ADRs
   immutable once accepted (DC-02).
 - History note: this repo previously hosted an "evidence core" concept

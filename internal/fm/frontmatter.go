@@ -115,45 +115,55 @@ var knownKeys = map[string]bool{
 func Validate(profile string, d Document) ([]Finding, error) {
 	switch profile {
 	case "daybook":
-		if !d.Note.HasFM {
-			return nil, contract(errf("fm_missing", "frontmatter missing"))
-		}
-		if d.err != nil {
-			return nil, contract(errf("fm_unparseable", "frontmatter is not parseable YAML: %v", d.err))
-		}
-		if t, ok := d.Map["type"].(string); !ok || strings.TrimSpace(t) == "" {
-			return nil, contract(errf("type_missing", "frontmatter has no non-empty \"type\""))
-		}
-		return daybookWarnings(d), nil
+		return validateDaybook(d)
 	case "strict":
-		if !d.Note.HasFM {
-			return nil, contract(errf("fm_missing", "frontmatter missing"))
-		}
-		if d.err != nil {
-			return nil, contract(errf("fm_unparseable", "frontmatter is not parseable YAML: %v", d.err))
-		}
-		var fs []Finding
-		for _, k := range []string{"type", "status", "created", "description", "tags"} {
-			if empty(d.Map[k]) {
-				fs = append(fs, errf("key_missing", "strict profile requires non-empty %q", k))
-			}
-		}
-		// Lexical read: yaml.v3 decodes unquoted timestamps (including
-		// date-only values) to time.Time, hiding them from map assertions.
-		if c, ok := d.Scalar("created"); ok && strings.TrimSpace(c) != "" {
-			if _, perr := time.Parse(time.RFC3339, c); perr != nil {
-				fs = append(fs, errf("created_format", "created %q is not RFC3339", c))
-			}
-		}
-		for _, f := range fs {
-			if f.Level == "error" {
-				return fs, contract(f)
-			}
-		}
-		return fs, nil
+		return validateStrict(d)
 	default:
 		return nil, fmt.Errorf("unknown profile %q", profile)
 	}
+}
+
+func requireFrontmatter(d Document) error {
+	if !d.Note.HasFM {
+		return contract(errf("fm_missing", "frontmatter missing"))
+	}
+	if d.err != nil {
+		return contract(errf("fm_unparseable", "frontmatter is not parseable YAML: %v", d.err))
+	}
+	return nil
+}
+
+func validateDaybook(d Document) ([]Finding, error) {
+	if err := requireFrontmatter(d); err != nil {
+		return nil, err
+	}
+	if t, ok := d.Map["type"].(string); !ok || strings.TrimSpace(t) == "" {
+		return nil, contract(errf("type_missing", "frontmatter has no non-empty \"type\""))
+	}
+	return daybookWarnings(d), nil
+}
+
+func validateStrict(d Document) ([]Finding, error) {
+	if err := requireFrontmatter(d); err != nil {
+		return nil, err
+	}
+	var fs []Finding
+	for _, k := range []string{"type", "status", "created", "description", "tags"} {
+		if empty(d.Map[k]) {
+			fs = append(fs, errf("key_missing", "strict profile requires non-empty %q", k))
+		}
+	}
+	if c, ok := d.Scalar("created"); ok && strings.TrimSpace(c) != "" {
+		if _, perr := time.Parse(time.RFC3339, c); perr != nil {
+			fs = append(fs, errf("created_format", "created %q is not RFC3339", c))
+		}
+	}
+	for _, f := range fs {
+		if f.Level == "error" {
+			return fs, contract(f)
+		}
+	}
+	return fs, nil
 }
 
 // contract wraps a finding as a validation error.

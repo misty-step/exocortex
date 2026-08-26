@@ -1,0 +1,4 @@
+/artifacts/
+/repomix-output.xml
+coverage.out
+*.test
