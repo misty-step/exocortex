@@ -160,7 +160,8 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 	}
 
 	// Validate under the cortex profile BEFORE any comparison or write.
-	findings, verr := fm.Validate(c.Profile, fm.Split(in.Payload))
+	payload := fm.ParseDocument(in.Payload)
+	findings, verr := fm.Validate(c.Profile, payload)
 	if verr != nil {
 		f, _ := fm.ContractFinding(verr)
 		return nil, conflict("invalid_note", op, rel,
@@ -179,9 +180,9 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 	// yaml.v3 would decode unquoted timestamps to time.Time and hide
 	// the common case from map assertions.
 	if op == "update" {
-		storedNote := fm.Split(stored)
-		if storedCreated, ok := fm.TopLevelScalar(storedNote, "created"); ok && strings.TrimSpace(storedCreated) != "" {
-			submitted, pok := fm.TopLevelScalar(fm.Split(in.Payload), "created")
+		storedDoc := fm.ParseDocument(stored)
+		if storedCreated, ok := storedDoc.Scalar("created"); ok && strings.TrimSpace(storedCreated) != "" {
+			submitted, pok := payload.Scalar("created")
 			if !pok || submitted != storedCreated {
 				return nil, conflict("created_immutable", op, rel,
 					"created never changes; resubmit with created: "+storedCreated,
@@ -201,8 +202,9 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 		return res, nil
 	}
 
-	// Stamp provenance, atomic write.
-	final := fm.SpliceProvenance(in.Payload, fm.Provenance{
+	// Stamp provenance, atomic write. Splice is line-based over the
+	// original payload bytes; it does not round-trip YAML.
+	final := fm.SpliceProvenance(payload.Note.Raw, fm.Provenance{
 		Agent: agentID(in.Agent), At: time.Now(), Via: viaID(in.Via),
 	})
 	if werr := atomicWrite(abs, final); werr != nil {

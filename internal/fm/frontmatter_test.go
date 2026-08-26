@@ -26,9 +26,12 @@ func TestSplit(t *testing.T) {
 	}
 }
 
+func validate(profile, raw string) ([]Finding, error) {
+	return Validate(profile, ParseDocument([]byte(raw)))
+}
+
 func TestValidateDaybook(t *testing.T) {
-	ok := Split([]byte("---\ntype: decision\n---\nbody"))
-	fs, err := Validate("daybook", ok)
+	fs, err := validate("daybook", "---\ntype: decision\n---\nbody")
 	if err != nil {
 		t.Fatalf("minimal type-only note must pass daybook profile: %v", err)
 	}
@@ -36,17 +39,17 @@ func TestValidateDaybook(t *testing.T) {
 		t.Fatal("expected warnings for missing optional keys")
 	}
 
-	if _, err := Validate("daybook", Split([]byte("---\nstatus: active\n---\nbody"))); err == nil {
+	if _, err := validate("daybook", "---\nstatus: active\n---\nbody"); err == nil {
 		t.Fatal("missing type must fail")
 	}
-	if _, err := Validate("daybook", Split([]byte("plain body"))); err == nil {
+	if _, err := validate("daybook", "plain body"); err == nil {
 		t.Fatal("missing frontmatter must fail")
 	}
-	if _, err := Validate("daybook", Split([]byte("---\n: [unclosed\n---\n"))); err == nil {
+	if _, err := validate("daybook", "---\n: [unclosed\n---\n"); err == nil {
 		t.Fatal("unparseable frontmatter must fail")
 	}
 	// Unknown type vocabulary tolerated; bad created only warns.
-	fs, err = Validate("daybook", Split([]byte("---\ntype: zettel-exotic\ncreated: not-a-date\n---\n")))
+	fs, err = validate("daybook", "---\ntype: zettel-exotic\ncreated: not-a-date\n---\n")
 	if err != nil {
 		t.Fatalf("unknown type value must only warn: %v", err)
 	}
@@ -66,15 +69,15 @@ func TestValidateDaybook(t *testing.T) {
 	// Date-only created is non-empty but NOT RFC3339: the lexical read
 	// must catch it in both profiles despite yaml.v3 decoding it to
 	// time.Time.
-	dateOnly := Split([]byte("---\ntype: x\ncreated: 2026-08-21\n---\n"))
-	fs, err = Validate("daybook", dateOnly)
+	dateOnly := "---\ntype: x\ncreated: 2026-08-21\n---\n"
+	fs, err = validate("daybook", dateOnly)
 	if err != nil {
 		t.Fatalf("date-only created must warn, not fail, under daybook: %v", err)
 	}
 	if !hasRule(fs, "created_format") {
 		t.Fatalf("daybook missed date-only created: %+v", fs)
 	}
-	if _, err := Validate("strict", dateOnly); err == nil {
+	if _, err := validate("strict", dateOnly); err == nil {
 		t.Fatal("strict must reject date-only created")
 	}
 }
@@ -89,26 +92,24 @@ func hasRule(fs []Finding, rule string) bool {
 }
 
 func TestValidateStrict(t *testing.T) {
-	full := Split([]byte("---\ntype: a\nstatus: b\ncreated: 2026-08-21T00:00:00Z\ndescription: d\ntags: [x]\n---\n"))
-	if _, err := Validate("strict", full); err != nil {
+	full := "---\ntype: a\nstatus: b\ncreated: 2026-08-21T00:00:00Z\ndescription: d\ntags: [x]\n---\n"
+	if _, err := validate("strict", full); err != nil {
 		t.Fatalf("complete strict note must pass: %v", err)
 	}
-	partial := Split([]byte("---\ntype: a\nstatus: b\n---\n"))
-	if _, err := Validate("strict", partial); err == nil {
+	if _, err := validate("strict", "---\ntype: a\nstatus: b\n---\n"); err == nil {
 		t.Fatal("strict requires all five keys")
 	}
-	badDate := Split([]byte("---\ntype: a\nstatus: b\ncreated: yesterday\ndescription: d\ntags: [x]\n---\n"))
-	if _, err := Validate("strict", badDate); err == nil {
+	if _, err := validate("strict", "---\ntype: a\nstatus: b\ncreated: yesterday\ndescription: d\ntags: [x]\n---\n"); err == nil {
 		t.Fatal("strict requires RFC3339 created")
 	}
 	// Date-only created fails strict; unquoted full RFC3339 passes —
 	// both resolve to time.Time, so only the lexical check distinguishes.
-	dateOnly := Split([]byte("---\ntype: a\nstatus: b\ncreated: 2026-08-21\ndescription: d\ntags: [x]\n---\n"))
-	if _, err := Validate("strict", dateOnly); err == nil {
+	dateOnly := "---\ntype: a\nstatus: b\ncreated: 2026-08-21\ndescription: d\ntags: [x]\n---\n"
+	if _, err := validate("strict", dateOnly); err == nil {
 		t.Fatal("strict must reject date-only created")
 	}
-	unq := Split([]byte("---\ntype: a\nstatus: b\ncreated: 2019-03-04T05:06:07Z\ndescription: d\ntags: [x]\n---\n"))
-	if _, err := Validate("strict", unq); err != nil {
+	unq := "---\ntype: a\nstatus: b\ncreated: 2019-03-04T05:06:07Z\ndescription: d\ntags: [x]\n---\n"
+	if _, err := validate("strict", unq); err != nil {
 		t.Fatalf("unquoted RFC3339 must pass strict: %v", err)
 	}
 }

@@ -36,19 +36,7 @@ func Get(cs []Cortex, nameFlag, p string) (*GetResult, *Conflict) {
 		if gerr != nil {
 			return nil, conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
 		}
-		rawBytes := []byte(raw)
-		note := fm.Split(rawBytes)
-		var fmm map[string]any
-		if m, perr := fm.Parse(note); perr == nil {
-			fmm = m
-		}
-		return &GetResult{
-			Cortex:      c.Name,
-			Path:        filepath.ToSlash(rel),
-			Revision:    Revision(rawBytes),
-			Frontmatter: fmm,
-			Content:     raw,
-		}, nil
+		return getResult(c, rel, []byte(raw)), nil
 	}
 	abs := filepath.Join(root, rel)
 	raw, serr := os.ReadFile(abs)
@@ -58,18 +46,18 @@ func Get(cs []Cortex, nameFlag, p string) (*GetResult, *Conflict) {
 	if serr != nil {
 		return nil, conflict("read_failed", "get", rel, "fix filesystem access and retry", map[string]any{"detail": serr.Error()})
 	}
-	note := fm.Split(raw)
-	var fmm map[string]any
-	if m, perr := fm.Parse(note); perr == nil {
-		fmm = m
-	}
+	return getResult(c, rel, raw), nil
+}
+
+func getResult(c *Cortex, rel string, raw []byte) *GetResult {
+	doc := fm.ParseDocument(raw)
 	return &GetResult{
 		Cortex:      c.Name,
 		Path:        filepath.ToSlash(rel),
 		Revision:    Revision(raw),
-		Frontmatter: fmm,
+		Frontmatter: doc.Map,
 		Content:     string(raw),
-	}, nil
+	}
 }
 
 // LogEntry is one line of git lineage for a note.
@@ -199,7 +187,7 @@ func lintOne(profile, abs string) ([]fm.Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	return fm.Validate(profile, fm.Split(raw))
+	return fm.Validate(profile, fm.ParseDocument(raw))
 }
 
 // Revision is the lowercase hex sha256 of a note's exact file bytes —
