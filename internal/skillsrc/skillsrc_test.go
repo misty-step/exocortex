@@ -45,7 +45,9 @@ func TestCheckFailsWhenDestEdited(t *testing.T) {
 	if _, err := f.WriteString("\n# edited\n"); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := skillsrc.Check(dest); err == nil {
 		t.Fatal("edited dest must fail Check")
 	}
@@ -96,7 +98,7 @@ func TestInstallScript(t *testing.T) {
 	root := filepath.Clean(filepath.Join(filepath.Dir(src), "..", ".."))
 	script := filepath.Join(root, "scripts", "install-skill.sh")
 	dest := t.TempDir()
-	cmd := exec.Command("sh", script, dest)
+	cmd := exec.CommandContext(t.Context(), "sh", script, dest)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("install-skill.sh: %v\n%s", err, out)
