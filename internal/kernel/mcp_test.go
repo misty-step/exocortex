@@ -314,3 +314,76 @@ EOF
 		t.Fatal("decision filter dropped the live keep.md note")
 	}
 }
+
+func TestMCPSearchModeTable(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	root := t.TempDir()
+	if _, err := Register("box", root, "none", "daybook", "journal"); err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "cmd.log")
+	script := `#!/bin/sh
+while [ "$1" = "--index" ]; do shift 2; done
+echo "$1" >> ` + logPath + `
+echo '[]'
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "qmd"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	ctx := context.Background()
+	cmd := exec.Command(binPath, "mcp")
+	cmd.Env = os.Environ()
+	client := mcp.NewClient(&mcp.Implementation{Name: "kernel-test", Version: "v0"}, nil)
+	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer session.Close()
+
+	call := func(args map[string]any) (map[string]any, bool, string) {
+		t.Helper()
+		res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "exocortex_search", Arguments: args})
+		if err != nil {
+			t.Fatalf("search %v: %v", args, err)
+		}
+		tc, ok := res.Content[0].(*mcp.TextContent)
+		if !ok {
+			t.Fatalf("content %T", res.Content[0])
+		}
+		var body map[string]any
+		_ = json.Unmarshal([]byte(tc.Text), &body)
+		return body, res.IsError, tc.Text
+	}
+
+	cases := []struct {
+		args map[string]any
+		cmd  string
+	}{
+		{map[string]any{"query": "q"}, "query"},
+		{map[string]any{"query": "q", "mode": "hybrid"}, "query"},
+		{map[string]any{"query": "q", "mode": "bm25"}, "search"},
+		{map[string]any{"query": "q", "mode": "vector"}, "vsearch"},
+	}
+	for _, tc := range cases {
+		os.Remove(logPath)
+		_, isErr, raw := call(tc.args)
+		if isErr {
+			t.Fatalf("args %v error %s", tc.args, raw)
+		}
+		got, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatalf("args %v log: %v", tc.args, err)
+		}
+		if strings.TrimSpace(string(got)) != tc.cmd {
+			t.Errorf("args %v invoked %q, want %q", tc.args, strings.TrimSpace(string(got)), tc.cmd)
+		}
+	}
+	body, isErr, _ := call(map[string]any{"query": "q", "mode": "semantic"})
+	if !isErr || body["error"] != "search_unavailable" {
+		t.Fatalf("unknown mode: isErr=%v body=%v", isErr, body)
+	}
+}

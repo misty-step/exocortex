@@ -118,7 +118,7 @@ Usage:
   exocortex register <name> <path> [--vcs daybook|caller|none] [--profile daybook|strict]
   exocortex put <path> --from <file|-> [--expects <sha>] [--cortex <name>] [--agent <id>]
   exocortex get <path> [--cortex <name>]
-  exocortex search "<query>" [--cortex <name>] [--mode hybrid|bm25|vector] [--type <kind>] [--limit <n>]
+  exocortex search "<query>" [--cortex <name>] [--mode hybrid|bm25|vector] [--type <kind>] [--limit <n>]  # omitted mode is hybrid
   exocortex brief "<topic>" [--cortex <name>] [--limit <n>]
   exocortex note "<thought>" [--cortex <name>] [--agent <id>]
   exocortex sync [--cortex <name>]
@@ -282,7 +282,7 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
 	limit := fs.Int("limit", 20, "max hits (default 20, max 100)")
-	mode := fs.String("mode", "hybrid", "retrieval mode: hybrid (default) | bm25 | vector")
+	mode := fs.String("mode", qmd.DefaultMode, "retrieval mode: hybrid (default) | bm25 | vector")
 	typeFilter := fs.String("type", "", "filter by content kind: decision | memo | session | note | scratch")
 	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "limit": true, "mode": true, "type": true, "agent": true})
 	if err := fs.Parse(flags); err != nil {
@@ -411,10 +411,7 @@ func cmdBrief(args []string) (any, *kernel.Conflict, error) {
 	if *cortex != "" {
 		collections = []string{*cortex}
 	}
-	hits, err := qmd.Search(context.Background(), topic, collections, "hybrid", 15)
-	if err != nil {
-		hits, err = qmd.Search(context.Background(), topic, collections, "bm25", 15)
-	}
+	hits, err := qmd.Search(context.Background(), topic, collections, qmd.DefaultMode, 15)
 	if err != nil {
 		return nil, &kernel.Conflict{
 			Code:      "search_unavailable",

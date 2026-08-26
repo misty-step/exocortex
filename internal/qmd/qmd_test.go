@@ -8,13 +8,12 @@ import (
 	"testing"
 )
 
-// Empty mode must select the deterministic BM25 subcommand: the kernel
-// primitive may not depend on LLM-backed expansion availability.
+// Empty mode must select hybrid (qmd query). Search owns the BM25 fallback.
 func TestSubcommandFor(t *testing.T) {
 	cases := map[string]string{
-		"":       "search",
-		"bm25":   "search",
+		"":       "query",
 		"hybrid": "query",
+		"bm25":   "search",
 		"vector": "vsearch",
 	}
 	for mode, want := range cases {
@@ -472,5 +471,73 @@ exit 0
 	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
 	if err := Embed(context.Background(), "daybook"); err == nil {
 		t.Fatal("missing banner must fail")
+	}
+}
+
+func TestSearchModeTable(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "cmd.log")
+	fake := filepath.Join(binDir, "qmd")
+	script := `#!/bin/sh
+while [ "$1" = "--index" ]; do shift 2; done
+echo "$1" >> ` + logPath + `
+echo '[]'
+exit 0
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	want := map[string]string{
+		"":       "query",
+		"hybrid": "query",
+		"bm25":   "search",
+		"vector": "vsearch",
+	}
+	for mode, cmd := range want {
+		os.Remove(logPath)
+		if _, err := Search(context.Background(), "mode-table", nil, mode, 5); err != nil {
+			t.Fatalf("mode %q: %v", mode, err)
+		}
+		got, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatalf("mode %q log: %v", mode, err)
+		}
+		if strings.TrimSpace(string(got)) != cmd {
+			t.Errorf("mode %q invoked %q, want %q", mode, strings.TrimSpace(string(got)), cmd)
+		}
+	}
+	if _, err := Search(context.Background(), "mode-table", nil, "semantic", 5); err == nil {
+		t.Fatal("unknown mode must error")
+	}
+}
+
+func TestSearchOmittedModeFallsBackToBM25(t *testing.T) {
+	binDir := t.TempDir()
+	fakeQMD := filepath.Join(binDir, "qmd")
+	script := `#!/bin/sh
+while [ "$1" = "--index" ]; do shift 2; done
+cmd="$1"
+if [ "$cmd" = "query" ]; then
+  echo "error: query expansion failed" >&2
+  exit 1
+fi
+if [ "$cmd" = "search" ]; then
+  echo '[{"docid":"#omitted-fallback","file":"qmd://daybook/n.md","score":0.5,"line":1,"title":"t","context":"","snippet":"s"}]'
+  exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(fakeQMD, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	hits, err := Search(context.Background(), "omitted-fallback", []string{"daybook"}, "", 10)
+	if err != nil {
+		t.Fatalf("omitted fallback failed: %v", err)
+	}
+	if len(hits) != 1 || hits[0].DocID != "#omitted-fallback" {
+		t.Fatalf("unexpected omitted fallback hits: %+v", hits)
 	}
 }

@@ -67,9 +67,14 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     `--expects` is a hard error, never a silent overwrite.
   - `get <path>` — read a note.
   - `search "<query>"` — shells `qmd --format json`; never re-implements
-    retrieval. Default mode is deterministic BM25 (`qmd search`);
-    `--mode hybrid|vector` opts into qmd's LLM-backed retrieval, which
-    is environment-dependent (disabled under `CI=true`). `--type
+    retrieval. Default (omitted) mode is hybrid (`qmd query`) with one
+    fallback to deterministic BM25 (`qmd search`) if `qmd query` errors
+    while the context is still active. Empty mode has that meaning on CLI and MCP. `--mode
+    bm25|hybrid|vector` selects explicitly. Callers that need
+    deterministic BM25 must pass `--mode bm25` / `mode: "bm25"`. The
+    kernel strips `CI`/`CI_` from the QMD environment, so `CI=true`
+    does not by itself disable hybrid; if QMD still fails, fallback is
+    the truthful path. `--type
     decision|memo|session|note|scratch` filters hits after retrieval.
     Memo matching uses the resolved cortex `journal_prefix`. Decision
     and `brief` share one exclusion list and one `liveStatus` helper.

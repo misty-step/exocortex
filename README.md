@@ -22,7 +22,7 @@ and executive orientation briefs (`brief`). The CLI and bundled skill
 ```sh
 exocortex register daybook ~/Development/misty-step/daybook
 exocortex brief "<topic>"                               # executive orientation briefing
-exocortex search "<query>" [--type decision|memo|session] # hybrid semantic search (BM25 + Qwen rerank)
+exocortex search "<query>" [--mode hybrid|bm25|vector] [--type decision|memo|session] # omitted mode is hybrid; pass bm25 for deterministic
 exocortex get <path>                                    # read from committed Git HEAD snapshot
 exocortex note "<thought>"                              # atomic memo capture (~2s)
 exocortex put <path> --from draft.md                    # create-only (fails if path exists)
