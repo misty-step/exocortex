@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Note is a raw file split into frontmatter and body.
@@ -23,16 +23,29 @@ type Note struct {
 	HasFM  bool
 }
 
+// Document is one parse of a note's frontmatter. It owns the original
+// split, the decoded map, and the YAML node tree. Validation and
+// lexical scalar access reuse it. Provenance splice and strip stay
+// line-based over the original bytes and never round-trip YAML.
+type Document struct {
+	Note Note
+	Map  map[string]any // nil if frontmatter is missing or unparseable
+	err  error
+	root yaml.Node
+}
+
+func (d Document) Err() error { return d.err }
+
 var (
 	openDelim  = "---\n"
 	closerRe   = regexp.MustCompile(`(?m)^---[ \t]*(\r?\n|$)`)
 	topLevelRe = regexp.MustCompile(`(?m)^([A-Za-z][A-Za-z0-9_-]*):`)
 )
 
-// Split divides raw into frontmatter and body. Frontmatter is present
+// split divides raw into frontmatter and body. Frontmatter is present
 // only when the file starts with an opening --- delimiter line and a
 // closing --- line exists at column 0 later in the file.
-func Split(raw []byte) Note {
+func split(raw []byte) Note {
 	n := Note{Raw: raw}
 	s := string(raw)
 	if !strings.HasPrefix(s, openDelim) {
@@ -49,20 +62,30 @@ func Split(raw []byte) Note {
 	return n
 }
 
-// Parse decodes the frontmatter text into a generic map. It returns an
-// error when the text is not a YAML mapping.
-func Parse(n Note) (map[string]any, error) {
+// ParseDocument splits raw once and decodes the frontmatter mapping and
+// YAML node tree from that split. Missing frontmatter is not an error;
+// unparseable YAML is.
+func ParseDocument(raw []byte) Document {
+	n := split(raw)
+	d := Document{Note: n}
 	if !n.HasFM {
-		return nil, errors.New("no frontmatter")
+		return d
+	}
+	if err := yaml.Unmarshal([]byte(n.FMText), &d.root); err != nil {
+		d.err = err
+		return d
 	}
 	var m map[string]any
-	if err := yaml.Unmarshal([]byte(n.FMText), &m); err != nil {
-		return nil, err
+	if err := d.root.Decode(&m); err != nil {
+		d.err = err
+		return d
 	}
 	if m == nil {
-		return nil, errors.New("frontmatter is not a mapping")
+		d.err = errors.New("frontmatter is not a mapping")
+		return d
 	}
-	return m, nil
+	d.Map = m
+	return d
 }
 
 // Finding is one lint observation.
@@ -86,38 +109,38 @@ var knownKeys = map[string]bool{
 	"description": true, "tags": true, "provenance": true,
 }
 
-// Validate applies a named profile to a note. Errors are contract
-// failures; warnings are advisory and never blocking under any profile.
-func Validate(profile string, n Note) ([]Finding, error) {
-	fmMap, perr := Parse(n)
+// Validate applies a named profile to an already-parsed document.
+// Errors are contract failures; warnings are advisory and never
+// blocking under any profile.
+func Validate(profile string, d Document) ([]Finding, error) {
 	switch profile {
 	case "daybook":
-		if !n.HasFM {
+		if !d.Note.HasFM {
 			return nil, contract(errf("fm_missing", "frontmatter missing"))
 		}
-		if perr != nil {
-			return nil, contract(errf("fm_unparseable", "frontmatter is not parseable YAML: %v", perr))
+		if d.err != nil {
+			return nil, contract(errf("fm_unparseable", "frontmatter is not parseable YAML: %v", d.err))
 		}
-		if t, ok := fmMap["type"].(string); !ok || strings.TrimSpace(t) == "" {
+		if t, ok := d.Map["type"].(string); !ok || strings.TrimSpace(t) == "" {
 			return nil, contract(errf("type_missing", "frontmatter has no non-empty \"type\""))
 		}
-		return daybookWarnings(n, fmMap), nil
+		return daybookWarnings(d), nil
 	case "strict":
-		if !n.HasFM {
+		if !d.Note.HasFM {
 			return nil, contract(errf("fm_missing", "frontmatter missing"))
 		}
-		if perr != nil {
-			return nil, contract(errf("fm_unparseable", "frontmatter is not parseable YAML: %v", perr))
+		if d.err != nil {
+			return nil, contract(errf("fm_unparseable", "frontmatter is not parseable YAML: %v", d.err))
 		}
 		var fs []Finding
 		for _, k := range []string{"type", "status", "created", "description", "tags"} {
-			if empty(fmMap[k]) {
+			if empty(d.Map[k]) {
 				fs = append(fs, errf("key_missing", "strict profile requires non-empty %q", k))
 			}
 		}
 		// Lexical read: yaml.v3 decodes unquoted timestamps (including
 		// date-only values) to time.Time, hiding them from map assertions.
-		if c, ok := TopLevelScalar(n, "created"); ok && strings.TrimSpace(c) != "" {
+		if c, ok := d.Scalar("created"); ok && strings.TrimSpace(c) != "" {
 			if _, perr := time.Parse(time.RFC3339, c); perr != nil {
 				fs = append(fs, errf("created_format", "created %q is not RFC3339", c))
 			}
@@ -146,26 +169,26 @@ func ContractFinding(err error) (Finding, bool) {
 	return ce.f, ok
 }
 
-func daybookWarnings(n Note, m map[string]any) []Finding {
+func daybookWarnings(d Document) []Finding {
 	// Journal micro-notes (type: memo) are quiet under the daybook
 	// profile: they are not wiki notes, and constant key warnings would
 	// erode trust in one-line memories.
-	if t, _ := m["type"].(string); t == "memo" {
+	if t, _ := d.Map["type"].(string); t == "memo" {
 		return nil
 	}
 	var fs []Finding
 	for _, k := range []string{"status", "description", "tags", "created"} {
-		if empty(m[k]) {
+		if empty(d.Map[k]) {
 			fs = append(fs, warnf("key_missing", "%q missing or empty", k))
 		}
 	}
-	if c, ok := TopLevelScalar(n, "created"); ok && c != "" {
+	if c, ok := d.Scalar("created"); ok && c != "" {
 		if _, perr := time.Parse(time.RFC3339, c); perr != nil {
 			fs = append(fs, warnf("created_format", "created %q is not RFC3339", c))
 		}
 	}
 	var unknown []string
-	for k := range m {
+	for k := range d.Map {
 		if !knownKeys[k] {
 			unknown = append(unknown, k)
 		}
@@ -201,7 +224,7 @@ type Provenance struct {
 // the note's frontmatter, leaving every other byte of the file
 // untouched. It returns the new file bytes.
 func SpliceProvenance(raw []byte, p Provenance) []byte {
-	n := Split(raw)
+	n := split(raw)
 	if !n.HasFM {
 		// Caller validated before stamping; a note without frontmatter
 		// cannot carry provenance, so it is returned unchanged.
@@ -221,23 +244,17 @@ func SpliceProvenance(raw []byte, p Provenance) []byte {
 	return append([]byte(head), n.Body...)
 }
 
-// TopLevelScalar returns the lexical text of a top-level scalar key,
-// independent of the resolved Go type: yaml.v3 decodes unquoted
-// timestamps (the normal created form) into time.Time, so map-based
-// string assertions miss them. ok is false when the key is absent or
-// its value is not a scalar.
-func TopLevelScalar(n Note, key string) (string, bool) {
-	if !n.HasFM {
+// Scalar returns the lexical text of a top-level scalar key from the
+// already-parsed YAML node. ok is false when the key is absent or its
+// value is not a scalar.
+func (d Document) Scalar(key string) (string, bool) {
+	if !d.Note.HasFM {
 		return "", false
 	}
-	var root yaml.Node
-	if err := yaml.Unmarshal([]byte(n.FMText), &root); err != nil {
+	if len(d.root.Content) == 0 || d.root.Content[0].Kind != yaml.MappingNode {
 		return "", false
 	}
-	if len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
-		return "", false
-	}
-	mapping := root.Content[0]
+	mapping := d.root.Content[0]
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
 		if mapping.Content[i].Value == key {
 			v := mapping.Content[i+1]
@@ -254,7 +271,7 @@ func TopLevelScalar(n Note, key string) (string, bool) {
 // note's frontmatter, leaving all other bytes untouched. It is the
 // identity for notes without frontmatter or without a provenance block.
 func StripProvenance(raw []byte) []byte {
-	n := Split(raw)
+	n := split(raw)
 	if !n.HasFM {
 		return raw
 	}
