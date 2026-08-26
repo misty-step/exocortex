@@ -26,7 +26,7 @@ CAS preconditions and keep working trees clean.
 ```sh
 exocortex brief "powder"                                  # single-call orientation briefing
 exocortex search "who owns powder credentials"            # hybrid semantic search (BM25 + Qwen rerank)
-exocortex search "claim procedure" --type decision        # scoped search: decision | memo | session
+exocortex search "claim procedure" --type decision        # scoped search; memo uses each cortex journal_prefix
 exocortex get areas/work-philosophy.md                    # read note from committed HEAD snapshot
 exocortex note "decision or bug fix"                     # atomic memo to the daily board (~2s)
 exocortex put misty-step/new-decision.md --from draft.md              # create-only: fails if it exists

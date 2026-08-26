@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/misty-step/exocortex/internal/kernel"
+	"github.com/misty-step/exocortex/internal/orient"
 	"github.com/misty-step/exocortex/internal/qmd"
 )
 
@@ -66,6 +67,7 @@ type searchArgs struct {
 	Cortex string `json:"cortex,omitempty" jsonschema:"restrict to one cortex (qmd collection of the same name)"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"max hits (default 20, max 100)"`
 	Mode   string `json:"mode,omitempty" jsonschema:"bm25 (deterministic default) | hybrid | vector"`
+	Type   string `json:"type,omitempty" jsonschema:"filter by content kind: decision | memo | session | note | scratch"`
 }
 
 type noteArgs struct {
@@ -143,7 +145,18 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 	if a.Cortex != "" {
 		collections = []string{a.Cortex}
 	}
-	hits, err := qmd.Search(ctx, a.Query, collections, a.Mode, a.Limit)
+	limit := a.Limit
+	if limit <= 0 {
+		limit = qmd.DefaultSearchLimit
+	}
+	fetchLimit := limit
+	if a.Type != "" && fetchLimit < qmd.MaxSearchLimit {
+		fetchLimit = limit * 5
+		if fetchLimit > qmd.MaxSearchLimit {
+			fetchLimit = qmd.MaxSearchLimit
+		}
+	}
+	hits, err := qmd.Search(ctx, a.Query, collections, a.Mode, fetchLimit)
 	if err != nil {
 		return toolResult(nil, &kernel.Conflict{
 			Code:      "search_unavailable",
@@ -152,6 +165,13 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 			Hint:      "check that qmd is installed and the cortex has an indexed qmd collection of the same name",
 			Detail:    map[string]any{"detail": err.Error()},
 		})
+	}
+	var cs []kernel.Cortex
+	if a.Type != "" {
+		cs, err = kernel.LoadRegistry()
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	out := make([]map[string]any, 0, len(hits))
 	for _, h := range hits {
@@ -164,11 +184,31 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 			"snippet": h.Snippet,
 			"file":    h.File,
 		}
-		if collection, rel, ok := qmd.SplitURI(h.File); ok {
+		var (
+			c       *kernel.Cortex
+			rel     string
+			fm      map[string]any
+			fetched bool
+		)
+		if collection, path, ok := qmd.SplitURI(h.File); ok {
 			entry["cortex"] = collection
-			entry["path"] = rel
+			entry["path"] = path
+			rel = path
+			c = kernel.CortexNamed(cs, collection)
+			if a.Type != "" && c != nil && path != "" {
+				if res, conf := kernel.Get(cs, collection, path); conf == nil && res != nil {
+					fm = res.Frontmatter
+					fetched = true
+				}
+			}
+		}
+		if a.Type != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, a.Type, fm, fetched) {
+			continue
 		}
 		out = append(out, entry)
+		if len(out) >= limit {
+			break
+		}
 	}
 	return toolResult(out, nil)
 }

@@ -568,14 +568,6 @@ func mustEffectiveRoot(c *Cortex) string {
 	return root
 }
 
-// effectiveJournalPrefix is the cortex's note-file directory: the
-// registered field, or the plain default for legacy registry entries.
-func effectiveJournalPrefix(c *Cortex) string {
-	if c.JournalPrefix != "" {
-		return c.JournalPrefix
-	}
-	return "journal"
-}
 func ensureWriter(name, shared string) (string, error) {
 	cfg, err := ConfigDir()
 	if err != nil {

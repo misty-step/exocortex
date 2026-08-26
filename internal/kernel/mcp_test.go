@@ -205,3 +205,112 @@ func TestMCPRegisterDuplicateIsConflict(t *testing.T) {
 		t.Fatalf("body=%v", body)
 	}
 }
+
+func TestMCPSearchTypeUsesJournalPrefix(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	root := t.TempDir()
+	daily := filepath.Join(root, "daily", "2026-08-25", "n.md")
+	if err := os.MkdirAll(filepath.Dir(daily), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(daily, []byte("---\ntype: memo\n---\nmemo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(root, "keep.md")
+	if err := os.WriteFile(keep, []byte("---\ntype: decision\nstatus: active\n---\n# Keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Register("emma", root, "none", "daybook", "daily"); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	script := `#!/bin/sh
+cat <<'EOF'
+[
+  {"docid":"#m","file":"qmd://emma/daily/2026-08-25/n.md","score":0.9,"line":1,"title":"memo","context":"","snippet":"memo"},
+  {"docid":"#d","file":"qmd://emma/keep.md","score":0.8,"line":1,"title":"Keep","context":"","snippet":"keep"},
+  {"docid":"#x","file":"qmd://emma/keep.md","score":0.7,"line":1,"title":"Keep2","context":"","snippet":"keep2"},
+  {"docid":"#g","file":"qmd://emma/projects/ghost.md","score":0.6,"line":1,"title":"Ghost","context":"","snippet":"ghost"}
+]
+EOF
+`
+	if err := os.WriteFile(filepath.Join(binDir, "qmd"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	ctx := context.Background()
+	cmd := exec.Command(binPath, "mcp")
+	cmd.Env = os.Environ()
+	client := mcp.NewClient(&mcp.Implementation{Name: "kernel-test", Version: "v0"}, nil)
+	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer session.Close()
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "exocortex_search",
+		Arguments: map[string]any{
+			"query": "topic",
+			"type":  "memo",
+			"mode":  "bm25",
+			"limit": 2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("search error: %v", res.Content)
+	}
+	tc, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("content %T", res.Content[0])
+	}
+	var hits []map[string]any
+	if err := json.Unmarshal([]byte(tc.Text), &hits); err != nil {
+		t.Fatalf("hits: %v\n%s", err, tc.Text)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("memo filter/limit: %v", hits)
+	}
+	if hits[0]["path"] != "daily/2026-08-25/n.md" || hits[0]["cortex"] != "emma" {
+		t.Fatalf("want emma daily memo, got %v", hits[0])
+	}
+	if hits[0]["score"] != 0.9 || hits[0]["snippet"] != "memo" {
+		t.Fatalf("QMD fields lost: %v", hits[0])
+	}
+
+	res, err = session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "exocortex_search",
+		Arguments: map[string]any{
+			"query": "topic",
+			"type":  "decision",
+			"mode":  "bm25",
+			"limit": 10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("decision search: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("decision search error: %v", res.Content)
+	}
+	tc, ok = res.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("decision content %T", res.Content[0])
+	}
+	if err := json.Unmarshal([]byte(tc.Text), &hits); err != nil {
+		t.Fatalf("decision hits: %v\n%s", err, tc.Text)
+	}
+	for _, h := range hits {
+		if h["path"] == "projects/ghost.md" {
+			t.Fatalf("Get-miss path leaked into decision: %v", hits)
+		}
+	}
+	if len(hits) == 0 {
+		t.Fatal("decision filter dropped the live keep.md note")
+	}
+}
