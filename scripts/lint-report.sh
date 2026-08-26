@@ -25,10 +25,9 @@ golangci-lint run --issues-exit-code 0 --max-issues-per-linter 0 --uniq-by-line=
 	--enable-only=gocognit,nestif,funlen,maintidx,staticcheck,errcheck,dupl \
 	--output.json.path "$json" --output.text.path "$text" ./... >/dev/null
 
-
 python3 - "$json" <<'PY'
 import json, re, sys
-from collections import Counter, defaultdict
+from collections import Counter
 
 data = json.load(open(sys.argv[1]))
 issues = data.get("Issues") or []
@@ -91,7 +90,6 @@ def print_hot(title, rows):
 print_hot("production hot list", prod)
 print_hot("test hot list", test)
 
-
 print("\n-- correctness (all files) --")
 for i in issues:
     if i.get("FromLinter") not in ("staticcheck", "errcheck"):
@@ -103,7 +101,7 @@ print("\n-- suggested ratchet tickets --")
 print("1. Hard-gate staticcheck (currently report-only).")
 print("2. Hard-gate errcheck on production (currently report-only).")
 print("3. Split Lint: one-path vs walk (cognitive 28, nestif 7).")
-print("4. Replace takeaways flag machine with an explicit scanner state.")
+print("4. Replace takeawaysFromDecisionSection flag machine with an explicit scanner state.")
 print("5. After 3-4, fail gocognit at 20, then 16.")
 print("6. After 3, fail nestif at 5.")
 print("7. Keep cyclop at 15 until dispatch/Register are not the reason to cut.")

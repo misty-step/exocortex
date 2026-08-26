@@ -31,7 +31,6 @@ golangci-lint run --enable-only=cyclop ./...
 echo "==> golangci-lint (visibility report)"
 "$repo_root/scripts/lint-report.sh"
 
-
 need gitleaks "install gitleaks v8.30.1 from https://github.com/gitleaks/gitleaks/releases"
 echo "==> gitleaks"
 gitleaks detect --source "$repo_root" --no-banner --redact --exit-code 1
