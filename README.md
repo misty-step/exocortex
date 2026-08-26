@@ -41,10 +41,13 @@ Clone-to-green:
 ./scripts/check.sh
 ```
 
-That is the owned gate: `gofmt`, `go vet`, `golangci-lint` (cyclop ≤ 15),
-gitleaks, govulncheck, module token budgets, `go test -race`, and a CLI
-smoke (`register` → `put` → `get` → `lint` on a temp cortex). Go 1.26.6
-is required (`go.mod`); 1.26.5 stdlib is govulncheck-red.
+That is the owned gate: `gofmt`, `go vet`, `golangci-lint` cyclop ≤ 15
+(failing fuse), gitleaks, govulncheck, module token budgets,
+`go test -race`, and a CLI smoke (`register` → `put` → `get` → `lint`
+on a temp cortex). `scripts/lint-report.sh` prints gocognit, nestif,
+funlen, maintidx, staticcheck, errcheck, and dupl without failing.
+Go 1.26.6 is required (`go.mod`); 1.26.5 stdlib is govulncheck-red.
+
 
 
 Install the binary so `go version -m` names this module:

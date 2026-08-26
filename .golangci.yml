@@ -4,11 +4,40 @@ linters:
   default: none
   enable:
     - cyclop
+    - gocognit
+    - nestif
+    - funlen
+    - maintidx
+    - staticcheck
+    - errcheck
+    - dupl
   settings:
     cyclop:
       max-complexity: 15
+    gocognit:
+      min-complexity: 1
+    nestif:
+      min-complexity: 1
+    funlen:
+      lines: 40
+      statements: 25
+    maintidx:
+      under: 40
+    dupl:
+      threshold: 150
   exclusions:
     rules:
+      # Fuse and shape metrics apply to production code.
+      # Tests stay visible in the report via a second pass.
       - path: '.+_test\.go'
         linters:
           - cyclop
+          - gocognit
+          - nestif
+          - funlen
+          - maintidx
+          - dupl
+
+issues:
+  max-issues-per-linter: 0
+  uniq-by-line: false
