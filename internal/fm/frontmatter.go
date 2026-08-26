@@ -42,10 +42,10 @@ var (
 	topLevelRe = regexp.MustCompile(`(?m)^([A-Za-z][A-Za-z0-9_-]*):`)
 )
 
-// Split divides raw into frontmatter and body. Frontmatter is present
+// split divides raw into frontmatter and body. Frontmatter is present
 // only when the file starts with an opening --- delimiter line and a
 // closing --- line exists at column 0 later in the file.
-func Split(raw []byte) Note {
+func split(raw []byte) Note {
 	n := Note{Raw: raw}
 	s := string(raw)
 	if !strings.HasPrefix(s, openDelim) {
@@ -66,7 +66,7 @@ func Split(raw []byte) Note {
 // YAML node tree from that split. Missing frontmatter is not an error;
 // unparseable YAML is.
 func ParseDocument(raw []byte) Document {
-	n := Split(raw)
+	n := split(raw)
 	d := Document{Note: n}
 	if !n.HasFM {
 		return d
@@ -224,7 +224,7 @@ type Provenance struct {
 // the note's frontmatter, leaving every other byte of the file
 // untouched. It returns the new file bytes.
 func SpliceProvenance(raw []byte, p Provenance) []byte {
-	n := Split(raw)
+	n := split(raw)
 	if !n.HasFM {
 		// Caller validated before stamping; a note without frontmatter
 		// cannot carry provenance, so it is returned unchanged.
@@ -271,7 +271,7 @@ func (d Document) Scalar(key string) (string, bool) {
 // note's frontmatter, leaving all other bytes untouched. It is the
 // identity for notes without frontmatter or without a provenance block.
 func StripProvenance(raw []byte) []byte {
-	n := Split(raw)
+	n := split(raw)
 	if !n.HasFM {
 		return raw
 	}

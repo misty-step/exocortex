@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestSplit(t *testing.T) {
+func TestDocumentSplit(t *testing.T) {
 	cases := []struct {
 		name, raw, wantFMText string
 		wantFM                bool
@@ -18,9 +18,9 @@ func TestSplit(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			n := Split([]byte(tc.raw))
+			n := ParseDocument([]byte(tc.raw)).Note
 			if n.HasFM != tc.wantFM || n.FMText != tc.wantFMText {
-				t.Fatalf("Split(%q) = HasFM=%v FMText=%q", tc.raw, n.HasFM, n.FMText)
+				t.Fatalf("ParseDocument(%q).Note = HasFM=%v FMText=%q", tc.raw, n.HasFM, n.FMText)
 			}
 		})
 	}

@@ -31,13 +31,10 @@ func TestDocumentEquivalence(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := []byte(tc.raw)
-			n := Split(raw)
 			doc := ParseDocument(raw)
+			n := doc.Note
 
-			if doc.Note.HasFM != n.HasFM || doc.Note.FMText != n.FMText || doc.Note.Body != n.Body {
-				t.Fatalf("split diverge: doc=%+v note=%+v", doc.Note, n)
-			}
-			if !bytes.Equal(doc.Note.Raw, raw) {
+			if !bytes.Equal(n.Raw, raw) {
 				t.Fatal("document must own the original bytes")
 			}
 
