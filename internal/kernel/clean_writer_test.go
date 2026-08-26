@@ -158,10 +158,13 @@ func TestProof17FreshRegistrationReadsCommittedStateNotHumanDirt(t *testing.T) {
 
 	g(t, base, "init", "--bare", "-b", "master", origin)
 	g(t, base, "clone", origin, human)
+	g(t, human, "config", "user.email", "ci@exocortex.test")
+	g(t, human, "config", "user.name", "exocortex-test")
 	os.MkdirAll(filepath.Join(human, "notes"), 0o755)
 	os.WriteFile(filepath.Join(human, "notes/committed.md"), []byte(mkNote("note", "committed seed")), 0o644)
 	g(t, human, "add", "notes/committed.md")
 	g(t, human, "commit", "-m", "seed")
+
 	g(t, human, "push", "-u", "origin", "master")
 
 	// Human now edits the file locally without committing.
