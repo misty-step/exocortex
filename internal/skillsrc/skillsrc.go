@@ -1,5 +1,5 @@
-// Package skillsrc owns the bundled Exocortex skill file: this repository
-// copy is source; omp-config and live installs are generated from it.
+// Package skillsrc locates the bundled Exocortex skill and compares
+// generated copies to it. The only copier is scripts/install-skill.sh.
 package skillsrc
 
 import (
@@ -40,33 +40,6 @@ func SourceFile() (string, error) {
 		return "", err
 	}
 	return filepath.Join(root, filepath.FromSlash(relSource)), nil
-}
-
-// Install writes the source skill to dest (a SKILL.md path or a directory).
-func Install(dest string) error {
-	src, err := SourceFile()
-	if err != nil {
-		return err
-	}
-	body, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("skill install: read source %s: %w", src, err)
-	}
-	out := dest
-	if st, err := os.Stat(dest); err == nil && st.IsDir() {
-		out = filepath.Join(dest, "SKILL.md")
-	} else if filepath.Ext(dest) == "" {
-		if err := os.MkdirAll(dest, 0o755); err != nil {
-			return fmt.Errorf("skill install: create dest dir %s: %w", dest, err)
-		}
-		out = filepath.Join(dest, "SKILL.md")
-	} else if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return fmt.Errorf("skill install: create dest parent %s: %w", filepath.Dir(dest), err)
-	}
-	if err := os.WriteFile(out, body, 0o644); err != nil {
-		return fmt.Errorf("skill install: write %s: %w", out, err)
-	}
-	return nil
 }
 
 // Check reports whether dest is byte-identical to the repository source.

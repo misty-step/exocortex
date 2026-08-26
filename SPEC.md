@@ -357,9 +357,9 @@ the bundled skill (`skill://exocortex`) teaches agents the interface. The
 fleet runs on OMP; per-harness MCP fleet registration (Slice 2) was retired
 by operator decision (2026-08-24) as unnecessary complexity. Skill source
 is `skills/exocortex/SKILL.md` in this repository. omp-config and live
-harness copies are generated with `scripts/install-skill.sh`; they are
-not independently edited. `go test ./internal/skillsrc` is the parity
-gate. SPEC and `exocortex help` own binding product semantics.
+harness copies are generated only with `scripts/install-skill.sh`.
+omp-config `skills/exocortex/check-source.sh` fails if that dest drifts.
+SPEC and `exocortex help` own binding product semantics.
 ## Rejected options
 
 - **Standalone memory service** (daemon + own DB) — duplicates versioning and

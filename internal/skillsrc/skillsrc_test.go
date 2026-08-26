@@ -12,12 +12,24 @@ import (
 	"github.com/misty-step/exocortex/internal/skillsrc"
 )
 
-func TestInstallRoundTrip(t *testing.T) {
-	destDir := t.TempDir()
-	if err := skillsrc.Install(destDir); err != nil {
+func installViaScript(t *testing.T, destDir string) string {
+	t.Helper()
+	src, err := skillsrc.SourceFile()
+	if err != nil {
 		t.Fatal(err)
 	}
-	dest := filepath.Join(destDir, "SKILL.md")
+	root := filepath.Clean(filepath.Join(filepath.Dir(src), "..", ".."))
+	script := filepath.Join(root, "scripts", "install-skill.sh")
+	cmd := exec.CommandContext(t.Context(), "sh", script, destDir)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install-skill.sh: %v\n%s", err, out)
+	}
+	return filepath.Join(destDir, "SKILL.md")
+}
+
+func TestInstallScriptRoundTrip(t *testing.T) {
+	dest := installViaScript(t, t.TempDir())
 	if err := skillsrc.Check(dest); err != nil {
 		t.Fatal(err)
 	}
@@ -25,19 +37,21 @@ func TestInstallRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, _ := os.ReadFile(src)
-	got, _ := os.ReadFile(dest)
+	want, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !bytes.Equal(want, got) {
-		t.Fatalf("install mutated bytes: dest %d source %d", len(got), len(want))
+		t.Fatalf("script mutated bytes: dest %d source %d", len(got), len(want))
 	}
 }
 
 func TestCheckFailsWhenDestEdited(t *testing.T) {
-	destDir := t.TempDir()
-	if err := skillsrc.Install(destDir); err != nil {
-		t.Fatal(err)
-	}
-	dest := filepath.Join(destDir, "SKILL.md")
+	dest := installViaScript(t, t.TempDir())
 	f, err := os.OpenFile(dest, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		t.Fatal(err)
@@ -87,23 +101,5 @@ func TestSkillMatchesHelpContract(t *testing.T) {
 	}
 	if !strings.Contains(body, "writers/") {
 		t.Fatal("skill missing sole-publisher writers path")
-	}
-}
-
-func TestInstallScript(t *testing.T) {
-	src, err := skillsrc.SourceFile()
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(src), "..", ".."))
-	script := filepath.Join(root, "scripts", "install-skill.sh")
-	dest := t.TempDir()
-	cmd := exec.CommandContext(t.Context(), "sh", script, dest)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("install-skill.sh: %v\n%s", err, out)
-	}
-	if err := skillsrc.Check(filepath.Join(dest, "SKILL.md")); err != nil {
-		t.Fatal(err)
 	}
 }

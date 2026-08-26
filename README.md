@@ -41,7 +41,7 @@ exocortex status [--cortex <name>]                     # dirty markers, last syn
 - [skills/exocortex/SKILL.md](skills/exocortex/SKILL.md) — bundled agent skill
   (source of truth; generate omp-config with `scripts/install-skill.sh`)
 
-Clone-to-green: `go test ./...`. Skill install: `scripts/install-skill.sh <dest-dir>` then `go test ./internal/skillsrc`. A hand-edited dest fails `skillsrc.Check`.
+Clone-to-green: `go test ./...`. Generate a dest copy with `scripts/install-skill.sh <dest-dir>` only. omp-config dest drift fails `skills/exocortex/check-source.sh` there.
 
 ## Provenance
 
