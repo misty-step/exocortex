@@ -26,8 +26,10 @@ echo "==> go vet"
 go vet ./...
 
 need golangci-lint "go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1"
-echo "==> golangci-lint (cyclop)"
-golangci-lint run ./...
+echo "==> golangci-lint (cyclop fuse)"
+golangci-lint run --enable-only=cyclop ./...
+echo "==> golangci-lint (visibility report)"
+"$repo_root/scripts/lint-report.sh"
 
 need gitleaks "install gitleaks v8.30.1 from https://github.com/gitleaks/gitleaks/releases"
 echo "==> gitleaks"

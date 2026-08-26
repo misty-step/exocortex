@@ -4,4 +4,7 @@ coverage.out
 *.test
 .budget-pack.xml
 .budget-pack.log
+.lint-report.json
+.lint-report.txt
+
 
