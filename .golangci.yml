@@ -22,14 +22,12 @@ linters:
       threshold: 150
   exclusions:
     rules:
+      # Fuse ignores tests. Report linters (gocognit, nestif, funlen,
+      # maintidx, dupl) still run on _test.go via lint-report.sh.
       - path: '.+_test\.go'
         linters:
           - cyclop
-          - gocognit
-          - nestif
-          - funlen
-          - maintidx
-          - dupl
+
 
 issues:
   max-issues-per-linter: 0

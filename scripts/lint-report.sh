@@ -59,28 +59,38 @@ test = [i for i in issues if is_test(i.get("Pos", {}).get("Filename", ""))]
 print(f"production {len(prod)}  tests {len(test)}")
 
 cogs = [(cog(i.get("Text")), i) for i in prod if i.get("FromLinter") == "gocognit" and cog(i.get("Text")) is not None]
+test_cogs = [(cog(i.get("Text")), i) for i in test if i.get("FromLinter") == "gocognit" and cog(i.get("Text")) is not None]
 bands = [("1-7", 1, 7), ("8-14", 8, 14), ("15-19", 15, 19), ("20+", 20, 10**9)]
 print("gocognit production bands:")
 for label, lo, hi in bands:
     n = sum(1 for v, _ in cogs if lo <= v <= hi)
     print(f"  {label:6} {n}")
+print("gocognit test bands:")
+for label, lo, hi in bands:
+    n = sum(1 for v, _ in test_cogs if lo <= v <= hi)
+    print(f"  {label:6} {n}")
 
-print("\n-- production hot list --")
-hot = []
-for i in prod:
-    path = i.get("Pos", {}).get("Filename", "")
-    line = i.get("Pos", {}).get("Line", 0)
-    lint = i.get("FromLinter", "")
-    text = i.get("Text", "")
-    score = cog(text) or cyclo(text) or nest(text) or 0
-    hot.append((score, lint, path, line, text))
-hot.sort(key=lambda r: (-r[0], r[1], r[2], r[3]))
-for score, lint, path, line, text in hot:
-    if lint == "gocognit" and score < 8:
-        continue
-    if lint == "nestif" and score < 2:
-        continue
-    print(f"{score:3} {lint:12} {path}:{line} {text}")
+def print_hot(title, rows):
+    print(f"\n-- {title} --")
+    hot = []
+    for i in rows:
+        path = i.get("Pos", {}).get("Filename", "")
+        line = i.get("Pos", {}).get("Line", 0)
+        lint = i.get("FromLinter", "")
+        text = i.get("Text", "")
+        score = cog(text) or cyclo(text) or nest(text) or 0
+        hot.append((score, lint, path, line, text))
+    hot.sort(key=lambda r: (-r[0], r[1], r[2], r[3]))
+    for score, lint, path, line, text in hot:
+        if lint == "gocognit" and score < 8:
+            continue
+        if lint == "nestif" and score < 2:
+            continue
+        print(f"{score:3} {lint:12} {path}:{line} {text}")
+
+print_hot("production hot list", prod)
+print_hot("test hot list", test)
+
 
 print("\n-- correctness (all files) --")
 for i in issues:
