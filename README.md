@@ -70,9 +70,11 @@ back by installing the previous commit the same way.
 - [VISION.md](VISION.md) — why this exists
 - [ADR-0001](docs/adr/0001-exocortex-kernel.md) — accepted kernel decision
 - [skills/exocortex/SKILL.md](skills/exocortex/SKILL.md) — bundled agent skill
-  (source of truth; generate omp-config with `scripts/install-skill.sh`)
+  (source; `scripts/install-skill.sh` writes omp-config; omp-config `./install` deploys live)
 
-Clone-to-green: `go test ./...`. Generate a dest copy with `scripts/install-skill.sh <dest-dir>` only. omp-config dest drift fails `skills/exocortex/check-source.sh` there.
+Clone-to-green: `go test ./...`. Generate the omp-config copy with
+`scripts/install-skill.sh <omp-config>/skills/exocortex`. Deploy live with
+omp-config `./install`. Drift fails `skills/exocortex/check-source.sh` in omp-config.
 
 ## Provenance
 

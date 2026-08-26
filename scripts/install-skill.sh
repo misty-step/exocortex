@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 # Copy the repository skill (source) to a destination directory as SKILL.md.
-# omp-config and live harness trees are generated this way; do not hand-edit them.
+# Writes the committed omp-config copy. Live deploy is omp-config ./install.
 
 DEST=${1:?destination directory}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
