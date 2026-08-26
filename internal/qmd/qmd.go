@@ -80,8 +80,9 @@ func qmdArgs(args ...string) []string {
 }
 
 // Search runs one qmd retrieval with a sanitized environment and returns raw hits.
-// Omitted mode is hybrid. If hybrid query expansion fails, Search falls back
-// once to deterministic BM25. Explicit bm25 and vector do not fall back.
+// Omitted mode is hybrid. If qmd query errors while the context remains
+// active, Search falls back once to deterministic BM25. Explicit bm25 and
+// vector do not fall back.
 func Search(ctx context.Context, query string, collections []string, mode string, limit int) ([]Hit, error) {
 	sub, err := subcommandFor(mode)
 	if err != nil {
