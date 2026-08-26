@@ -39,7 +39,9 @@ exocortex status [--cortex <name>]                     # dirty markers, last syn
 - [VISION.md](VISION.md) — why this exists
 - [ADR-0001](docs/adr/0001-exocortex-kernel.md) — accepted kernel decision
 - [skills/exocortex/SKILL.md](skills/exocortex/SKILL.md) — bundled agent skill
-  (canonical copy installed into omp-config)
+  (source of truth; generate omp-config with `scripts/install-skill.sh`)
+
+Clone-to-green: `go test ./...`. Generate a dest copy with `scripts/install-skill.sh <dest-dir>` only. omp-config dest drift fails `skills/exocortex/check-source.sh` there.
 
 ## Provenance
 
