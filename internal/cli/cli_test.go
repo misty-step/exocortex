@@ -275,3 +275,47 @@ func fmtString(v any) string {
 	s, _ := v.(string)
 	return s
 }
+
+func TestCLISearchModeTable(t *testing.T) {
+	setupCortex(t)
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "cmd.log")
+	script := `#!/bin/sh
+while [ "$1" = "--index" ]; do shift 2; done
+echo "$1" >> ` + logPath + `
+echo '[]'
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "qmd"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	cases := []struct {
+		args []string
+		cmd  string
+	}{
+		{[]string{"search", "q"}, "query"},
+		{[]string{"search", "q", "--mode", "hybrid"}, "query"},
+		{[]string{"search", "q", "--mode", "bm25"}, "search"},
+		{[]string{"search", "q", "--mode", "vector"}, "vsearch"},
+	}
+	for _, tc := range cases {
+		os.Remove(logPath)
+		code, _, raw := runMain(t, "", tc.args...)
+		if code != 0 {
+			t.Fatalf("args %v exit=%d %s", tc.args, code, raw)
+		}
+		got, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatalf("args %v log: %v", tc.args, err)
+		}
+		if strings.TrimSpace(string(got)) != tc.cmd {
+			t.Errorf("args %v invoked %q, want %q", tc.args, strings.TrimSpace(string(got)), tc.cmd)
+		}
+	}
+	code, body, _ := runMain(t, "", "search", "q", "--mode", "semantic")
+	if code == 0 || body["error"] != "search_unavailable" {
+		t.Fatalf("unknown mode: exit=%d body=%v", code, body)
+	}
+}

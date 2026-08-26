@@ -25,6 +25,10 @@ type Hit struct {
 	Snippet string  `json:"snippet"`
 }
 
+// DefaultMode is the omitted-mode contract: hybrid retrieval with a
+// single BM25 fallback owned by Search.
+const DefaultMode = "hybrid"
+
 // subcommand maps retrieval modes onto qmd subcommands.
 var subcommand = map[string]string{
 	"hybrid": "query",
@@ -34,7 +38,7 @@ var subcommand = map[string]string{
 
 func subcommandFor(mode string) (string, error) {
 	if mode == "" {
-		mode = "bm25"
+		mode = DefaultMode
 	}
 	sub, ok := subcommand[mode]
 	if !ok {
@@ -76,7 +80,8 @@ func qmdArgs(args ...string) []string {
 }
 
 // Search runs one qmd retrieval with a sanitized environment and returns raw hits.
-// If hybrid query expansion fails, it falls back to deterministic BM25 search.
+// Omitted mode is hybrid. If hybrid query expansion fails, Search falls back
+// once to deterministic BM25. Explicit bm25 and vector do not fall back.
 func Search(ctx context.Context, query string, collections []string, mode string, limit int) ([]Hit, error) {
 	sub, err := subcommandFor(mode)
 	if err != nil {
@@ -112,7 +117,7 @@ func Search(ctx context.Context, query string, collections []string, mode string
 		return parseJSONHits(cmdName, stdoutBuf.Bytes())
 	}
 	hits, err := run(sub)
-	if err != nil && (mode == "hybrid" || (mode == "" && sub == "query")) && ctx.Err() == nil {
+	if err != nil && sub == "query" && ctx.Err() == nil {
 		return run("search")
 	}
 	return hits, err
