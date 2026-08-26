@@ -114,7 +114,7 @@ func lockNamed(name, op, rel string) (*cortexLock, *Conflict) {
 }
 
 func preparePutRoot(c *Cortex, rel, op, abs string) (dir, outAbs, base string, conf *Conflict) {
-	dir = c.Path
+	dir = c.Path // caller/none; daybook overwrites with publisher clone
 	outAbs = abs
 	if c.VCS != "daybook" {
 		return dir, outAbs, "", nil
@@ -571,11 +571,7 @@ func writerDir(c *Cortex) string {
 	return w
 }
 
-// effectiveRoot is where this cortex's bytes live for ALL kernel
-// operations: once a clean-writer clone exists it is the root (the
-// shared checkout may be stale or dirty); otherwise the registered
-// checkout.
-// effectiveRoot returns the kernel-owned publisher tree for the cortex.
+// effectiveRoot returns the kernel-owned publisher tree for daybook cortices.
 // For daybook cortices with an origin remote, it ensures the publisher
 // clone is provisioned; if provisioning fails, it returns an error
 // failing closed to prevent reading uncommitted human dirt.
