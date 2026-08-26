@@ -19,9 +19,12 @@ json="$repo_root/.lint-report.json"
 text="$repo_root/.lint-report.txt"
 rm -f "$json" "$text"
 
-# Full config, never fail the gate.
+# Settings live in .golangci.yml. Enable the report set here so a bare
+# `golangci-lint run` stays cyclop-only.
 golangci-lint run --issues-exit-code 0 --max-issues-per-linter 0 --uniq-by-line=false \
+	--enable-only=gocognit,nestif,funlen,maintidx,staticcheck,errcheck,dupl \
 	--output.json.path "$json" --output.text.path "$text" ./... >/dev/null
+
 
 python3 - "$json" <<'PY'
 import json, re, sys
