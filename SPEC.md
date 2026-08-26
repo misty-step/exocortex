@@ -68,8 +68,8 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
   - `get <path>` — read a note.
   - `search "<query>"` — shells `qmd --format json`; never re-implements
     retrieval. Default (omitted) mode is hybrid (`qmd query`) with one
-    fallback to deterministic BM25 (`qmd search`) if hybrid expansion
-    fails. Empty mode has that meaning on CLI and MCP. `--mode
+    fallback to deterministic BM25 (`qmd search`) if `qmd query` errors
+    while the context is still active. Empty mode has that meaning on CLI and MCP. `--mode
     bm25|hybrid|vector` selects explicitly. Callers that need
     deterministic BM25 must pass `--mode bm25` / `mode: "bm25"`. The
     kernel strips `CI`/`CI_` from the QMD environment, so `CI=true`
