@@ -2,3 +2,6 @@
 /repomix-output.xml
 coverage.out
 *.test
+.budget-pack.xml
+.budget-pack.log
+

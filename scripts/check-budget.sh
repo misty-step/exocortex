@@ -31,20 +31,24 @@ while IFS="$(printf '\t')" read -r name include budget rest || [ -n "${name:-}" 
 		echo "malformed budget line: $name" >&2
 		exit 2
 	fi
-	tmp=$(mktemp)
-	log=$(mktemp)
-	if ! repack --include "$include/**" --no-file-summary --no-directory-structure -o "$tmp" >"$log" 2>&1; then
+	pack="$repo_root/.budget-pack.xml"
+	log="$repo_root/.budget-pack.log"
+	rm -f "$pack" "$log"
+	if ! repack --include "$include/**" --no-file-summary --no-directory-structure -o "$pack" >"$log" 2>&1; then
 		echo "repomix failed for $name ($include)" >&2
 		cat "$log" >&2
-		rm -f "$tmp" "$log"
+		rm -f "$pack" "$log"
 		exit 1
 	fi
-	tokens=$(sed -n 's/^ *Total Tokens: *\([0-9,]*\).*/\1/p' "$log" | tr -d ',' | tail -n 1)
-	rm -f "$tmp" "$log"
+	tokens=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$log" | grep -oE 'Total Tokens:[[:space:]]*[0-9,]+' | tail -n 1 | grep -oE '[0-9,]+' | tr -d ',')
 	if [ -z "$tokens" ]; then
-		echo "repomix produced no Total Tokens line for $name" >&2
+		echo "repomix produced no Total Tokens line for $name ($include)" >&2
+		cat "$log" >&2
+		rm -f "$pack" "$log"
 		exit 1
 	fi
+	rm -f "$pack" "$log"
+
 	printf '  %s %s tokens (budget %s)\n' "$name" "$tokens" "$budget"
 	if [ "$tokens" -gt "$budget" ]; then
 		echo "token budget exceeded: $name $tokens > $budget. Delete dead weight or split the module; raise only with a recorded reason." >&2
