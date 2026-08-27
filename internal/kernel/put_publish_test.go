@@ -248,6 +248,36 @@ func TestUnknownFetchFailureDoesNotRebaseOnNextPut(t *testing.T) {
 	}
 }
 
+func TestUnknownFetchFailureAheadDoesNotPublishOnNextPut(t *testing.T) {
+	f := newFixture(t)
+	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
+	if _, conf := f.put("hosta", "notes/seed.md", mkNote("note", "seed")); conf != nil {
+		t.Fatal(conf.Code)
+	}
+	writer := mustEffectiveRoot(&f.cs[0])
+	originURL := g(t, writer, "remote", "get-url", "origin")
+	pushOverride = func() error {
+		gone := filepath.Join(t.TempDir(), "gone.git")
+		if _, err := git(writer, "remote", "set-url", "origin", gone); err != nil {
+			return err
+		}
+		return gitErr("fatal: unable to access 'https://example.invalid/': Could not resolve host")
+	}
+	_, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/ghost.md",
+		Payload: []byte(mkNote("note", "unpublished candidate")),
+		Agent:   "agent-a", Via: "cli", OwnPayload: true,
+	})
+	wantCode(t, conf, "publish_unknown")
+	g(t, writer, "remote", "set-url", "origin", originURL)
+	_, conf = f.put("hosta", "notes/second.md", mkNote("note", "must not publish ghost"))
+	wantCode(t, conf, "refresh_failed")
+	remote := g(t, f.origin, "ls-tree", "-r", "--name-only", "HEAD")
+	if strings.Contains(remote, "notes/ghost.md") || strings.Contains(remote, "notes/second.md") {
+		t.Fatalf("ahead writer published on next put:\n%s", remote)
+	}
+}
+
 func gitErr(stderr string) error {
 	return &GitError{Args: []string{"push"}, Stderr: stderr, Err: errExit1{}}
 }

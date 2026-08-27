@@ -130,12 +130,8 @@ func preparePutRoot(c *Cortex, rel, op, abs string) (dir, outAbs, base string, c
 	if conf = preflight(dir, rel, op == "update"); conf != nil {
 		return "", "", "", conf
 	}
-	if hasUpstream(dir) {
-		if _, gerr := git(dir, "pull", "--ff-only"); gerr != nil {
-			return "", "", "", conflict("refresh_failed", op, rel,
-				"writer is not a fast-forward of upstream (unpublished candidate or divergence); inspect the publisher clone; nothing was written",
-				map[string]any{"detail": gerr.(*GitError).Stderr})
-		}
+	if conf = refreshWriter(dir, op, rel); conf != nil {
+		return "", "", "", conf
 	}
 	b, gerr := git(dir, "rev-parse", "HEAD")
 	if gerr != nil {
@@ -408,6 +404,28 @@ func unwindPath(repo, base, rel string) []string {
 func convergeTo(repo, tip string) []string {
 	if _, err := git(repo, "merge", "--ff-only", tip); err != nil {
 		return []string{"ff-only restore failed; next put's refresh heals: " + err.Error()}
+	}
+	return nil
+}
+
+func refreshWriter(dir, op, rel string) *Conflict {
+	if !hasUpstream(dir) {
+		return nil
+	}
+	if _, gerr := git(dir, "fetch"); gerr != nil {
+		return conflict("refresh_failed", op, rel,
+			"resolve the fetch failure and retry; nothing was written",
+			map[string]any{"detail": gerr.(*GitError).Stderr})
+	}
+	if _, gerr := git(dir, "merge-base", "--is-ancestor", "HEAD", "@{u}"); gerr != nil {
+		return conflict("refresh_failed", op, rel,
+			"writer HEAD is not an ancestor of upstream (unpublished candidate or divergence); inspect the publisher clone; nothing was written",
+			map[string]any{"detail": "HEAD is ahead of or diverged from @{u}"})
+	}
+	if _, gerr := git(dir, "merge", "--ff-only", "@{u}"); gerr != nil {
+		return conflict("refresh_failed", op, rel,
+			"writer is not a fast-forward of upstream; inspect the publisher clone; nothing was written",
+			map[string]any{"detail": gerr.(*GitError).Stderr})
 	}
 	return nil
 }
