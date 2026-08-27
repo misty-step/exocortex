@@ -57,6 +57,9 @@ func recoverMoved(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *P
 	if pathChanged(op, in.Expects, remote, ok) {
 		return observedPathConflict(op, rel, abs, in, perr, unwind)
 	}
+	if len(unwind) > 0 || !writerAt(dir, tip) {
+		return provedUnavailable(op, rel, in, perr, unwind, tip, remote)
+	}
 	if remaining <= 0 {
 		return publicationConflict("publish_unknown", op, rel, in, perr, unwind,
 			"could not tell whether the push landed; re-read with get before retrying; do not create a second path")
@@ -73,6 +76,9 @@ func recoverUnknown(_ *Cortex, in PutInput, rel, dir, abs, base, op string, res 
 	remote, ok := fileAt(dir, tip, rel)
 	unwind := convergeEvaluated(dir, base, rel, tip)
 	if ok && bytes.Equal(remote, candidate) {
+		if len(unwind) > 0 || !writerAt(dir, tip) {
+			return provedUnavailable(op, rel, in, perr, unwind, tip, remote)
+		}
 		res.Commit = tip
 		res.Revision = Revision(candidate)
 		res.Pushed = true
@@ -151,6 +157,25 @@ func keepUnknown(op, rel string, in PutInput, perr error) *Conflict {
 		})
 	preservePayload(in, conf)
 	return conf
+}
+
+func provedUnavailable(op, rel string, in PutInput, perr error, unwind []string, tip string, remote []byte) *Conflict {
+	conf := publicationConflict("publish_unknown", op, rel, in, perr, unwind,
+		"the push landed on the remote but the writer could not converge; re-read with get; do not create a second path")
+	if conf.Detail == nil {
+		conf.Detail = map[string]any{}
+	}
+	conf.Detail["proved_commit"] = tip
+	conf.Detail["converged"] = false
+	if remote != nil {
+		conf.Detail["proved_revision"] = Revision(remote)
+	}
+	return conf
+}
+
+func writerAt(dir, tip string) bool {
+	head, err := git(dir, "rev-parse", "HEAD")
+	return err == nil && strings.TrimSpace(head) == tip
 }
 
 func classifyPushError(err error) pushOutcome {

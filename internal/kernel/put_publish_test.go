@@ -164,6 +164,55 @@ func TestPublishUnknownRecoversWhenLanded(t *testing.T) {
 	}
 }
 
+func TestLostAckDoesNotSucceedWhenWriterMissesTip(t *testing.T) {
+	f := newFixture(t)
+	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
+	if _, conf := f.put("hosta", "notes/foreign.md", mkNote("note", "foreign v1")); conf != nil {
+		t.Fatal(conf.Code)
+	}
+	writer := mustEffectiveRoot(&f.cs[0])
+	beforePushHook = func() {
+		if err := os.WriteFile(filepath.Join(writer, "notes/foreign.md"), []byte(mkNote("note", "local dirty foreign")), 0o644); err != nil {
+			t.Errorf("dirty foreign: %v", err)
+		}
+	}
+	pushOverride = func() error {
+		if _, err := git(writer, "push"); err != nil {
+			return err
+		}
+		g(t, f.b, "pull", "--ff-only")
+		if err := os.WriteFile(filepath.Join(f.b, "notes/foreign.md"), []byte(mkNote("note", "peer foreign v2")), 0o644); err != nil {
+			return err
+		}
+		g(t, f.b, "add", "notes/foreign.md")
+		g(t, f.b, "commit", "-m", "peer advances foreign")
+		g(t, f.b, "push")
+		return gitErr("fatal: the remote end hung up unexpectedly")
+	}
+	res, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/lost-ack.md",
+		Payload: []byte(mkNote("note", "landed but writer blocked")),
+		Agent:   "agent-a", Via: "cli", OwnPayload: true,
+	})
+	if res != nil && res.Pushed {
+		t.Fatal("must not report pushed when writer missed the fetched tip")
+	}
+	wantCode(t, conf, "publish_unknown")
+	if conf.Class() != ClassUnavailable {
+		t.Fatalf("class=%v want Unavailable", conf.Class())
+	}
+	if conf.Detail["proved_commit"] == nil || conf.Detail["proved_revision"] == nil {
+		t.Fatalf("proved remote state missing: %v", conf.Detail)
+	}
+	remote := g(t, f.origin, "ls-tree", "-r", "--name-only", "HEAD")
+	if !strings.Contains(remote, "notes/lost-ack.md") {
+		t.Fatal("candidate must remain on origin")
+	}
+	if _, err := os.Stat(filepath.Join(writer, "notes/lost-ack.md")); !os.IsNotExist(err) {
+		t.Fatalf("writer get must not show the candidate after failed converge; stat=%v", err)
+	}
+}
+
 func TestPublishUnknownWhenNotLanded(t *testing.T) {
 	f := newFixture(t)
 	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
