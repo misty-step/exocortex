@@ -54,11 +54,11 @@ func recoverMoved(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *P
 	}
 	remote, ok := fileAt(dir, tip, rel)
 	unwind := convergeEvaluated(dir, base, rel, tip)
-	if pathChanged(op, in.Expects, remote, ok) {
-		return observedPathConflict(op, rel, abs, in, perr, unwind)
-	}
 	if len(unwind) > 0 || !writerAt(dir, tip) {
 		return writerUnavailable(op, rel, in, perr, unwind, tip, remote, "rejected")
+	}
+	if pathChanged(op, in.Expects, remote, ok) {
+		return observedPathConflict(op, rel, remote, ok, in, perr, unwind)
 	}
 	if remaining <= 0 {
 		return publicationConflict("publish_unknown", op, rel, in, perr, unwind,
@@ -120,8 +120,11 @@ func replayCandidate(c *Cortex, in PutInput, rel, dir, abs, op string, res *PutR
 	return nil
 }
 
-func observedPathConflict(op, rel, abs string, in PutInput, perr error, unwind []string) *Conflict {
-	actual := Revision(mustRead(abs))
+func observedPathConflict(op, rel string, remote []byte, ok bool, in PutInput, perr error, unwind []string) *Conflict {
+	actual := ""
+	if ok {
+		actual = Revision(remote)
+	}
 	hint := "a peer created this note first; after the automatic restore-to-remote, re-read with get and update it with --expects"
 	code := "exists"
 	if op != "create" {

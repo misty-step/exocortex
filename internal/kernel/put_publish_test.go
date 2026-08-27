@@ -250,6 +250,51 @@ func TestMovedDoesNotClaimLandedWhenWriterMissesTip(t *testing.T) {
 	}
 }
 
+func TestMovedPathChangeDoesNotHashStaleLocalWhenConvergeFails(t *testing.T) {
+	f := newFixture(t)
+	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
+	if _, conf := f.put("hosta", "notes/shared.md", mkNote("note", "R1")); conf != nil {
+		t.Fatal(conf.Code)
+	}
+	if _, conf := f.put("hosta", "notes/foreign.md", mkNote("note", "foreign v1")); conf != nil {
+		t.Fatal(conf.Code)
+	}
+	g(t, f.b, "pull", "--ff-only")
+	r1 := f.rev("hosta", "notes/shared.md")
+	writer := mustEffectiveRoot(&f.cs[0])
+	beforePushHook = func() {
+		if err := os.WriteFile(filepath.Join(writer, "notes/foreign.md"), []byte(mkNote("note", "local dirty foreign")), 0o644); err != nil {
+			t.Errorf("dirty foreign: %v", err)
+		}
+		if _, conf := Put(nil, f.cs, PutInput{
+			CortexName: "hostb", Path: "notes/shared.md",
+			Payload: []byte(mkNote("note", "peer wins shared")), Expects: r1,
+			Agent: "agent-b", Via: "cli", OwnPayload: true,
+		}); conf != nil {
+			t.Errorf("peer shared put: %v", conf.Code)
+		}
+		if _, conf := Put(nil, f.cs, PutInput{
+			CortexName: "hostb", Path: "notes/foreign.md",
+			Payload: []byte(mkNote("note", "peer foreign v2")), Expects: f.rev("hostb", "notes/foreign.md"),
+			Agent: "agent-b", Via: "cli", OwnPayload: true,
+		}); conf != nil {
+			t.Errorf("peer foreign put: %v", conf.Code)
+		}
+	}
+	_, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/shared.md",
+		Payload: []byte(mkNote("note", "loser shared")), Expects: r1,
+		Agent: "agent-a", Via: "cli", OwnPayload: true,
+	})
+	if conf != nil && conf.Code == "revision_conflict" && conf.Detail["actual"] == conf.Detail["expected"] {
+		t.Fatal("stale local actual==expected is a false publication conflict")
+	}
+	wantCode(t, conf, "writer_unavailable")
+	if conf.Detail["remote"] != "rejected" {
+		t.Fatalf("remote=%v want rejected", conf.Detail["remote"])
+	}
+}
+
 func TestPublishUnknownWhenNotLanded(t *testing.T) {
 	f := newFixture(t)
 	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
