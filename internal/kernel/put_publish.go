@@ -176,6 +176,7 @@ func isRemoteRefusal(msg string) bool {
 	for _, n := range []string{
 		"hook declined",
 		"pre-receive hook",
+		"remote rejected",
 		"authentication failed",
 		"permission denied",
 		"could not read username",

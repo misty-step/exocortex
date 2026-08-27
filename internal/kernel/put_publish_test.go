@@ -17,6 +17,7 @@ func TestClassifyPushError(t *testing.T) {
 		{" ! [rejected] master -> master (non-fast-forward)\nhint: Updates were rejected because the remote contains work that you do", pushMoved},
 		{" ! [remote rejected] master -> master (pre-receive hook declined)", pushRefused},
 		{"remote: error: cannot lock ref 'refs/heads/master'\n ! [remote rejected] master -> master (failed to update ref)", pushMoved},
+		{" ! [remote rejected] main -> main (push declined due to repository rule violations)", pushRefused},
 		{"remote: pre-receive hook declined\nerror: failed to push some refs", pushRefused},
 		{"fatal: Authentication failed for 'https://example.test/repo.git'", pushRefused},
 		{"Permission denied (publickey).", pushRefused},
