@@ -131,9 +131,9 @@ func preparePutRoot(c *Cortex, rel, op, abs string) (dir, outAbs, base string, c
 		return "", "", "", conf
 	}
 	if hasUpstream(dir) {
-		if _, gerr := git(dir, "pull", "--rebase"); gerr != nil {
+		if _, gerr := git(dir, "pull", "--ff-only"); gerr != nil {
 			return "", "", "", conflict("refresh_failed", op, rel,
-				"resolve the pull failure and retry; nothing was written",
+				"writer is not a fast-forward of upstream (unpublished candidate or divergence); inspect the publisher clone; nothing was written",
 				map[string]any{"detail": gerr.(*GitError).Stderr})
 		}
 	}

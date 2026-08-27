@@ -18,7 +18,7 @@ Source artifact: daybook `misty-step/exocortex-kernel.md`.
 - Daybook is cortex #1. Core operations: `register/put/get/search/brief/note/sync/status/log/lint`.
 - Sole-publisher architecture: for Daybook cortices, the kernel-owned clone in
   `~/.config/exocortex/writers/<cortex>` is the exclusive write and read authority.
-  The kernel runs `pull --rebase`, stages touched paths only, commits, and pushes
+  The kernel runs `pull --ff-only`, stages touched paths only, commits, and pushes
   from the isolated clone. Registered human workspaces are never preflighted,
   stashed, committed to, or mutated.
 - Fail-closed operations: a missing origin remote or provisioning error fails

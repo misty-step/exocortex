@@ -157,7 +157,8 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
 2. pre-flight — `daybook` only, on the writer clone, all three aborts
    conflict-as-data, run BEFORE refresh. There is no
    `--autostash`: the writer is kernel-owned and must stay clean, so
-   `git pull --rebase` has no in-flight human work. The create-mode
+   `git pull --ff-only` has no in-flight human work and never rebases
+   an unpublished candidate. The create-mode
    existence check is NOT a working-tree stat; CAS later answers
    existence from `HEAD:<path>` only. Preflight still runs under the
    lock (step 1), never before it:
@@ -171,9 +172,11 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
      (`foreign_unstaged_state`) — untracked files are allowed; modified
      or deleted tracked files belong to another worker, and the step-8
      unwind must never be able to reach them;
-3. refresh — `daybook`: `git pull --rebase` on the writer clone (no
-   `--autostash`), then REPEAT step 2's scan against post-refresh
-   state; `caller`/`none`: nothing;
+3. refresh — `daybook`: `git pull --ff-only` on the writer clone.
+   Ahead or diverged (unpublished candidate after `publish_unknown`)
+   is `refresh_failed`; nothing is written and the candidate is not
+   rebased. Then REPEAT step 2's scan against post-refresh state;
+   `caller`/`none`: nothing;
 4. CAS: re-read the stored destination revision; evaluate `--expects` or
    create-absence against fresh state;
 5. validate the payload under the cortex profile — invalid payloads fail
