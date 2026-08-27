@@ -1,0 +1,221 @@
+package kernel
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestClassifyPushError(t *testing.T) {
+	cases := []struct {
+		stderr string
+		want   pushOutcome
+	}{
+		{" ! [rejected] master -> master (non-fast-forward)\nerror: failed to push some refs", pushMoved},
+		{"hint: Updates were rejected because the tip of your current branch is behind", pushMoved},
+		{" ! [rejected] master -> master (non-fast-forward)\nhint: Updates were rejected because the remote contains work that you do", pushMoved},
+		{" ! [remote rejected] master -> master (pre-receive hook declined)", pushRefused},
+		{"remote: error: cannot lock ref 'refs/heads/master'\n ! [remote rejected] master -> master (failed to update ref)", pushMoved},
+		{"remote: pre-receive hook declined\nerror: failed to push some refs", pushRefused},
+		{"fatal: Authentication failed for 'https://example.test/repo.git'", pushRefused},
+		{"Permission denied (publickey).", pushRefused},
+		{"fatal: could not read Username for 'https://example.test': terminal prompts disabled", pushRefused},
+		{"fatal: the remote end hung up unexpectedly", pushUnknown},
+		{"fatal: unable to access 'https://example.invalid/': Could not resolve host", pushUnknown},
+		{"error: RPC failed; curl 28 Timeout was reached", pushUnknown},
+		{"", pushUnknown},
+	}
+	for _, tc := range cases {
+		got := classifyPushError(gitErr(tc.stderr))
+		if got != tc.want {
+			t.Fatalf("stderr %q: got %v want %v", tc.stderr, got, tc.want)
+		}
+	}
+}
+
+func TestDifferentPathCreatesBothLand(t *testing.T) {
+	f := newFixture(t)
+	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
+	beforePushHook = func() {
+		if _, conf := f.put("hosta", "notes/peer.md", mkNote("note", "peer landed first")); conf != nil {
+			t.Errorf("peer create failed: %v", conf.Code)
+		}
+	}
+	res, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hostb", Path: "notes/mine.md",
+		Payload: []byte(mkNote("note", "unrelated create")),
+		Agent:   "agent-b", Via: "cli", OwnPayload: true,
+	})
+	if conf != nil {
+		t.Fatalf("unrelated create must land, got %s: %+v", conf.Code, conf.Detail)
+	}
+	if res == nil || !res.Pushed {
+		t.Fatalf("want pushed create, got %+v", res)
+	}
+	rootB := mustEffectiveRoot(&f.cs[1])
+	if !strings.Contains(string(mustRead(filepath.Join(rootB, "notes/mine.md"))), "unrelated create") {
+		t.Fatal("loser's own path missing after replay")
+	}
+	if !strings.Contains(string(mustRead(filepath.Join(rootB, "notes/peer.md"))), "peer landed first") {
+		t.Fatal("peer's path missing after converge")
+	}
+}
+
+func TestDifferentPathUpdatesBothLand(t *testing.T) {
+	f := newFixture(t)
+	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
+	if _, conf := f.put("hosta", "notes/peer.md", mkNote("note", "peer v1")); conf != nil {
+		t.Fatal(conf.Code)
+	}
+	if _, conf := f.put("hostb", "notes/mine.md", mkNote("note", "mine v1")); conf != nil {
+		t.Fatal(conf.Code)
+	}
+	g(t, f.a, "pull", "--ff-only")
+	g(t, f.b, "pull", "--ff-only")
+	peerRev := f.rev("hosta", "notes/peer.md")
+	mineRev := f.rev("hostb", "notes/mine.md")
+	beforePushHook = func() {
+		if _, conf := Put(nil, f.cs, PutInput{
+			CortexName: "hosta", Path: "notes/peer.md",
+			Payload: []byte(mkNote("note", "peer v2")), Expects: peerRev,
+			Agent: "agent-a", Via: "cli", OwnPayload: true,
+		}); conf != nil {
+			t.Errorf("peer update failed: %v", conf.Code)
+		}
+	}
+	res, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hostb", Path: "notes/mine.md",
+		Payload: []byte(mkNote("note", "mine v2")), Expects: mineRev,
+		Agent: "agent-b", Via: "cli", OwnPayload: true,
+	})
+	if conf != nil {
+		t.Fatalf("unrelated update must land, got %s expected=%v actual=%v", conf.Code, conf.Detail["expected"], conf.Detail["actual"])
+	}
+	if res == nil || !res.Pushed {
+		t.Fatalf("want pushed update, got %+v", res)
+	}
+	rootB := mustEffectiveRoot(&f.cs[1])
+	if !strings.Contains(string(mustRead(filepath.Join(rootB, "notes/mine.md"))), "mine v2") {
+		t.Fatal("update of unchanged path lost")
+	}
+	if !strings.Contains(string(mustRead(filepath.Join(rootB, "notes/peer.md"))), "peer v2") {
+		t.Fatal("peer update missing after converge")
+	}
+}
+
+func TestPublishRejectedHook(t *testing.T) {
+	f := newFixture(t)
+	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
+	if err := writeRejectHook(f.origin); err != nil {
+		t.Fatal(err)
+	}
+	_, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/hooked.md",
+		Payload: []byte(mkNote("note", "must not pretend this exists")),
+		Agent:   "agent-a", Via: "cli", OwnPayload: false,
+	})
+	wantCode(t, conf, "publish_rejected")
+	if conf.Class() != ClassUnavailable {
+		t.Fatalf("class=%v want Unavailable", conf.Class())
+	}
+	if conf.Detail["push_stderr"] == "" {
+		t.Fatal("publish_rejected must carry push diagnostics")
+	}
+	saved, _ := conf.Detail["payload_saved"].(string)
+	if saved == "" {
+		t.Fatalf("payload not preserved: %v", conf.Detail)
+	}
+	rootA := mustEffectiveRoot(&f.cs[0])
+	if _, err := os.Stat(filepath.Join(rootA, "notes/hooked.md")); !os.IsNotExist(err) {
+		t.Fatalf("refused create must unwind; stat=%v", err)
+	}
+	remote := g(t, f.origin, "ls-tree", "-r", "--name-only", "HEAD")
+	if strings.Contains(remote, "notes/hooked.md") {
+		t.Fatal("refused push must not land on origin")
+	}
+}
+
+func TestPublishUnknownRecoversWhenLanded(t *testing.T) {
+	f := newFixture(t)
+	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
+	pushOverride = func() error {
+		writer := mustEffectiveRoot(&f.cs[0])
+		if _, err := git(writer, "push"); err != nil {
+			return err
+		}
+		return gitErr("fatal: the remote end hung up unexpectedly")
+	}
+	res, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/lost-ack.md",
+		Payload: []byte(mkNote("note", "landed but ack lost")),
+		Agent:   "agent-a", Via: "cli", OwnPayload: true,
+	})
+	if conf != nil {
+		t.Fatalf("matching remote bytes must be success, got %s %+v", conf.Code, conf.Detail)
+	}
+	if res == nil || !res.Pushed {
+		t.Fatalf("want proved push, got %+v", res)
+	}
+	rootA := mustEffectiveRoot(&f.cs[0])
+	if !strings.Contains(string(mustRead(filepath.Join(rootA, "notes/lost-ack.md"))), "landed but ack lost") {
+		t.Fatal("proved success lost local bytes")
+	}
+}
+
+func TestPublishUnknownWhenNotLanded(t *testing.T) {
+	f := newFixture(t)
+	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
+	pushOverride = func() error {
+		return gitErr("fatal: unable to access 'https://example.invalid/': Could not resolve host")
+	}
+	_, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hosta", Path: "notes/ghost.md",
+		Payload: []byte(mkNote("note", "never reached the remote")),
+		Agent:   "agent-a", Via: "mcp", OwnPayload: false,
+	})
+	wantCode(t, conf, "publish_unknown")
+	if conf.Class() != ClassUnavailable {
+		t.Fatalf("class=%v want Unavailable", conf.Class())
+	}
+	if _, ok := conf.Detail["payload_saved"].(string); !ok {
+		t.Fatalf("payload not preserved: %v", conf.Detail)
+	}
+	rootA := mustEffectiveRoot(&f.cs[0])
+	if _, err := os.Stat(filepath.Join(rootA, "notes/ghost.md")); !os.IsNotExist(err) {
+		t.Fatalf("unlanded unknown must unwind when fetch works; stat=%v", err)
+	}
+}
+
+func TestNoteDoesNotMintSecondPathOnPublishUnknown(t *testing.T) {
+	f := newFixture(t)
+	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
+	var pushes int
+	pushOverride = func() error {
+		pushes++
+		pushOverride = func() error {
+			pushes++
+			return gitErr("fatal: the remote end hung up unexpectedly")
+		}
+		return gitErr("fatal: the remote end hung up unexpectedly")
+	}
+	_, conf := Note(nil, f.cs, NoteInput{CortexName: "hosta", Text: "do not duplicate me", Agent: "agent-a", Via: "cli"})
+	wantCode(t, conf, "publish_unknown")
+	if pushes != 1 {
+		t.Fatalf("note minted another path: push attempts=%d", pushes)
+	}
+}
+
+func gitErr(stderr string) error {
+	return &GitError{Args: []string{"push"}, Stderr: stderr, Err: errExit1{}}
+}
+
+type errExit1 struct{}
+
+func (errExit1) Error() string { return "exit 1" }
+
+func writeRejectHook(origin string) error {
+	hook := filepath.Join(origin, "hooks", "pre-receive")
+	body := "#!/bin/sh\necho 'pre-receive hook declined' >&2\nexit 1\n"
+	return os.WriteFile(hook, []byte(body), 0o755)
+}
