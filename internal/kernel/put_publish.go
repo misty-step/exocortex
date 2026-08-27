@@ -58,7 +58,7 @@ func recoverMoved(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *P
 		return observedPathConflict(op, rel, abs, in, perr, unwind)
 	}
 	if len(unwind) > 0 || !writerAt(dir, tip) {
-		return provedUnavailable(op, rel, in, perr, unwind, tip, remote)
+		return writerUnavailable(op, rel, in, perr, unwind, tip, remote, "rejected")
 	}
 	if remaining <= 0 {
 		return publicationConflict("publish_unknown", op, rel, in, perr, unwind,
@@ -77,7 +77,7 @@ func recoverUnknown(_ *Cortex, in PutInput, rel, dir, abs, base, op string, res 
 	unwind := convergeEvaluated(dir, base, rel, tip)
 	if ok && bytes.Equal(remote, candidate) {
 		if len(unwind) > 0 || !writerAt(dir, tip) {
-			return provedUnavailable(op, rel, in, perr, unwind, tip, remote)
+			return writerUnavailable(op, rel, in, perr, unwind, tip, remote, "landed")
 		}
 		res.Commit = tip
 		res.Revision = Revision(candidate)
@@ -159,12 +159,16 @@ func keepUnknown(op, rel string, in PutInput, perr error) *Conflict {
 	return conf
 }
 
-func provedUnavailable(op, rel string, in PutInput, perr error, unwind []string, tip string, remote []byte) *Conflict {
-	conf := publicationConflict("publish_unknown", op, rel, in, perr, unwind,
-		"the push landed on the remote but the writer could not converge; re-read with get; do not create a second path")
+func writerUnavailable(op, rel string, in PutInput, perr error, unwind []string, tip string, remote []byte, remoteOutcome string) *Conflict {
+	hint := "the push was rejected and the writer could not converge for replay; inspect the publisher clone; do not create a second path"
+	if remoteOutcome == "landed" {
+		hint = "the push landed on the remote but the writer could not converge; re-read with get; do not create a second path"
+	}
+	conf := publicationConflict("writer_unavailable", op, rel, in, perr, unwind, hint)
 	if conf.Detail == nil {
 		conf.Detail = map[string]any{}
 	}
+	conf.Detail["remote"] = remoteOutcome
 	conf.Detail["proved_commit"] = tip
 	conf.Detail["converged"] = false
 	if remote != nil {

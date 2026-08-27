@@ -207,8 +207,13 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
      race). Unwind path-scoped; payload preserved.
    - Transport, timeout, and accepted-but-response-lost outcomes fetch
      and compare candidate bytes to `@{u}:<path>`: a match is proved
-     success. Otherwise `publish_unknown`. `note` must not mint a second
-     path. If fetch itself fails, do not unwind the local candidate.
+     success only if the writer HEAD equals the fetched tip. Otherwise
+     `publish_unknown`. `note` must not mint a second path. If fetch
+     itself fails, do not unwind the local candidate.
+   - If unwind or ff-only onto the evaluated tip fails, the outcome is
+     `writer_unavailable` with `remote: landed` (bytes matched) or
+     `remote: rejected` (non-fast-forward, path unchanged). This is not
+     `publish_unknown`.
    Unwind stays path-scoped, so nothing outside this operation can be
    destroyed even under a pre-flight race: `git reset --soft <base>` —
    HEAD moves back, the index is NEVER swept repo-wide, so even a
