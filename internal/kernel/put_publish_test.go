@@ -63,6 +63,38 @@ func TestDifferentPathCreatesBothLand(t *testing.T) {
 	}
 }
 
+func TestReplayFailurePreservesStdinPayload(t *testing.T) {
+	f := newFixture(t)
+	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil; afterConvergeHook = nil })
+	beforePushHook = func() {
+		if _, conf := f.put("hosta", "notes/peer.md", mkNote("note", "peer landed first")); conf != nil {
+			t.Errorf("peer create failed: %v", conf.Code)
+		}
+	}
+	afterConvergeHook = func() {
+		writer := mustEffectiveRoot(&f.cs[1])
+		notes := filepath.Join(writer, "notes")
+		if err := os.Chmod(notes, 0o555); err != nil {
+			t.Errorf("chmod notes: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(notes, 0o755) })
+	}
+	payload := []byte(mkNote("note", "stdin payload must survive replay write_failed"))
+	_, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hostb", Path: "notes/mine.md",
+		Payload: payload, Agent: "agent-b", Via: "mcp", OwnPayload: false,
+	})
+	wantCode(t, conf, "write_failed")
+	saved, _ := conf.Detail["payload_saved"].(string)
+	if saved == "" {
+		t.Fatalf("payload not preserved: %v", conf.Detail)
+	}
+	raw, err := os.ReadFile(saved)
+	if err != nil || !strings.Contains(string(raw), "stdin payload must survive replay write_failed") {
+		t.Fatalf("preserved payload wrong: %v %s", err, raw)
+	}
+}
+
 func TestDifferentPathUpdatesBothLand(t *testing.T) {
 	f := newFixture(t)
 	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })

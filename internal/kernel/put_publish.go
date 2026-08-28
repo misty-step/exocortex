@@ -24,6 +24,10 @@ const (
 // Production leaves it nil; tests inject transport/lost-response outcomes.
 var pushOverride func() error
 
+// afterConvergeHook, when non-nil, runs once at the start of replay
+// after a successful converge, then disarms. Production leaves it nil.
+var afterConvergeHook func()
+
 func pushRepo(dir string) error {
 	if h := pushOverride; h != nil {
 		pushOverride = nil
@@ -93,19 +97,28 @@ func replayCandidate(c *Cortex, in PutInput, rel, dir, abs, op string, res *PutR
 		preservePayload(in, conf)
 		return conf
 	}
+	if h := afterConvergeHook; h != nil {
+		afterConvergeHook = nil
+		h()
+	}
 	base, gerr := git(dir, "rev-parse", "HEAD")
 	if gerr != nil {
-		return conflict("refresh_failed", op, rel, "replay lost HEAD after converge; retry",
+		conf := conflict("refresh_failed", op, rel, "replay lost HEAD after converge; retry",
 			map[string]any{"detail": gerr.(*GitError).Stderr})
+		preservePayload(in, conf)
+		return conf
 	}
 	base = strings.TrimSpace(base)
 	if werr := atomicWrite(abs, candidate); werr != nil {
-		return conflict("write_failed", op, rel, "fix filesystem access and retry",
+		conf := conflict("write_failed", op, rel, "fix filesystem access and retry",
 			map[string]any{"detail": werr.Error()})
+		preservePayload(in, conf)
+		return conf
 	}
 	msg := fmt.Sprintf("vault(%s): exocortex put %s via %s", commitScope(c, rel), rel, agentID(in.Agent))
 	head, conf := commitPath(dir, rel, msg, op)
 	if conf != nil {
+		preservePayload(in, conf)
 		return conf
 	}
 	res.Commit = head
