@@ -204,6 +204,12 @@ func TestLostAckDoesNotSucceedWhenWriterMissesTip(t *testing.T) {
 	if conf.Detail["remote"] != "landed" {
 		t.Fatalf("remote=%v want landed", conf.Detail["remote"])
 	}
+	if strings.Contains(conf.Hint, "re-read with get") {
+		t.Fatalf("landed hint must not send callers to get: %q", conf.Hint)
+	}
+	if !strings.Contains(conf.Hint, "proved_commit") || !strings.Contains(conf.Hint, "do not retry") {
+		t.Fatalf("landed hint must name proved identity and forbid retry: %q", conf.Hint)
+	}
 	if conf.Detail["proved_commit"] == nil || conf.Detail["proved_revision"] == nil {
 		t.Fatalf("proved remote state missing: %v", conf.Detail)
 	}

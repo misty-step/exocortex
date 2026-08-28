@@ -211,9 +211,10 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
      `publish_unknown`. `note` must not mint a second path. If fetch
      itself fails, do not unwind the local candidate.
    - If unwind or ff-only onto the evaluated tip fails, the outcome is
-     `writer_unavailable` with `remote: landed` (bytes matched) or
-     `remote: rejected` (non-fast-forward, path unchanged). This is not
-     `publish_unknown`.
+     `writer_unavailable` with `remote: landed` (bytes matched; repair
+     the publisher clone to `proved_commit`/`proved_revision`; do not
+     retry the landed write) or `remote: rejected` (non-fast-forward,
+     path unchanged). This is not `publish_unknown`.
    Unwind stays path-scoped, so nothing outside this operation can be
    destroyed even under a pre-flight race: `git reset --soft <base>` —
    HEAD moves back, the index is NEVER swept repo-wide, so even a

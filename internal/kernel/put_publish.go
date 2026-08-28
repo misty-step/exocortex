@@ -165,7 +165,7 @@ func keepUnknown(op, rel string, in PutInput, perr error) *Conflict {
 func writerUnavailable(op, rel string, in PutInput, perr error, unwind []string, tip string, remote []byte, remoteOutcome string) *Conflict {
 	hint := "the push was rejected and the writer could not converge for replay; inspect the publisher clone; do not create a second path"
 	if remoteOutcome == "landed" {
-		hint = "the push landed on the remote but the writer could not converge; re-read with get; do not create a second path"
+		hint = "the push landed on the remote but the publisher clone did not converge; repair the writer to proved_commit/proved_revision; do not retry this write and do not create a second path"
 	}
 	conf := publicationConflict("writer_unavailable", op, rel, in, perr, unwind, hint)
 	if conf.Detail == nil {
