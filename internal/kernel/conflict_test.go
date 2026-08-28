@@ -174,6 +174,14 @@ func TestConflictBodyGolden(t *testing.T) {
 		})
 	}
 }
+func TestPublicationConflictCleanUnwindIsJSONArray(t *testing.T) {
+	conf := publicationConflict("publish_rejected", "create", "notes/x.md", PutInput{}, nil, nil, "retry")
+	body := jsonRoundTrip(t, conf.Body())
+	unwind, ok := body["unwind"].([]any)
+	if !ok || len(unwind) != 0 {
+		t.Fatalf("unwind=%#v want empty JSON array", body["unwind"])
+	}
+}
 
 func jsonRoundTrip(t *testing.T, v map[string]any) map[string]any {
 	t.Helper()

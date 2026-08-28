@@ -174,6 +174,9 @@ func observedPathConflict(op, rel string, remote []byte, ok bool, in PutInput, p
 }
 
 func publicationConflict(code, op, rel string, in PutInput, perr error, unwind []string, hint string) *Conflict {
+	if unwind == nil {
+		unwind = []string{}
+	}
 	conf := conflict(code, op, rel, hint, map[string]any{
 		"push_stderr": pushStderr(perr),
 		"unwind":      unwind,
