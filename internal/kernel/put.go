@@ -221,10 +221,10 @@ func commitPutNote(c *Cortex, in PutInput, payload fm.Document, abs, rel, dir, b
 	if c.VCS != "daybook" {
 		return nil
 	}
-	return daybookTail(c, in, rel, dir, abs, base, op, res)
+	return daybookTail(c, in, rel, dir, abs, base, op, res, final)
 }
 
-func daybookTail(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult) *Conflict {
+func daybookTail(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult, candidate []byte) *Conflict {
 	msg := fmt.Sprintf("vault(%s): exocortex put %s via %s", commitScope(c, rel), rel, agentID(in.Agent))
 	head, conf := commitPath(dir, rel, msg, op)
 	if conf != nil {
@@ -239,7 +239,7 @@ func daybookTail(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *Pu
 		return nil
 	}
 	if perr := pushRepo(dir); perr != nil {
-		return handlePushFailure(c, in, rel, dir, abs, base, op, res, perr, maxPublishReplay)
+		return handlePushFailure(c, in, rel, dir, abs, base, op, res, candidate, perr, maxPublishReplay)
 	}
 	res.Pushed = true
 	return nil

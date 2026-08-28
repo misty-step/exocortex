@@ -37,26 +37,35 @@ func pushRepo(dir string) error {
 	return err
 }
 
-func handlePushFailure(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult, perr error, remaining int) *Conflict {
+func handlePushFailure(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult, candidate []byte, perr error, remaining int) *Conflict {
 	switch classifyPushError(perr) {
 	case pushMoved:
-		return recoverMoved(c, in, rel, dir, abs, base, op, res, perr, remaining)
+		return recoverMoved(c, in, rel, dir, abs, base, op, res, candidate, perr, remaining)
 	case pushRefused:
 		unwind := unwindAndConverge(dir, base, rel)
+		if len(unwind) > 0 {
+			return writerUnavailable(op, rel, in, perr, unwind, "", nil, "rejected")
+		}
 		return publicationConflict("publish_rejected", op, rel, in, perr, unwind,
 			"the remote refused this push (auth, hook, or policy); fix the refusal and retry; this is not a lost write race")
 	default:
-		return recoverUnknown(c, in, rel, dir, abs, base, op, res, perr)
+		return recoverUnknown(in, rel, dir, base, op, res, candidate, perr)
 	}
 }
 
-func recoverMoved(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult, perr error, remaining int) *Conflict {
-	candidate := mustRead(abs)
+func recoverMoved(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult, candidate []byte, perr error, remaining int) *Conflict {
 	tip, err := fetchTip(dir)
 	if err != nil {
-		return keepUnknown(op, rel, in, perr)
+		conf := writerUnavailable(op, rel, in, perr, nil, "", nil, "rejected")
+		conf.Detail["recovery_error"] = pushStderr(err)
+		return conf
 	}
-	remote, ok := fileAt(dir, tip, rel)
+	remote, ok, err := fileAt(dir, tip, rel)
+	if err != nil {
+		conf := writerUnavailable(op, rel, in, perr, nil, tip, nil, "rejected")
+		conf.Detail["observation_error"] = pushStderr(err)
+		return conf
+	}
 	unwind := convergeEvaluated(dir, base, rel, tip)
 	if len(unwind) > 0 || !writerAt(dir, tip) {
 		return writerUnavailable(op, rel, in, perr, unwind, tip, remote, "rejected")
@@ -65,19 +74,25 @@ func recoverMoved(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *P
 		return observedPathConflict(op, rel, remote, ok, in, perr, unwind)
 	}
 	if remaining <= 0 {
-		return publicationConflict("publish_unknown", op, rel, in, perr, unwind,
-			"could not tell whether the push landed; re-read with get before retrying; do not create a second path")
+		conf := publicationConflict("publish_rejected", op, rel, in, perr, unwind,
+			"unrelated remote movement exhausted bounded replay; the last push was rejected and did not land; retry the same path")
+		conf.Detail["reason"] = "contention_exhausted"
+		conf.Detail["observed_tip"] = tip
+		conf.Detail["converged"] = true
+		return conf
 	}
 	return replayCandidate(c, in, rel, dir, abs, op, res, candidate, remaining-1)
 }
 
-func recoverUnknown(_ *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult, perr error) *Conflict {
-	candidate := mustRead(abs)
+func recoverUnknown(in PutInput, rel, dir, base, op string, res *PutResult, candidate []byte, perr error) *Conflict {
 	tip, err := fetchTip(dir)
 	if err != nil {
-		return keepUnknown(op, rel, in, perr)
+		return keepUnknown(op, rel, in, perr, err, "")
 	}
-	remote, ok := fileAt(dir, tip, rel)
+	remote, ok, err := fileAt(dir, tip, rel)
+	if err != nil {
+		return keepUnknown(op, rel, in, perr, err, tip)
+	}
 	unwind := convergeEvaluated(dir, base, rel, tip)
 	if ok && bytes.Equal(remote, candidate) {
 		if len(unwind) > 0 || !writerAt(dir, tip) {
@@ -87,6 +102,9 @@ func recoverUnknown(_ *Cortex, in PutInput, rel, dir, abs, base, op string, res 
 		res.Revision = Revision(candidate)
 		res.Pushed = true
 		return nil
+	}
+	if len(unwind) > 0 || !writerAt(dir, tip) {
+		return writerUnavailable(op, rel, in, perr, unwind, tip, remote, "unknown")
 	}
 	return publicationConflict("publish_unknown", op, rel, in, perr, unwind,
 		"could not tell whether the push landed; re-read with get before retrying; do not create a second path")
@@ -127,7 +145,7 @@ func replayCandidate(c *Cortex, in PutInput, rel, dir, abs, op string, res *PutR
 		return nil
 	}
 	if perr := pushRepo(dir); perr != nil {
-		return handlePushFailure(c, in, rel, dir, abs, base, op, res, perr, remaining)
+		return handlePushFailure(c, in, rel, dir, abs, base, op, res, candidate, perr, remaining)
 	}
 	res.Pushed = true
 	return nil
@@ -164,31 +182,42 @@ func publicationConflict(code, op, rel string, in PutInput, perr error, unwind [
 	return conf
 }
 
-func keepUnknown(op, rel string, in PutInput, perr error) *Conflict {
+func keepUnknown(op, rel string, in PutInput, perr, recoveryErr error, tip string) *Conflict {
 	conf := conflict("publish_unknown", op, rel,
-		"could not tell whether the push landed; re-read with get before retrying; do not create a second path",
+		"could not tell whether the push landed and recovery could not observe the remote; repair access before retrying; do not create a second path",
 		map[string]any{
-			"push_stderr": pushStderr(perr),
-			"unwound":     false,
+			"push_stderr":    pushStderr(perr),
+			"recovery_error": pushStderr(recoveryErr),
+			"unwound":        false,
 		})
+	if tip != "" {
+		conf.Detail["observed_tip"] = tip
+	}
 	preservePayload(in, conf)
 	return conf
 }
 
 func writerUnavailable(op, rel string, in PutInput, perr error, unwind []string, tip string, remote []byte, remoteOutcome string) *Conflict {
 	hint := "the push was rejected and the writer could not converge for replay; inspect the publisher clone; do not create a second path"
-	if remoteOutcome == "landed" {
+	switch remoteOutcome {
+	case "landed":
 		hint = "the push landed on the remote but the publisher clone did not converge; repair the writer to proved_commit/proved_revision; do not retry this write and do not create a second path"
+	case "unknown":
+		hint = "the push outcome is unknown and the publisher clone did not converge; repair the writer before using get; do not retry or create a second path"
 	}
 	conf := publicationConflict("writer_unavailable", op, rel, in, perr, unwind, hint)
 	if conf.Detail == nil {
 		conf.Detail = map[string]any{}
 	}
 	conf.Detail["remote"] = remoteOutcome
-	conf.Detail["proved_commit"] = tip
 	conf.Detail["converged"] = false
-	if remote != nil {
-		conf.Detail["proved_revision"] = Revision(remote)
+	if remoteOutcome == "landed" {
+		conf.Detail["proved_commit"] = tip
+		if remote != nil {
+			conf.Detail["proved_revision"] = Revision(remote)
+		}
+	} else if tip != "" {
+		conf.Detail["observed_tip"] = tip
 	}
 	return conf
 }
@@ -218,6 +247,9 @@ func isNonFastForward(msg string) bool {
 }
 
 func isRemoteRefusal(msg string) bool {
+	if strings.Contains(msg, "permission to ") && strings.Contains(msg, " denied to ") {
+		return true
+	}
 	for _, n := range []string{
 		"hook declined",
 		"pre-receive hook",
@@ -257,12 +289,23 @@ func fetchTip(dir string) (string, error) {
 	return strings.TrimSpace(tip), nil
 }
 
-func fileAt(dir, rev, rel string) ([]byte, bool) {
-	raw, err := git(dir, "show", rev+":"+filepath.ToSlash(rel))
+func fileAt(dir, rev, rel string) ([]byte, bool, error) {
+	path := filepath.ToSlash(rel)
+	entry, err := git(dir, "ls-tree", "-z", "--name-only", rev, "--", ":(literal)"+path)
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
-	return []byte(raw), true
+	if entry == "" {
+		return nil, false, nil
+	}
+	if entry != path+"\x00" {
+		return nil, false, fmt.Errorf("git ls-tree returned unexpected path %q for %q", entry, path)
+	}
+	raw, err := git(dir, "show", rev+":"+path)
+	if err != nil {
+		return nil, false, err
+	}
+	return []byte(raw), true, nil
 }
 
 func convergeEvaluated(dir, base, rel, tip string) []string {

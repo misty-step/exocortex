@@ -68,9 +68,12 @@ Write rules enforced by `put` (do not pre-satisfy by hand):
   On mismatch, re-read with `get`, re-apply your change on top, retry.
   Never overwrite a conflict. Daybook push failures are classified:
   `exists`/`revision_conflict` only after the target path is observed
-  to have changed; `publish_rejected` is a known remote refusal (auth,
-  hook); `publish_unknown` means the kernel cannot tell if the push
-  landed. Do not mint a second `note` path on `publish_unknown`.
+  to have changed; `publish_rejected` is a known non-landing result
+  (auth, hook, permission, policy, or exhausted unrelated-ref replay);
+  `publish_unknown` means the kernel cannot tell if the push landed.
+  `writer_unavailable` means the publisher clone needs repair before
+  `get` is authoritative. Do not mint a second `note` path when landing
+  is unknown.
 
 ## Sole-Publisher Isolation
 

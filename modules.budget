@@ -1,7 +1,9 @@
 # name	include	budget
 # Packed-output tokens via repomix --no-file-summary --no-directory-structure.
 # Raise only with a recorded reason after delete-or-split.
-kernel	internal/kernel	54000
+# PR #30: typed publication outcomes and cross-host recovery proofs; duplicate
+# candidate-path coverage was folded before raising this package ceiling.
+kernel	internal/kernel	54500
 cli	internal/cli	16000
 fm	internal/fm	8000
 mcp	internal/mcp	5000

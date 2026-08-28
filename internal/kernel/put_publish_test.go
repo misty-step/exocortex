@@ -21,6 +21,7 @@ func TestClassifyPushError(t *testing.T) {
 		{"remote: pre-receive hook declined\nerror: failed to push some refs", pushRefused},
 		{"fatal: Authentication failed for 'https://example.test/repo.git'", pushRefused},
 		{"Permission denied (publickey).", pushRefused},
+		{"remote: Permission to misty-step/exocortex.git denied to proof-user.", pushRefused},
 		{"fatal: could not read Username for 'https://example.test': terminal prompts disabled", pushRefused},
 		{"fatal: the remote end hung up unexpectedly", pushUnknown},
 		{"fatal: unable to access 'https://example.invalid/': Could not resolve host", pushUnknown},
@@ -39,6 +40,10 @@ func TestDifferentPathCreatesBothLand(t *testing.T) {
 	f := newFixture(t)
 	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
 	beforePushHook = func() {
+		writer := mustEffectiveRoot(&f.cs[1])
+		if err := os.Remove(filepath.Join(writer, "notes/mine.md")); err != nil {
+			t.Errorf("remove candidate: %v", err)
+		}
 		if _, conf := f.put("hosta", "notes/peer.md", mkNote("note", "peer landed first")); conf != nil {
 			t.Errorf("peer create failed: %v", conf.Code)
 		}
@@ -60,6 +65,40 @@ func TestDifferentPathCreatesBothLand(t *testing.T) {
 	}
 	if !strings.Contains(string(mustRead(filepath.Join(rootB, "notes/peer.md"))), "peer landed first") {
 		t.Fatal("peer's path missing after converge")
+	}
+}
+
+func TestReplayExhaustionIsKnownRejection(t *testing.T) {
+	f := newFixture(t)
+	t.Cleanup(func() { beforePushHook = nil; pushOverride = nil })
+	peerPaths := []string{"notes/peer-a.md", "notes/peer-b.md", "notes/peer-c.md"}
+	moves := 0
+	var rejectWithMovement func() error
+	rejectWithMovement = func() error {
+		path := peerPaths[moves]
+		moves++
+		if _, conf := f.put("hosta", path, mkNote("note", path)); conf != nil {
+			return conf
+		}
+		pushOverride = rejectWithMovement
+		return gitErr(" ! [rejected] master -> master (non-fast-forward)")
+	}
+	pushOverride = rejectWithMovement
+	_, conf := Put(nil, f.cs, PutInput{
+		CortexName: "hostb", Path: "notes/mine.md",
+		Payload: []byte(mkNote("note", "bounded candidate")),
+		Agent:   "agent-b", Via: "cli", OwnPayload: true,
+	})
+	wantCode(t, conf, "publish_rejected")
+	if moves != 3 || conf.Detail["reason"] != "contention_exhausted" {
+		t.Fatalf("bounded replay result wrong: moves=%d detail=%v", moves, conf.Detail)
+	}
+	if conf.Detail["converged"] != true {
+		t.Fatalf("writer must converge after rejected replay: %v", conf.Detail)
+	}
+	remote := g(t, f.origin, "ls-tree", "-r", "--name-only", "HEAD")
+	if strings.Contains(remote, "notes/mine.md") {
+		t.Fatal("exhausted candidate unexpectedly landed")
 	}
 }
 
@@ -166,6 +205,15 @@ func TestPublishRejectedHook(t *testing.T) {
 	remote := g(t, f.origin, "ls-tree", "-r", "--name-only", "HEAD")
 	if strings.Contains(remote, "notes/hooked.md") {
 		t.Fatal("refused push must not land on origin")
+	}
+}
+func TestRejectedPushWithFailedRecoveryIsWriterUnavailable(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing")
+	conf := handlePushFailure(nil, PutInput{}, "notes/a.md", dir, "", "missing", "create",
+		&PutResult{}, nil, gitErr("remote rejected"), maxPublishReplay)
+	wantCode(t, conf, "writer_unavailable")
+	if conf.Detail["remote"] != "rejected" {
+		t.Fatalf("remote=%v", conf.Detail["remote"])
 	}
 }
 
@@ -281,6 +329,12 @@ func TestMovedDoesNotClaimLandedWhenWriterMissesTip(t *testing.T) {
 	wantCode(t, conf, "writer_unavailable")
 	if conf.Detail["remote"] != "rejected" {
 		t.Fatalf("remote=%v want rejected", conf.Detail["remote"])
+	}
+	if conf.Detail["proved_commit"] != nil || conf.Detail["proved_revision"] != nil {
+		t.Fatalf("rejected outcome must not claim proved write identity: %v", conf.Detail)
+	}
+	if conf.Detail["observed_tip"] == nil {
+		t.Fatalf("rejected outcome must report the observed remote tip: %v", conf.Detail)
 	}
 	remote := g(t, f.origin, "ls-tree", "-r", "--name-only", "HEAD")
 	if strings.Contains(remote, "notes/mine.md") {
@@ -445,6 +499,20 @@ func TestUnknownFetchFailureAheadDoesNotPublishOnNextPut(t *testing.T) {
 	remote := g(t, f.origin, "ls-tree", "-r", "--name-only", "HEAD")
 	if strings.Contains(remote, "notes/ghost.md") || strings.Contains(remote, "notes/second.md") {
 		t.Fatalf("ahead writer published on next put:\n%s", remote)
+	}
+}
+func TestFileAtDistinguishesAbsenceFromReadFailure(t *testing.T) {
+	f := newFixture(t)
+	if _, conf := f.put("hosta", "notes/seed.md", mkNote("note", "seed")); conf != nil {
+		t.Fatal(conf.Code)
+	}
+	writer := mustEffectiveRoot(&f.cs[0])
+	tip := strings.TrimSpace(g(t, writer, "rev-parse", "HEAD"))
+	if raw, ok, err := fileAt(writer, tip, "notes/missing.md"); err != nil || ok || raw != nil {
+		t.Fatalf("missing path observation = (%q, %v, %v)", raw, ok, err)
+	}
+	if _, _, err := fileAt(writer, "missing-revision", "notes/seed.md"); err == nil {
+		t.Fatal("repository read failure was reported as path absence")
 	}
 }
 

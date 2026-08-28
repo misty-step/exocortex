@@ -195,26 +195,33 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
    commit are forbidden. A push failure is classified before any data
    conflict is reported:
    - Non-fast-forward: fetch and re-evaluate the original create-absence
-     or `--expects` predicate against `@{u}:<path>`. If the target is
-     unchanged, unwind path-scoped, ff-only onto `@{u}`, and replay the
-     already-stamped candidate (no re-stamp) with a bound of two replays.
-     If the target is observed to have changed, unwind path-scoped,
-     converge, then `exists` (create) or `revision_conflict` (update)
-     with `actual` from the converged path. `actual` equal to `expected`
-     is not a publication conflict.
-   - Auth, hook, and explicit `remote rejected` refusals are
-     `publish_rejected` (not a data conflict; do not retry as a lost
-     race). Unwind path-scoped; payload preserved.
+     or `--expects` predicate against `@{u}:<path>`. Path absence and
+     path-observation failure are distinct; an observation failure never
+     becomes a data conflict or replay. If the target is unchanged,
+     unwind path-scoped, ff-only onto `@{u}`, and replay the immutable,
+     already-stamped candidate held by the operation (no worktree re-read,
+     no re-stamp) with a bound of two replays. If the target is observed
+     to have changed, unwind path-scoped, converge, then `exists` (create)
+     or `revision_conflict` (update) with `actual` from the converged
+     path. `actual` equal to `expected` is not a publication conflict.
+     Fetch or observation failure is `writer_unavailable` with
+     `remote: rejected`; exhaustion after two unchanged-path replays is
+     `publish_rejected` with `reason: contention_exhausted`. Both are
+     known-not-landed results, never `publish_unknown`.
+   - Auth, hook, permission, policy, and explicit `remote rejected`
+     refusals are `publish_rejected` (not a data conflict; do not retry
+     as a lost race). Unwind path-scoped; payload preserved.
    - Transport, timeout, and accepted-but-response-lost outcomes fetch
      and compare candidate bytes to `@{u}:<path>`: a match is proved
      success only if the writer HEAD equals the fetched tip. Otherwise
-     `publish_unknown`. `note` must not mint a second path. If fetch
-     itself fails, do not unwind the local candidate.
+     `publish_unknown`. `note` must not mint a second path. If fetch or
+     path observation fails, do not unwind the local candidate.
    - If unwind or ff-only onto the evaluated tip fails, the outcome is
      `writer_unavailable` with `remote: landed` (bytes matched; repair
      the publisher clone to `proved_commit`/`proved_revision`; do not
-     retry the landed write) or `remote: rejected` (non-fast-forward,
-     path unchanged). This is not `publish_unknown`.
+     retry the landed write), `remote: rejected` (the push was rejected),
+     or `remote: unknown` (landing is still ambiguous). The latter two
+     expose only `observed_tip`, never a proved write identity.
    Unwind stays path-scoped, so nothing outside this operation can be
    destroyed even under a pre-flight race: `git reset --soft <base>` —
    HEAD moves back, the index is NEVER swept repo-wide, so even a
@@ -279,6 +286,9 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
   {"error":"revision_conflict","operation":"update","path":"…","expected":"…","actual":"…"}
   {"error":"publish_rejected","operation":"create","path":"…"}
   {"error":"publish_unknown","operation":"update","path":"…"}
+  {"error":"writer_unavailable","operation":"create","path":"…","remote":"landed","proved_commit":"…","proved_revision":"…","converged":false,"unwind":[],"push_stderr":"…"}
+  {"error":"writer_unavailable","operation":"update","path":"…","remote":"rejected","observed_tip":"…","converged":false,"unwind":[],"push_stderr":"…"}
+  {"error":"writer_unavailable","operation":"update","path":"…","remote":"unknown","observed_tip":"…","converged":false,"unwind":[],"push_stderr":"…"}
   {"error":"dirty_destination","path":"…","state":"staged"|"unstaged"}
   {"error":"foreign_staged_state","paths":["…"]}
   {"error":"foreign_unstaged_state","paths":["…"]}
