@@ -1,9 +1,10 @@
 # name	include	budget
 # Packed-output tokens via repomix --no-file-summary --no-directory-structure.
 # Raise only with a recorded reason after delete-or-split.
+# 2026-08-29 fm 8000→10000: OKF reserved index.md/log.md validators (Root vault).
 kernel	internal/kernel	54000
 cli	internal/cli	16000
-fm	internal/fm	8000
+fm	internal/fm	10000
 mcp	internal/mcp	5000
 orient	internal/orient	4500
 qmd	internal/qmd	9000

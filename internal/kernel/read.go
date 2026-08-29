@@ -113,6 +113,8 @@ type LintResult struct {
 
 // Lint runs the cortex's validation profile over one note or every .md
 // file in the cortex. Findings are tiered; only errors block.
+// Reserved OKF files index.md and log.md use dedicated format checks
+// instead of the type floor. Every other .md file still requires type.
 func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 	var c *Cortex
 	var rel string
@@ -147,7 +149,7 @@ func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 		return nil, conflict("cortex_unavailable", "lint", p, "publisher repository is unavailable; check remote access", map[string]any{"detail": rerr.Error()})
 	}
 	if rel != "" {
-		findings, verr := lintOne(c.Profile, filepath.Join(root, rel))
+		findings, verr := lintOne(c.Profile, filepath.Join(root, rel), rel)
 		add(rel, findings, verr)
 	} else {
 		werr := filepath.WalkDir(root, func(path string, d fs.DirEntry, werr error) error {
@@ -164,8 +166,9 @@ func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 				return nil
 			}
 			relPath, _ := filepath.Rel(root, path)
-			findings, verr := lintOne(c.Profile, path)
-			add(filepath.ToSlash(relPath), findings, verr)
+			slash := filepath.ToSlash(relPath)
+			findings, verr := lintOne(c.Profile, path, slash)
+			add(slash, findings, verr)
 			return nil
 		})
 		if werr != nil {
@@ -182,12 +185,20 @@ func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 	return res, nil
 }
 
-func lintOne(profile, abs string) ([]fm.Finding, error) {
+func lintOne(profile, abs, rel string) ([]fm.Finding, error) {
 	raw, err := os.ReadFile(abs)
 	if err != nil {
 		return nil, err
 	}
-	return fm.Validate(profile, fm.ParseDocument(raw))
+	kind, rootIndex := fm.ReservedMarkdown(rel)
+	switch kind {
+	case "index":
+		return fm.ValidateIndex(raw, rootIndex)
+	case "log":
+		return fm.ValidateLog(raw)
+	default:
+		return fm.Validate(profile, fm.ParseDocument(raw))
+	}
 }
 
 // Revision is the lowercase hex sha256 of a note's exact file bytes —

@@ -293,7 +293,14 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
     `description`, `tags` all present and non-empty; RFC3339 `created`);
     opt-in for future cortices that want it.
   `lint` reports failures and warnings tiered; consumers of `daybook`
-  cortices MUST NOT hard-fail on warnings.
+  cortices MUST NOT hard-fail on warnings. Reserved basenames `index.md`
+  and `log.md` (any directory) are not notes: `lint` does not apply the
+  type floor. `index.md` has no frontmatter except the bundle-root file,
+  which MAY carry only `okf_version`; its body needs at least one ATX
+  heading and at least one `* [Title](url)` catalog bullet. `log.md` has
+  no frontmatter; every `##` heading is ISO `YYYY-MM-DD`, newest-first,
+  at least one date heading. Every other `.md` file still requires
+  non-empty `type`.
 
 ### v0 acceptance proofs
 
