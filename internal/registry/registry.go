@@ -3,6 +3,7 @@ package registry
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,8 +26,18 @@ type Cortex struct {
 
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// Identity is the stable key for a cortex's persistent operational state.
+func (c Cortex) Identity() string {
+	root := filepath.Clean(c.Path)
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	sum := sha256.Sum256([]byte(root))
+	return fmt.Sprintf("%s-%x", c.Name, sum[:8])
+}
+
 // Load combines the user registry with directory-scoped registries that apply
-// to cwd. Duplicate cortex names across scopes fail closed.
+// to cwd. Deeper scopes replace same-named entries.
 func Load(userPath, cwd string) ([]Cortex, error) {
 	cs, err := LoadFile(userPath, filepath.Dir(userPath))
 	if err != nil {

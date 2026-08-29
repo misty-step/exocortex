@@ -54,7 +54,7 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 	if conf != nil {
 		return nil, conf
 	}
-	lock, conf := lockNamed(c.Name, op, rel)
+	lock, conf := lockNamed(c, op, rel)
 	if conf != nil {
 		return nil, conf
 	}
@@ -79,7 +79,7 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 	if conf = commitPutNote(c, in, payload, abs, rel, dir, base, op, res); conf != nil {
 		return nil, conf
 	}
-	recordDirty(res, c.Name)
+	recordDirty(res, c.Identity())
 	return res, nil
 }
 
@@ -105,8 +105,8 @@ func bindPutTarget(cs []Cortex, in PutInput) (*Cortex, string, string, string, *
 	return c, rel, op, abs, nil
 }
 
-func lockNamed(name, op, rel string) (*cortexLock, *Conflict) {
-	lock, lerr := acquireLock(name)
+func lockNamed(c *Cortex, op, rel string) (*cortexLock, *Conflict) {
+	lock, lerr := acquireLock(c.Identity())
 	if lerr != nil {
 		return nil, conflict("lock_failed", op, rel, "fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
 	}
@@ -119,7 +119,7 @@ func preparePutRoot(c *Cortex, rel, op, abs string) (dir, outAbs, base string, c
 	if c.VCS != "daybook" {
 		return dir, outAbs, "", nil
 	}
-	wdir, werr := ensureWriter(c.Name, c.Path)
+	wdir, werr := ensureWriter(c.Identity(), c.Path)
 	if werr != nil {
 		return "", "", "", conflict("writer_unavailable", op, rel,
 			"failed to provision publisher clone; daybook cortices require a valid git origin",
@@ -245,10 +245,7 @@ func daybookTail(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *Pu
 	return nil
 }
 
-// recordDirty writes a sync marker after a successful durable write.
-// Identity is the git commit when the VCS tail produced one, otherwise
-// the content revision. Persistence failure is a warning, not a put failure.
-func recordDirty(res *PutResult, name string) {
+func recordDirty(res *PutResult, stateKey string) {
 	id := res.Commit
 	if id == "" {
 		id = res.Revision
@@ -256,7 +253,7 @@ func recordDirty(res *PutResult, name string) {
 	if id == "" {
 		return
 	}
-	if merr := markDirty(name, id); merr != nil {
+	if merr := markDirty(stateKey, res.Cortex, id); merr != nil {
 		res.Warnings = append(res.Warnings, fm.Finding{
 			Level:   "warning",
 			Rule:    "dirty_marker_failed",
@@ -544,8 +541,6 @@ func commitScope(c *Cortex, rel string) string {
 	return c.Name
 }
 
-// writerDir returns the cortex's persistent clean-writer clone path,
-// or "" when none exists yet.
 func writerDir(c *Cortex) string {
 	if c.VCS != "daybook" {
 		return ""
@@ -554,7 +549,7 @@ func writerDir(c *Cortex) string {
 	if err != nil {
 		return ""
 	}
-	w := filepath.Join(cfg, "writers", c.Name)
+	w := filepath.Join(cfg, "writers", c.Identity())
 	if _, statErr := os.Stat(filepath.Join(w, ".git")); statErr != nil {
 		return ""
 	}
@@ -567,7 +562,7 @@ func writerDir(c *Cortex) string {
 // failing closed to prevent reading uncommitted human dirt.
 func effectiveRoot(c *Cortex) (string, error) {
 	if c.VCS == "daybook" {
-		w, werr := ensureWriter(c.Name, c.Path)
+		w, werr := ensureWriter(c.Identity(), c.Path)
 		if werr != nil {
 			return "", fmt.Errorf("failed to provision publisher clone for %s: %w", c.Name, werr)
 		}
@@ -576,7 +571,6 @@ func effectiveRoot(c *Cortex) (string, error) {
 	return c.Path, nil
 }
 
-// mustEffectiveRoot returns effectiveRoot or panics on failure (test helper).
 func mustEffectiveRoot(c *Cortex) string {
 	root, err := effectiveRoot(c)
 	if err != nil {
@@ -585,12 +579,12 @@ func mustEffectiveRoot(c *Cortex) string {
 	return root
 }
 
-func ensureWriter(name, shared string) (string, error) {
+func ensureWriter(identity, shared string) (string, error) {
 	cfg, err := ConfigDir()
 	if err != nil {
 		return "", err
 	}
-	w := filepath.Join(cfg, "writers", name)
+	w := filepath.Join(cfg, "writers", identity)
 
 	url, err := git(shared, "remote", "get-url", "origin")
 	if err != nil {

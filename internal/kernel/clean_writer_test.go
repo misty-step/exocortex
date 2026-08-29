@@ -61,7 +61,7 @@ func TestProof15SolePublisherIsolatesFromHumanCheckout(t *testing.T) {
 
 	// Publisher clone holds the committed update.
 	cfgDir, _ := ConfigDir()
-	writer := filepath.Join(cfgDir, "writers", "hosta")
+	writer := filepath.Join(cfgDir, "writers", f.cs[0].Identity())
 	wDisk, err := os.ReadFile(filepath.Join(writer, "notes/real.md"))
 	if err != nil || !strings.Contains(string(wDisk), "v1 via sole publisher") {
 		t.Fatalf("publisher clone missing update: %v", err)
@@ -135,7 +135,7 @@ func TestPublisherPinsNonDefaultTrackedBranch(t *testing.T) {
 	}
 
 	cfgDir, _ := ConfigDir()
-	writer := filepath.Join(cfgDir, "writers", "hosta")
+	writer := filepath.Join(cfgDir, "writers", f.cs[0].Identity())
 	branch := g(t, writer, "rev-parse", "--abbrev-ref", "HEAD")
 	if branch != "feature-vault" {
 		t.Fatalf("publisher branch = %q, want feature-vault", branch)
