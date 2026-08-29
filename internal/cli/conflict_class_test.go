@@ -35,6 +35,8 @@ func TestEmitMapsConflictClassToExit(t *testing.T) {
 		{"writer_unavailable", 1},
 		{"cortex_unavailable", 1},
 		{"log_unavailable", 1},
+		{"publish_rejected", 1},
+		{"publish_unknown", 1},
 		{"empty_note", 1},
 		{"novel_operation_code", 1},
 	}

@@ -38,11 +38,11 @@ func Note(ctx context.Context, cs []Cortex, in NoteInput) (*PutResult, *Conflict
 	prefix := effectiveJournalPrefix(c)
 
 	// Journal captures must never lose a memory to remote movement.
-	// Paths are unique, so every cross-host push race is benign: after
-	// the loser converges onto the winner, a fresh attempt (new ULID)
-	// finds its path free and lands normally. Intermediate attempts
-	// keep the payload in memory here; only a terminal conflict gets it
-	// preserved once into the conflict body.
+	// Paths are unique, so a same-path exists/revision_conflict is
+	// retried against converged state. Unrelated ref movement is
+	// replayed inside Put. publish_unknown and publish_rejected are
+	// terminal: minting a second path would duplicate a memo that may
+	// already have landed.
 	var last *Conflict
 	var payload []byte
 	for range 3 {
@@ -65,9 +65,6 @@ func Note(ctx context.Context, cs []Cortex, in NoteInput) (*PutResult, *Conflict
 			last = conf
 			continue
 		}
-		// Non-retryable (foreign state, refresh failure): the thought
-		// must survive anyway — production hit this on daybook's dirty
-		// heartbeat within minutes of first use.
 		preservePayload(PutInput{Payload: payload, OwnPayload: false}, conf)
 		return nil, conf
 	}

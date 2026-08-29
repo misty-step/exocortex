@@ -161,7 +161,7 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
 2. pre-flight — `daybook` only, on the writer clone, all three aborts
    conflict-as-data, run BEFORE refresh. There is no
    `--autostash`: the writer is kernel-owned and must stay clean, so
-   `git pull --rebase` has no in-flight human work. The create-mode
+   refresh never rebases an unpublished candidate. The create-mode
    existence check is NOT a working-tree stat; CAS later answers
    existence from `HEAD:<path>` only. Preflight still runs under the
    lock (step 1), never before it:
@@ -175,9 +175,12 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
      (`foreign_unstaged_state`) — untracked files are allowed; modified
      or deleted tracked files belong to another worker, and the step-8
      unwind must never be able to reach them;
-3. refresh — `daybook`: `git pull --rebase` on the writer clone (no
-   `--autostash`), then REPEAT step 2's scan against post-refresh
-   state; `caller`/`none`: nothing;
+3. refresh — `daybook`: `git fetch`, then require `HEAD` to be an
+   ancestor of `@{u}` (equal or behind), then `git merge --ff-only @{u}`.
+   Ahead or diverged (unpublished candidate after `publish_unknown`)
+   is `refresh_failed`; nothing is written and the candidate is not
+   rebased. Then REPEAT step 2's scan against post-refresh state;
+   `caller`/`none`: nothing;
 4. CAS: re-read the stored destination revision; evaluate `--expects` or
    create-absence against fresh state;
 5. validate the payload under the cortex profile — invalid payloads fail
@@ -192,37 +195,62 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
 7. stamp provenance, atomic write (temp file + rename);
 8. VCS tail — `daybook`: record `base` = HEAD sha (post-refresh), stage
    touched paths, path-limited commit (`git commit -- <touched paths>`),
-   then push. On push rejection (non-fast-forward or any failure): NO
-   retry, NO rebase, NO force. Unwind path-scoped, so nothing outside this
-   operation can be destroyed even under a pre-flight race:
-   `git reset --soft <base>` — HEAD moves back, the index is NEVER swept
-   repo-wide, so even a foreign path staged after pre-flight keeps its
-   index entry. Restore only the touched path by its mode: an UPDATED
-   path (present in base) via `git restore --source=<base> --staged
-   --worktree -- <path>`; a CREATED path does not exist in base and is
-   dropped via `git rm --cached` plus file removal — a leftover would
-   block the ff merge. Then converge on the winner:
-   `git fetch` + `git merge --ff-only @{u}` — a lost race must not leave
-   stale bytes that make `get` lie and retries spin; if the ff-only merge
-   fails (rare race), stay at base with hint "refresh failed; next put's
-   refresh heals". Payload preserved (CLI `--from` file is the caller's;
-   MCP/stdin payloads are written to a temp file whose path is returned
-   in the conflict body). Exit code: a losing UPDATE exits
-   `revision_conflict` ("remote moved; re-read with get and retry"); a
-   losing CREATE exits `exists` — the winner's note now occupies the
-   path (operator decision 2026-08-21: existing path → `exists`).
-   `caller`/`none`: nothing;
+   then push. Force-push, merge commits, and rebase of the candidate
+   commit are forbidden. A push failure is classified before any data
+   conflict is reported:
+   - Non-fast-forward: fetch and re-evaluate the original create-absence
+     or `--expects` predicate against `@{u}:<path>`. Path absence and
+     path-observation failure are distinct; an observation failure never
+     becomes a data conflict or replay. If the target is unchanged,
+     unwind path-scoped, ff-only onto `@{u}`, and replay the immutable,
+     already-stamped candidate held by the operation (no worktree re-read,
+     no re-stamp) with a bound of two replays. If the target is observed
+     to have changed, unwind path-scoped, converge, then `exists` (create)
+     or `revision_conflict` (update) with `actual` from the converged
+     path. `actual` equal to `expected` is not a publication conflict.
+     Fetch or observation failure is `writer_unavailable` with
+     `remote: rejected`; exhaustion after two unchanged-path replays is
+     `publish_rejected` with `reason: contention_exhausted`. Both are
+     known-not-landed results, never `publish_unknown`.
+   - Auth, hook, permission, policy, and explicit `remote rejected`
+     refusals are `publish_rejected` (not a data conflict; do not retry
+     as a lost race). Unwind path-scoped; payload preserved.
+   - Transport, timeout, and accepted-but-response-lost outcomes fetch
+     and compare candidate bytes to `@{u}:<path>`: a match is proved
+     success only if the writer HEAD equals the fetched tip. Otherwise
+     `publish_unknown`. `note` must not mint a second path. If fetch or
+     path observation fails, do not unwind the local candidate.
+   - If unwind or ff-only onto the evaluated tip fails, the outcome is
+     `writer_unavailable` with `remote: landed` (bytes matched; repair
+     the publisher clone to `proved_commit`/`proved_revision`; do not
+     retry the landed write), `remote: rejected` (the push was rejected),
+     or `remote: unknown` (landing is still ambiguous). The latter two
+     expose only `observed_tip`, never a proved write identity.
+   Unwind stays path-scoped, so nothing outside this operation can be
+   destroyed even under a pre-flight race: `git reset --soft <base>` —
+   HEAD moves back, the index is NEVER swept repo-wide, so even a
+   foreign path staged after pre-flight keeps its index entry. Restore
+   only the touched path by its mode: an UPDATED path (present in base)
+   via `git restore --source=<base> --staged --worktree -- <path>`; a
+   CREATED path does not exist in base and is dropped via `git rm
+   --cached` plus file removal — a leftover would block the ff merge.
+   Then converge: `git fetch` + `git merge --ff-only @{u}`. If the
+   ff-only merge fails (rare race), stay at base with hint "refresh
+   failed; next put's refresh heals". Payload preserved (CLI `--from`
+   file is the caller's; MCP/stdin payloads are written to a temp file
+   whose path is returned in the conflict body). `caller`/`none`:
+   nothing;
 9. release lock.
 
 `index.lock` never covers this sequence; the cortex lock does. A racing
 stager cannot enter the path-limited commit even if the lock is bypassed.
 Cross-host: per-host locks cannot see each other, so the CAS guarantee on
-git cortices is enforced by push — a rejected push IS the cross-host
-`revision_conflict` for updates and `exists` for creates; the failed put
-leaves ZERO trace of itself (its own commit unwound, touched bytes
-restored to base or created file removed) and the clone converges to the
-remote tip via the ff-only restore. `none` and `caller`
-cortices are single-host by contract.
+git cortices is enforced by push. After a non-fast-forward, the kernel
+re-evaluates the path predicate; `exists`/`revision_conflict` fire only
+when that path changed. Unrelated ref movement is replayed. Auth/hook
+refusals are `publish_rejected`. A lost push acknowledgment is proved
+success or `publish_unknown`. `none` and `caller` cortices are
+single-host by contract.
 
 
 ### VCS lifecycle (per-cortex policy)
@@ -250,16 +278,27 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
     via: cli | mcp
   ```
 
-- **Cortex registry** — `${XDG_CONFIG_HOME:-~/.config}/exocortex/cortices.json`:
+- **Cortex registry** — the user registry is
+  `${XDG_CONFIG_HOME:-~/.config}/exocortex/cortices.json`:
   `[{"name","path","vcs":"daybook"|"caller"|"none",
-  "profile":"…","journal_prefix":"…"}]`; `register` is the only writer.
-  `journal_prefix` (optional, default `journal`) is where `note` files
-  land.
+  "profile":"…","journal_prefix":"…"}]`. `register` writes only this
+  registry. For directory-scoped cortices, `LoadRegistry` also reads every
+  `.exocortex/cortices.json` from the filesystem root through the current
+  working directory. Those files augment the user registry. Duplicate names
+  within one file or across scopes fail closed so one name retains one writer
+  and lock identity. Relative `path` values resolve from the directory that
+  owns `.exocortex`. `journal_prefix` (optional, default
+  `journal`) is where `note` files land.
 - **Conflict payloads** — nonzero exit + JSON body:
 
   ```json
   {"error":"exists","operation":"create","path":"…"}
   {"error":"revision_conflict","operation":"update","path":"…","expected":"…","actual":"…"}
+  {"error":"publish_rejected","operation":"create","path":"…"}
+  {"error":"publish_unknown","operation":"update","path":"…"}
+  {"error":"writer_unavailable","operation":"create","path":"…","remote":"landed","proved_commit":"…","proved_revision":"…","converged":false,"unwind":[],"push_stderr":"…"}
+  {"error":"writer_unavailable","operation":"update","path":"…","remote":"rejected","observed_tip":"…","converged":false,"unwind":[],"push_stderr":"…"}
+  {"error":"writer_unavailable","operation":"update","path":"…","remote":"unknown","observed_tip":"…","converged":false,"unwind":[],"push_stderr":"…"}
   {"error":"dirty_destination","path":"…","state":"staged"|"unstaged"}
   {"error":"foreign_staged_state","paths":["…"]}
   {"error":"foreign_unstaged_state","paths":["…"]}
@@ -348,11 +387,20 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
     gone from disk, and B's branch and target bytes equal the remote
     (A's content).
 12. Two journal writers racing across clones both land: the loser's
-    push is rejected, its unique path is retried against converged
-    state, and BOTH notes exist on the winner's tip afterward. Every
-    terminal `note` conflict carries a preserved-payload path.
+    push is non-fast-forward, Put replays the unchanged unique path on
+    the converged tip, and BOTH notes exist afterward. Every terminal
+    `note` conflict carries a preserved-payload path. `publish_unknown`
+    does not mint a second journal path.
 13. Concurrent registration from two PROCESSES survives: both entries
     exist afterward (registry transaction lock + unique save temp).
+14. Generic different-path creates and updates both land after unrelated
+    ref movement. `exists`/`revision_conflict` fire only after the
+    target path is observed to have changed.
+15. A pre-receive hook or auth refusal exits `publish_rejected` with
+    payload preserved, zero remote effect, and the local candidate
+    unwound. It is not `exists` or `revision_conflict`.
+16. Accepted-but-response-lost: when `@{u}:<path>` bytes match the
+    candidate, the put is proved success. Otherwise `publish_unknown`.
 
 ## Fleet delivery
 

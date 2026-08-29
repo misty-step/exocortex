@@ -16,7 +16,7 @@ const (
 	ClassInternal
 	// ClassUnavailable is an expected dependency or publisher outage
 	// (search_unavailable, writer_unavailable, cortex_unavailable,
-	// log_unavailable).
+	// log_unavailable, publish_rejected, publish_unknown).
 	ClassUnavailable
 )
 
@@ -34,6 +34,8 @@ var codeClass = map[string]Class{
 	"writer_unavailable":  ClassUnavailable,
 	"cortex_unavailable":  ClassUnavailable,
 	"log_unavailable":     ClassUnavailable,
+	"publish_rejected":    ClassUnavailable,
+	"publish_unknown":     ClassUnavailable,
 }
 
 // Conflict is an operation failure returned as data (CR-04): a stable
