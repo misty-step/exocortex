@@ -11,3 +11,4 @@ orient	internal/orient	4500
 qmd	internal/qmd	9000
 cmd	cmd/exocortex	500
 skillsrc	internal/skillsrc	2000
+registry	internal/registry	4000
