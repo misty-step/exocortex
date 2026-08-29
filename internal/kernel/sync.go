@@ -266,7 +266,7 @@ func snapshotDirtyMarkers(name, dDir, errorPath string) (files []string, newest 
 
 func verifyIndexedRoot(ctx context.Context, c Cortex, out *SyncResult, recordError func(string, string)) *Conflict {
 	var wantRoot string
-	if c.VCS == "git" {
+	if c.VCS == "daybook" {
 		w := writerDir(&c)
 		if w == "" {
 			recordError("root", "publisher clone missing")
@@ -450,7 +450,7 @@ func fillSyncErrorStatus(st *StatusResult, errorPath string) {
 
 func fillHeadStatus(st *StatusResult, c Cortex) {
 	var root string
-	if c.VCS != "git" {
+	if c.VCS != "daybook" {
 		root = c.Path
 	} else if w := writerDir(&c); w != "" {
 		root = w

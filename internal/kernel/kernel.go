@@ -20,14 +20,14 @@ import (
 type Cortex struct {
 	Name          string `json:"name"`
 	Path          string `json:"path"` // absolute filesystem root
-	VCS           string `json:"vcs"`  // "git" | "caller" | "none"
+	VCS           string `json:"vcs"`  // "daybook" | "caller" | "none"
 	Profile       string `json:"profile"`
 	JournalPrefix string `json:"journal_prefix,omitempty"` // where note files land, e.g. "meta/agents-board/memo"
 }
 
 var (
 	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-	validVCS  = map[string]bool{"git": true, "caller": true, "none": true}
+	validVCS  = map[string]bool{"daybook": true, "caller": true, "none": true}
 	profiles  = map[string]bool{"daybook": true, "strict": true}
 	dupSuffix = ".tmp-exocortex"
 )
@@ -68,14 +68,6 @@ func LoadRegistry() ([]Cortex, error) {
 	var cs []Cortex
 	if err := json.Unmarshal(raw, &cs); err != nil {
 		return nil, fmt.Errorf("registry %s is not valid JSON: %w", p, err)
-	}
-	for i := range cs {
-		if cs[i].VCS == "daybook" {
-			cs[i].VCS = "git"
-		}
-		if !validVCS[cs[i].VCS] {
-			return nil, fmt.Errorf("registry %s has unsupported vcs %q for cortex %q", p, cs[i].VCS, cs[i].Name)
-		}
 	}
 	return cs, nil
 }
@@ -219,13 +211,13 @@ func registerPolicy(name, abs, vcs, profile string) (string, string, error) {
 	if vcs == "" {
 		vcs = "none"
 		if _, err := os.Stat(filepath.Join(abs, ".git")); err == nil {
-			vcs = "git"
+			vcs = "daybook"
 		}
 	}
 	if !validVCS[vcs] {
 		return "", "", conflict("registration_failed", "register", name,
 			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": fmt.Sprintf("vcs %q must be git, caller, or none", vcs)})
+			map[string]any{"detail": fmt.Sprintf("vcs %q must be daybook, caller, or none", vcs)})
 	}
 	if profile == "" {
 		profile = "daybook"

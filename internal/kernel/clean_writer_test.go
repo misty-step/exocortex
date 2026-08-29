@@ -15,7 +15,7 @@ func (f *fixture) noOriginClone(t *testing.T, name string) string {
 	dir := filepath.Join(parent, name+"-clone")
 	g(t, parent, "clone", f.origin, dir) // run from the EXISTING parent
 	g(t, dir, "remote", "remove", "origin")
-	c, err := Register(name, dir, "git", "", "")
+	c, err := Register(name, dir, "daybook", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,10 +23,11 @@ func (f *fixture) noOriginClone(t *testing.T, name string) string {
 	return dir
 }
 
-// Proof 15 (sole publisher): a kernel-owned writer clone is the sole
-// publisher for every git cortex. Writes land, commit, and push without
-// touching the registered checkout, even when it carries uncommitted edits,
-// staged work, or a dirty heartbeat. Reads resolve from the publisher clone.
+// Proof 15 (sole publisher): the kernel-owned writer clone is the sole
+// publisher for daybook cortices. Writes land, commit, and push from
+// the writer clone without touching the registered human checkout,
+// even when the human checkout carries uncommitted edits, staged work,
+// or a dirty heartbeat. Reads immediately resolve from the publisher clone.
 func TestProof15SolePublisherIsolatesFromHumanCheckout(t *testing.T) {
 	f := newFixture(t)
 
@@ -170,7 +171,7 @@ func TestProof17FreshRegistrationReadsCommittedStateNotHumanDirt(t *testing.T) {
 	os.WriteFile(filepath.Join(human, "notes/committed.md"), []byte(mkNote("note", "uncommitted human dirt")), 0o644)
 
 	// Register fresh cortex.
-	c, err := Register("fresh", human, "git", "", "")
+	c, err := Register("fresh", human, "daybook", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +209,7 @@ func TestProof18ProvisioningFailureFailsClosed(t *testing.T) {
 	g(t, base, "init", "-b", "master", human)
 	g(t, human, "remote", "add", "origin", "file:///nonexistent/broken.git")
 
-	c, err := Register("broken", human, "git", "", "")
+	c, err := Register("broken", human, "daybook", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,8 +232,8 @@ func TestProof18ProvisioningFailureFailsClosed(t *testing.T) {
 	}
 }
 
-// Proof 19: a git cortex without an origin fails closed across reads and
-// writes — Put returns writer_unavailable; Get/Log/Lint return
+// Proof 19: completely missing origin remote on a daybook cortex fails closed
+// across reads and writes — Put returns writer_unavailable; Get/Log/Lint return
 // cortex_unavailable; zero fallback to c.Path.
 func TestProof19MissingOriginFailsClosedAcrossReadsAndWrites(t *testing.T) {
 	testConfigEnv(t)
@@ -242,7 +243,7 @@ func TestProof19MissingOriginFailsClosedAcrossReadsAndWrites(t *testing.T) {
 	os.WriteFile(filepath.Join(human, "notes/secret.md"), []byte("human uncommitted secret"), 0o644)
 	g(t, base, "init", "-b", "master", human)
 
-	c, err := Register("no-origin", human, "git", "", "")
+	c, err := Register("no-origin", human, "daybook", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

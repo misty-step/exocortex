@@ -66,7 +66,7 @@ func newFixture(t *testing.T) *fixture {
 	for _, r := range []struct {
 		name, path string
 	}{{"hosta", f.a}, {"hostb", f.b}} {
-		c, err := Register(r.name, r.path, "git", "", "")
+		c, err := Register(r.name, r.path, "daybook", "", "")
 		if err != nil {
 			t.Fatalf("register %s: %v", r.name, err)
 		}
@@ -295,13 +295,9 @@ func TestProof5DirtyDestination(t *testing.T) {
 	}
 }
 
-// Proof 6: the git driver works independently of the cortex validation
-// profile, commits exactly once, pushes, and makes an identical retry a no-op.
-func TestProof6GitPublisherIsProfileIndependent(t *testing.T) {
+// Proof 6: daybook driver commits exactly once, pushes; identical retry is a no-op.
+func TestProof6SingleCommitPushedThenNoop(t *testing.T) {
 	f := newFixture(t)
-	for i := range f.cs {
-		f.cs[i].Profile = "strict"
-	}
 	payload := mkNote("decision", "the pinned contract")
 	if _, conf := f.put("hosta", "misty-step/pinned.md", payload); conf != nil {
 		t.Fatalf("create failed: %s detail=%v", conf.Code, conf.Detail)
@@ -513,7 +509,7 @@ func TestProof12CreateFastPathWaitsForLock(t *testing.T) {
 	os.MkdirAll(filepath.Join(f.b, "notes"), 0o755)
 	os.WriteFile(filepath.Join(f.b, "notes/pause.md"), []byte(winnerPayload), 0o644)
 	g(t, f.b, "add", "notes/pause.md")
-	g(t, f.b, "commit", "-m", "cortex(test): winner create")
+	g(t, f.b, "commit", "-m", "vault(test): winner create")
 	g(t, f.b, "push")
 	close(advanceRemote)
 	close(releaseA)
@@ -659,7 +655,7 @@ func TestProof10UnwindSparesForeignUnstaged(t *testing.T) {
 	base := f.head(f.b)
 	os.WriteFile(filepath.Join(f.b, "notes/tail.md"), []byte(mkNote("note", "B loses")), 0o644)
 	g(t, f.b, "add", "notes/tail.md")
-	g(t, f.b, "commit", "-m", "cortex(test): exocortex put notes/tail.md via agent-b")
+	g(t, f.b, "commit", "-m", "vault(test): exocortex put notes/tail.md via agent-b")
 	foreignRel := "notes/foreign-wip.md"
 	foreignAbs := filepath.Join(f.b, foreignRel)
 	foreignBody := "---\ntype: scratch\n---\n\nunrelated WIP that must survive\n"

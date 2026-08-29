@@ -55,28 +55,13 @@ func TestRegisterAndLoad(t *testing.T) {
 		t.Fatal("registered path must be absolute")
 	}
 }
-func TestLoadRegistryNormalizesLegacyPublisherPolicy(t *testing.T) {
-	cfg := testConfigEnv(t)
-	dir := filepath.Join(cfg, "exocortex")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	raw := `[{"name":"archive","path":"/tmp/archive","vcs":"daybook","profile":"strict"}]`
-	if err := os.WriteFile(filepath.Join(dir, "cortices.json"), []byte(raw), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cs, err := LoadRegistry()
-	if err != nil || len(cs) != 1 || cs[0].VCS != "git" {
-		t.Fatalf("legacy registry normalization: %+v %v", cs, err)
-	}
-}
 
 func TestResolve(t *testing.T) {
 	testConfigEnv(t)
 	rootA := t.TempDir()
 	rootB := t.TempDir()
 	cs := []Cortex{
-		{Name: "aaa", Path: rootA, VCS: "git", Profile: "daybook"},
+		{Name: "aaa", Path: rootA, VCS: "daybook", Profile: "daybook"},
 		{Name: "bbb", Path: rootB, VCS: "none", Profile: "strict"},
 	}
 

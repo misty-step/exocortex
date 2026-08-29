@@ -1,9 +1,9 @@
 # name	include	budget
 # Packed-output tokens via repomix --no-file-summary --no-directory-structure.
 # Raise only with a recorded reason after delete-or-split.
-# PR #30: publication recovery and generic git-policy migration; legacy
-# registry and profile-independence proofs were folded before this raise.
-kernel	internal/kernel	54800
+# PR #30: typed publication outcomes and cross-host recovery proofs; duplicate
+# candidate-path coverage was folded before raising this package ceiling.
+kernel	internal/kernel	54500
 cli	internal/cli	16000
 fm	internal/fm	8000
 mcp	internal/mcp	5000

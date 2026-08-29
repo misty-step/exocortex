@@ -16,12 +16,11 @@ Source artifact: daybook `misty-step/exocortex-kernel.md`.
   ingest foreign sources into a cortex as compiled, provenance-stamped notes
   with `source:` lineage. No content port; no storage backends.
 - Daybook is cortex #1. Core operations: `register/put/get/search/brief/note/sync/status/log/lint`.
-- Sole-publisher architecture: for every cortex registered with `vcs=git`,
-  the kernel-owned clone in `~/.config/exocortex/writers/<cortex>` is the
-  exclusive write and read authority. The kernel fetches, requires HEAD to be
-  an ancestor of upstream, fast-forwards, stages touched paths only, commits,
-  and pushes from the isolated clone. Registered workspaces are never
-  preflighted, stashed, committed to, or mutated.
+- Sole-publisher architecture: for Daybook cortices, the kernel-owned clone in
+  `~/.config/exocortex/writers/<cortex>` is the exclusive write and read authority.
+  The kernel fetches, requires HEAD to be an ancestor of upstream, fast-forwards, stages touched paths only, commits, and pushes
+  from the isolated clone. Registered human workspaces are never preflighted,
+  stashed, committed to, or mutated.
 - Fail-closed operations: a missing origin remote or provisioning error fails
   closed (`writer_unavailable` / `cortex_unavailable`) with zero fallback to
   reading or writing uncommitted human bytes.

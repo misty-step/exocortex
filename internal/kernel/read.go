@@ -31,7 +31,7 @@ func Get(cs []Cortex, nameFlag, p string) (*GetResult, *Conflict) {
 	if rerr != nil {
 		return nil, conflict("cortex_unavailable", "get", p, "publisher repository is unavailable; check remote access", map[string]any{"detail": rerr.Error()})
 	}
-	if c.VCS == "git" {
+	if c.VCS == "daybook" {
 		raw, gerr := git(root, "show", "HEAD:"+filepath.ToSlash(rel))
 		if gerr != nil {
 			return nil, conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)

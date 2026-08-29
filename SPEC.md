@@ -96,9 +96,9 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     payload on every terminal conflict. Memo notes are silent under the
     daybook profile. Journal files are
     append-only: generic `put` updates under the journal prefix abort
-    `journal_immutable` (ADR-0002/0003). For `vcs=git`, the kernel
-    never writes, scans, stashes, or commits the registered checkout.
-    The sole publisher is a persistent clone under
+    `journal_immutable` (ADR-0002/0003). For `vcs=daybook`, the kernel
+    never writes, scans, stashes, or commits the registered human
+    checkout. The sole publisher is a persistent clone under
     `<config>/exocortex/writers/<name>`, provisioned from the checkout's
     origin and fail-closed (`writer_unavailable`) if origin or clone
     setup fails. Preflight, refresh, CAS, and the VCS tail all run on
@@ -106,7 +106,7 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     QMD collection named for the cortex must point at that tree (or, for
     `caller`/`none`, at the registered path). `sync` owns index and
     embed freshness. `get`/`log`/`lint` read the writer once it exists
-    (`git show HEAD:<path>` for git cortices). Registered-checkout dirt is
+    (`git show HEAD:<path>` for daybook). Human-checkout dirt is
     invisible to the kernel.
   - `sync [--cortex <name>]` — acquire the same per-cortex write lock
     as `put`, snapshot dirty markers, require `qmd collection show`
@@ -140,7 +140,7 @@ Write path mechanics:
   arrives via `--from`/`content`. Concurrency stays structural for EVERY
   cortex: the CAS lock lives in the generic put pipeline, not in any VCS
   driver — `caller` and `none` cortices promise the same expected-revision
-  guarantees as `git`.
+  guarantees as `daybook`.
 - Idempotence: a validated payload byte-equal to stored content exits
   success as a NO-OP before provenance stamping — no write, no commit — so
   identical retries are free. Conflicts return as data: create finding an
@@ -154,7 +154,7 @@ acquired BEFORE any state is read and released only at the end. The VCS
 policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
 
 1. lock;
-2. pre-flight — `git` only, on the writer clone, all three aborts
+2. pre-flight — `daybook` only, on the writer clone, all three aborts
    conflict-as-data, run BEFORE refresh. There is no
    `--autostash`: the writer is kernel-owned and must stay clean, so
    refresh never rebases an unpublished candidate. The create-mode
@@ -171,8 +171,8 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
      (`foreign_unstaged_state`) — untracked files are allowed; modified
      or deleted tracked files belong to another worker, and the step-8
      unwind must never be able to reach them;
-3. refresh — `git`: `git fetch`, then require `HEAD` to be an ancestor
-   of `@{u}` (equal or behind), then `git merge --ff-only @{u}`.
+3. refresh — `daybook`: `git fetch`, then require `HEAD` to be an
+   ancestor of `@{u}` (equal or behind), then `git merge --ff-only @{u}`.
    Ahead or diverged (unpublished candidate after `publish_unknown`)
    is `refresh_failed`; nothing is written and the candidate is not
    rebased. Then REPEAT step 2's scan against post-refresh state;
@@ -189,7 +189,7 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
    match releases the lock and exits success — no stamp, no write, no
    commit;
 7. stamp provenance, atomic write (temp file + rename);
-8. VCS tail — `git`: record `base` = HEAD sha (post-refresh), stage
+8. VCS tail — `daybook`: record `base` = HEAD sha (post-refresh), stage
    touched paths, path-limited commit (`git commit -- <touched paths>`),
    then push. Force-push, merge commits, and rebase of the candidate
    commit are forbidden. A push failure is classified before any data
@@ -251,10 +251,9 @@ single-host by contract.
 
 ### VCS lifecycle (per-cortex policy)
 
-Generic `put` never hard-codes version control or a cortex identity. The
-registry entry's `vcs` policy selects steps 2, 3, and 8 above: `git`
-(kernel-owned publisher clone and full tail), `caller` (kernel writes; caller
-commits), or `none` (plain directory writes).
+Generic `put` never hard-codes version control. The registry entry's `vcs`
+policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
+`caller` (kernel writes; caller commits), `none` (plain directory writes).
 
 ### Pinned interfaces
 
@@ -276,11 +275,10 @@ commits), or `none` (plain directory writes).
   ```
 
 - **Cortex registry** — `${XDG_CONFIG_HOME:-~/.config}/exocortex/cortices.json`:
-  `[{"name","path","vcs":"git"|"caller"|"none",
+  `[{"name","path","vcs":"daybook"|"caller"|"none",
   "profile":"…","journal_prefix":"…"}]`; `register` is the only writer.
-  Legacy stored `vcs:"daybook"` entries normalize to `git` on load; new
-  registrations accept and emit only `git`. `journal_prefix` (optional,
-  default `journal`) is where `note` files land.
+  `journal_prefix` (optional, default `journal`) is where `note` files
+  land.
 - **Conflict payloads** — nonzero exit + JSON body:
 
   ```json
@@ -334,7 +332,7 @@ commits), or `none` (plain directory writes).
 
 1. Bare put on a path that exists in HEAD (the committed snapshot)
    exits nonzero with `exists` and a hint directing get → `--expects`.
-   Existence is `git show HEAD:<path>` for git cortices, not a working-tree
+   Existence is `git show HEAD:<path>` for daybook, not a working-tree
    stat: an untracked leftover in the writer clone is crash residue and
    create overwrites it. There is no intent inference and no
    `missing_expects` code (operator decision 2026-08-21): overwriting a
@@ -350,9 +348,8 @@ commits), or `none` (plain directory writes).
 5. Dirty destination: with an unstaged local edit to the target file, put
    aborts `dirty_destination` and the edit survives byte-for-byte; same for
    a staged-only change.
-6. `git` driver put under a non-Daybook validation profile: exactly one new
-   commit touching only the target path, pushed; second run is a clean no-op
-   only when content and revision match.
+6. Daybook driver put: exactly one new commit touching only the target path,
+   pushed; second run is a clean no-op only when content and revision match.
 7. MCP face round-trip: get → put(expectedRevision) → get bumps revision and
    preserves payload byte-for-byte apart from the provenance stamp.
 8. Profile conformance: a note whose frontmatter is parseable YAML with a
