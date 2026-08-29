@@ -38,7 +38,7 @@ if [ "$cmd" = "collection" ]; then
 fi
 
 if [ "$cmd" = "update" ] || [ "$cmd" = "embed" ]; then
-  lock="$XDG_CONFIG_HOME/exocortex/locks/hosta.lock"
+  lock="$EXOCORTEX_TEST_LOCK"
   if [ -n "$XDG_CONFIG_HOME" ] && [ -e "$lock" ]; then
     if ! command -v flock >/dev/null 2>&1; then
       echo "flock_missing $cmd" >> "$log"
@@ -165,7 +165,7 @@ func TestSyncPreservesConcurrentDirtyMarkerArrivals(t *testing.T) {
 	syncHook = func(cortexName string) {
 		time.Sleep(10 * time.Millisecond)
 		resBCommit = "commit-b-simulated-concurrent-arrival"
-		_ = markDirty(cortexName, resBCommit)
+		_ = markDirty(f.cs[0].Identity(), cortexName, resBCommit)
 	}
 	defer func() { syncHook = nil }()
 	alignMockCollection(t, f.cs[0])
@@ -240,7 +240,7 @@ func TestSyncUpdateFailureOmitsIndexedCommit(t *testing.T) {
 
 func TestMalformedDirtyMarkerFailsStateFailedAndRetainsMarkers(t *testing.T) {
 	f := newFixture(t)
-	dDir, err := dirtyMarkerDir("hosta")
+	dDir, err := dirtyMarkerDir(f.cs[0].Identity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestSyncContinuesAfterSiblingFailure(t *testing.T) {
 	if _, conf := f.put("hostb", "notes/ok.md", mkNote("note", "sibling survives")); conf != nil {
 		t.Fatal(conf)
 	}
-	dDir, err := dirtyMarkerDir("hosta")
+	dDir, err := dirtyMarkerDir(f.cs[0].Identity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,17 +416,17 @@ func TestStatusDoesNotCreateStateOrWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(cfg, "state", "hosta")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(cfg, "state", f.cs[0].Identity())); !os.IsNotExist(err) {
 		t.Fatalf("status created state dir: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(cfg, "writers", "hosta")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(cfg, "writers", f.cs[0].Identity())); !os.IsNotExist(err) {
 		t.Fatalf("status created writer clone: %v", err)
 	}
 }
 
 func TestUnreadableDirtyPathFailsStateFailed(t *testing.T) {
 	f := newFixture(t)
-	sDir, err := cortexStateDir("hosta")
+	sDir, err := cortexStateDir(f.cs[0].Identity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,6 +447,7 @@ func TestSyncHoldsWriteLock(t *testing.T) {
 	f := newFixture(t)
 	logFile := filepath.Join(t.TempDir(), "qmd-calls.log")
 	setupSyncMockQMD(t, logFile, "")
+	t.Setenv("EXOCORTEX_TEST_LOCK", filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "exocortex", "locks", f.cs[0].Identity()+".lock"))
 	if _, conf := f.put("hosta", "notes/lock-a.md", mkNote("note", "lock a")); conf != nil {
 		t.Fatal(conf)
 	}
@@ -581,7 +582,7 @@ func TestSyncCleanupFailureRecordsError(t *testing.T) {
 		t.Fatal(conf)
 	}
 	alignMockCollection(t, f.cs[0])
-	dDir, err := dirtyMarkerPath("hosta")
+	dDir, err := dirtyMarkerPath(f.cs[0].Identity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -653,7 +654,7 @@ func TestDirtyMarkerFailedWarningOnUnwritableState(t *testing.T) {
 
 func TestSyncClearsStaleErrorWhenClean(t *testing.T) {
 	f := newFixture(t)
-	writeSyncError("hosta", "deadbeef", "cleanup", "stale leftover")
+	writeSyncError(f.cs[0].Identity(), "hosta", "deadbeef", "cleanup", "stale leftover")
 	st, _ := Status(f.cs, "hosta")
 	if !strings.Contains(st[0].LastSyncError, "stale leftover") {
 		t.Fatalf("precondition: leftover error missing: %+v", st[0])

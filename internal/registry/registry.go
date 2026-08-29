@@ -2,6 +2,7 @@
 package registry
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,8 +21,18 @@ type Cortex struct {
 	JournalPrefix string `json:"journal_prefix,omitempty"`
 }
 
+// Identity is the stable key for a cortex's persistent operational state.
+func (c Cortex) Identity() string {
+	root := filepath.Clean(c.Path)
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	sum := sha256.Sum256([]byte(root))
+	return fmt.Sprintf("%s-%x", c.Name, sum[:8])
+}
+
 // Load combines the user registry with directory-scoped registries that apply
-// to cwd. Duplicate cortex names across scopes fail closed.
+// to cwd. Deeper scopes replace same-named entries.
 func Load(userPath, cwd string) ([]Cortex, error) {
 	cs, err := LoadFile(userPath, filepath.Dir(userPath))
 	if err != nil {
@@ -78,16 +89,17 @@ func LoadFile(path, base string) ([]Cortex, error) {
 	return cs, nil
 }
 
-func merge(base, overlay []Cortex, source string) ([]Cortex, error) {
-	names := make(map[string]struct{}, len(base)+len(overlay))
+func merge(base, overlay []Cortex, _ string) ([]Cortex, error) {
+	index := make(map[string]int, len(base)+len(overlay))
 	for i := range base {
-		names[base[i].Name] = struct{}{}
+		index[base[i].Name] = i
 	}
 	for _, c := range overlay {
-		if _, ok := names[c.Name]; ok {
-			return nil, fmt.Errorf("registry %s conflicts on cortex name %q", source, c.Name)
+		if i, ok := index[c.Name]; ok {
+			base[i] = c
+			continue
 		}
-		names[c.Name] = struct{}{}
+		index[c.Name] = len(base)
 		base = append(base, c)
 	}
 	sort.Slice(base, func(i, j int) bool { return base[i].Name < base[j].Name })

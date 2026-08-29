@@ -149,7 +149,7 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, c := range effective {
+	for _, c := range global {
 		if sameRoot(c.Path, abs) {
 			return nil, conflict("duplicate_path", "register", abs,
 				"pick a new path or use the existing cortex",

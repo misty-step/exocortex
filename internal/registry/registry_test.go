@@ -51,7 +51,7 @@ func TestLoadScopesLocalCorticesToWorkingTree(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsSameNamedCortexAcrossScopes(t *testing.T) {
+func TestLoadLetsDeeperScopeReplaceSameNamedCortex(t *testing.T) {
 	base := t.TempDir()
 	userPath := filepath.Join(base, "config", "cortices.json")
 	workspace := filepath.Join(base, "r90")
@@ -63,9 +63,13 @@ func TestLoadRejectsSameNamedCortexAcrossScopes(t *testing.T) {
   {"name":"root","path":"project-root","vcs":"none","profile":"strict"}
 ]`)
 
-	_, err := Load(userPath, project)
-	if err == nil || !strings.Contains(err.Error(), `conflicts on cortex name "root"`) {
-		t.Fatalf("same-name scope conflict=%v", err)
+	cs, err := Load(userPath, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(project, "project-root")
+	if len(cs) != 1 || cs[0].Name != "root" || cs[0].Path != wantPath || cs[0].Profile != "strict" {
+		t.Fatalf("deeper override=%v want root at %q with strict profile", cs, wantPath)
 	}
 }
 

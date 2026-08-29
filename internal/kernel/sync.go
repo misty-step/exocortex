@@ -46,24 +46,24 @@ type StatusResult struct {
 	LastErrorAt   string `json:"last_error_at,omitempty"`
 }
 
-func cortexStatePath(cortexName string) (string, error) {
+func cortexStatePath(stateKey string) (string, error) {
 	cfg, err := ConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(cfg, "state", cortexName), nil
+	return filepath.Join(cfg, "state", stateKey), nil
 }
 
-func dirtyMarkerPath(cortexName string) (string, error) {
-	sDir, err := cortexStatePath(cortexName)
+func dirtyMarkerPath(stateKey string) (string, error) {
+	sDir, err := cortexStatePath(stateKey)
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(sDir, "dirty"), nil
 }
 
-func cortexStateDir(cortexName string) (string, error) {
-	dir, err := cortexStatePath(cortexName)
+func cortexStateDir(stateKey string) (string, error) {
+	dir, err := cortexStatePath(stateKey)
 	if err != nil {
 		return "", err
 	}
@@ -73,8 +73,8 @@ func cortexStateDir(cortexName string) (string, error) {
 	return dir, nil
 }
 
-func dirtyMarkerDir(cortexName string) (string, error) {
-	dir, err := dirtyMarkerPath(cortexName)
+func dirtyMarkerDir(stateKey string) (string, error) {
+	dir, err := dirtyMarkerPath(stateKey)
 	if err != nil {
 		return "", err
 	}
@@ -84,11 +84,8 @@ func dirtyMarkerDir(cortexName string) (string, error) {
 	return dir, nil
 }
 
-// markDirty atomically writes an immutable marker after a durable write.
-// commit is the sync identity: a git SHA when one exists, otherwise the
-// content revision. Empty identities are rejected by syncOne.
-func markDirty(cortexName, commit string) error {
-	dir, err := dirtyMarkerDir(cortexName)
+func markDirty(stateKey, cortexName, commit string) error {
+	dir, err := dirtyMarkerDir(stateKey)
 	if err != nil {
 		return err
 	}
@@ -117,7 +114,6 @@ func sameRoot(a, b string) bool {
 	return a == b
 }
 
-// syncHook is an optional test hook called right after qmd embed and before deleting snapshot markers.
 var syncHook func(cortexName string)
 
 // Sync executes qmd update and qmd embed under the same per-cortex
@@ -125,16 +121,16 @@ var syncHook func(cortexName string)
 // snapshotted dirty markers. It fail-closes if the QMD collection
 // does not point at the indexed root.
 
-func writeSyncError(name, commit, stage, detail string) {
-	if _, err := cortexStateDir(name); err != nil {
+func writeSyncError(stateKey, cortexName, commit, stage, detail string) {
+	if _, err := cortexStateDir(stateKey); err != nil {
 		return
 	}
-	sDir, err := cortexStatePath(name)
+	sDir, err := cortexStatePath(stateKey)
 	if err != nil {
 		return
 	}
 	errData, _ := json.MarshalIndent(map[string]any{
-		"cortex": name,
+		"cortex": cortexName,
 		"commit": commit,
 		"stage":  stage,
 		"error":  detail,
@@ -185,21 +181,22 @@ func Sync(ctx context.Context, cs []Cortex, nameFlag string) ([]SyncResult, *Con
 }
 
 func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
-	lock, lerr := acquireLock(c.Name)
+	stateKey := c.Identity()
+	lock, lerr := acquireLock(stateKey)
 	if lerr != nil {
 		return nil, conflict("lock_failed", "sync", c.Name, "fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
 	}
 	defer lock.release()
 
-	dDir, err := dirtyMarkerPath(c.Name)
+	dDir, err := dirtyMarkerPath(stateKey)
 	if err != nil {
 		return nil, conflict("state_failed", "sync", c.Name, "fix state directory access and retry", map[string]any{"detail": err.Error()})
 	}
-	sDir, _ := cortexStatePath(c.Name)
+	sDir, _ := cortexStatePath(stateKey)
 	errorPath := filepath.Join(sDir, "sync_error.json")
 	syncedPath := filepath.Join(sDir, "synced.json")
 
-	snapshotFiles, newestCommit, empty, conf := snapshotDirtyMarkers(c.Name, dDir, errorPath)
+	snapshotFiles, newestCommit, empty, conf := snapshotDirtyMarkers(stateKey, c.Name, dDir, errorPath)
 	if conf != nil {
 		return nil, conf
 	}
@@ -209,7 +206,7 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 
 	out := &SyncResult{Cortex: c.Name}
 	recordError := func(stage, detail string) {
-		writeSyncError(c.Name, newestCommit, stage, detail)
+		writeSyncError(stateKey, c.Name, newestCommit, stage, detail)
 	}
 	if conf = verifyIndexedRoot(ctx, c, out, recordError); conf != nil {
 		return out, conf
@@ -220,10 +217,10 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 	if syncHook != nil {
 		syncHook(c.Name)
 	}
-	return persistSyncedState(c, snapshotFiles, newestCommit, dDir, errorPath, syncedPath, out)
+	return persistSyncedState(c, stateKey, snapshotFiles, newestCommit, dDir, errorPath, syncedPath, out)
 }
 
-func snapshotDirtyMarkers(name, dDir, errorPath string) (files []string, newest string, empty bool, conf *Conflict) {
+func snapshotDirtyMarkers(stateKey, name, dDir, errorPath string) (files []string, newest string, empty bool, conf *Conflict) {
 	entries, rerr := os.ReadDir(dDir)
 	if errors.Is(rerr, fs.ErrNotExist) || (rerr == nil && len(entries) == 0) {
 		if err := os.Remove(errorPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -244,14 +241,14 @@ func snapshotDirtyMarkers(name, dDir, errorPath string) (files []string, newest 
 		files = append(files, entry.Name())
 		b, err := os.ReadFile(filepath.Join(dDir, entry.Name()))
 		if err != nil {
-			writeSyncError(name, newest, "marker", err.Error())
+			writeSyncError(stateKey, name, newest, "marker", err.Error())
 			return nil, "", false, conflict("state_failed", "sync", name,
 				"failed to read dirty marker file; markers retained",
 				map[string]any{"file": entry.Name(), "detail": err.Error()})
 		}
 		var m SyncMarker
 		if err := json.Unmarshal(b, &m); err != nil || m.Commit == "" {
-			writeSyncError(name, newest, "marker", "malformed dirty marker file")
+			writeSyncError(stateKey, name, newest, "marker", "malformed dirty marker file")
 			return nil, "", false, conflict("state_failed", "sync", name,
 				"malformed dirty marker file; markers retained",
 				map[string]any{"file": entry.Name()})
@@ -309,7 +306,7 @@ func runQmdSync(ctx context.Context, c Cortex, newestCommit string, out *SyncRes
 	return nil
 }
 
-func persistSyncedState(c Cortex, snapshotFiles []string, newestCommit, dDir, errorPath, syncedPath string, out *SyncResult) (*SyncResult, *Conflict) {
+func persistSyncedState(c Cortex, stateKey string, snapshotFiles []string, newestCommit, dDir, errorPath, syncedPath string, out *SyncResult) (*SyncResult, *Conflict) {
 	syncedMarker := SyncMarker{
 		Cortex: c.Name,
 		Commit: newestCommit,
@@ -319,22 +316,22 @@ func persistSyncedState(c Cortex, snapshotFiles []string, newestCommit, dDir, er
 	if err != nil {
 		return out, conflict("state_failed", "sync", c.Name, "failed to marshal sync state", map[string]any{"detail": err.Error()})
 	}
-	if _, derr := cortexStateDir(c.Name); derr != nil {
+	if _, derr := cortexStateDir(stateKey); derr != nil {
 		return out, conflict("state_failed", "sync", c.Name, "failed to write synced state; markers retained", map[string]any{"detail": derr.Error()})
 	}
 	if err := atomicWrite(syncedPath, syncedData); err != nil {
-		writeSyncError(c.Name, newestCommit, "synced", err.Error())
+		writeSyncError(stateKey, c.Name, newestCommit, "synced", err.Error())
 		return out, conflict("state_failed", "sync", c.Name, "failed to write synced state; markers retained", map[string]any{"detail": err.Error()})
 	}
 	for _, fName := range snapshotFiles {
 		if err := os.Remove(filepath.Join(dDir, fName)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			writeSyncError(c.Name, newestCommit, "cleanup", err.Error())
+			writeSyncError(stateKey, c.Name, newestCommit, "cleanup", err.Error())
 			return out, conflict("state_failed", "sync", c.Name, "index advanced but snapshotted markers were not deleted; inspect state and retry", map[string]any{"detail": err.Error()})
 		}
 	}
 	remaining, rerr := os.ReadDir(dDir)
 	if rerr != nil {
-		writeSyncError(c.Name, newestCommit, "cleanup", rerr.Error())
+		writeSyncError(stateKey, c.Name, newestCommit, "cleanup", rerr.Error())
 		return out, conflict("state_failed", "sync", c.Name, "index advanced but remaining dirty markers could not be read; inspect state and retry", map[string]any{"detail": rerr.Error()})
 	}
 	if err := os.Remove(errorPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -370,7 +367,7 @@ func Status(cs []Cortex, nameFlag string) ([]StatusResult, *Conflict) {
 
 func statusOne(c Cortex) (StatusResult, *Conflict) {
 	st := StatusResult{Cortex: c.Name}
-	sDir, err := cortexStatePath(c.Name)
+	sDir, err := cortexStatePath(c.Identity())
 	if err != nil {
 		return st, nil
 	}
