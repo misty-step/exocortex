@@ -95,6 +95,40 @@ func TestSetProfileCAS(t *testing.T) {
 	}
 }
 
+func TestSetProfileDoesNotPromoteScopedCortex(t *testing.T) {
+	config := testConfigEnv(t)
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	localDir := filepath.Join(workspace, ".exocortex")
+	if err := os.MkdirAll(localDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := `[{"name":"local","path":"../root","vcs":"none","profile":"daybook"}]`
+	if err := os.WriteFile(filepath.Join(localDir, "cortices.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+
+	_, err = SetProfile("local", "okf", "daybook")
+	conf, ok := err.(*Conflict)
+	if !ok || conf.Code != "not_found" {
+		t.Fatalf("scoped profile mutation = %v (%T), want not_found", err, err)
+	}
+	if _, err := os.Stat(filepath.Join(config, "exocortex", "cortices.json")); !os.IsNotExist(err) {
+		t.Fatalf("scoped cortex was copied into global registry: %v", err)
+	}
+}
+
 func TestResolve(t *testing.T) {
 	testConfigEnv(t)
 	rootA := t.TempDir()

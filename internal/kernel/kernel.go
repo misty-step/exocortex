@@ -22,7 +22,6 @@ type Cortex = cortexregistry.Cortex
 
 var (
 	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-	validVCS  = map[string]bool{"daybook": true, "caller": true, "none": true}
 	profiles  = map[string]bool{"daybook": true, "strict": true, "okf": true}
 	dupSuffix = ".tmp-exocortex"
 )
@@ -109,13 +108,6 @@ func saveRegistry(cs []Cortex) error {
 
 // Register binds a cortex into the registry.
 func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
-	if err := checkRegisterName(name); err != nil {
-		return nil, err
-	}
-	abs, err := absRegisterPath(name, path)
-	if err != nil {
-		return nil, err
-	}
 	regLock, lerr := acquireLock("registry")
 	if lerr != nil {
 		return nil, conflict("registration_failed", "register", name,
@@ -141,41 +133,38 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 				map[string]any{"path": c.Path})
 		}
 	}
-	abs, err = statRegisterDir(abs)
+	candidate, err := cortexregistry.Normalize(Cortex{
+		Name: name, Path: path, VCS: vcs, Profile: profile, JournalPrefix: journalPrefix,
+	}, "")
 	if err != nil {
-		return nil, err
-	}
-	vcs, profile, err = registerPolicy(name, abs, vcs, profile)
-	if err != nil {
-		return nil, err
+		return nil, conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": err.Error()})
 	}
 	for _, c := range effective {
-		if sameRoot(c.Path, abs) {
-			return nil, conflict("duplicate_path", "register", abs,
+		if sameRoot(c.Path, candidate.Path) {
+			return nil, conflict("duplicate_path", "register", candidate.Path,
 				"pick a new path or use the existing cortex",
 				map[string]any{"name": c.Name})
 		}
 	}
-	jp := filepath.ToSlash(filepath.Clean(journalPrefix))
-	if jp == "." {
-		jp = "journal"
-	}
-	c := &Cortex{Name: name, Path: abs, VCS: vcs, Profile: profile, JournalPrefix: jp}
-	global = append(global, *c)
+	global = append(global, candidate)
 	sort.Slice(global, func(i, j int) bool { return global[i].Name < global[j].Name })
 	if err := saveRegistry(global); err != nil {
 		return nil, conflict("registration_failed", "register", name,
 			"fix the name (lowercase slug), path, vcs, or profile and retry",
 			map[string]any{"detail": err.Error()})
 	}
-	return c, nil
+	return &candidate, nil
 }
 
-// SetProfile changes one cortex's validation profile. from must match
+// SetProfile changes one global cortex's validation profile. from must match
 // the stored profile. Unspecified fields stay untouched.
 func SetProfile(name, to, from string) (*Cortex, error) {
-	if err := checkRegisterName(name); err != nil {
-		return nil, err
+	if !nameRe.MatchString(name) {
+		return nil, conflict("registration_failed", "set-profile", name,
+			"fix the name (lowercase slug) and retry",
+			map[string]any{"detail": fmt.Sprintf("cortex name %q must match %s", name, nameRe)})
 	}
 	if from == "" {
 		return nil, conflict("invalid_input", "set-profile", name,
@@ -183,7 +172,7 @@ func SetProfile(name, to, from string) (*Cortex, error) {
 	}
 	if !profiles[to] {
 		return nil, conflict("registration_failed", "set-profile", name,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			"pass daybook, strict, or okf",
 			map[string]any{"detail": fmt.Sprintf("profile %q must be daybook, strict, or okf", to)})
 	}
 	regLock, lerr := acquireLock("registry")
@@ -192,11 +181,10 @@ func SetProfile(name, to, from string) (*Cortex, error) {
 			"fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
 	}
 	defer regLock.release()
-	cs, err := LoadRegistry()
+	cs, err := loadGlobalRegistry()
 	if err != nil {
 		return nil, conflict("registration_failed", "set-profile", name,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": err.Error()})
+			"repair the global registry and retry", map[string]any{"detail": err.Error()})
 	}
 	idx := -1
 	for i, c := range cs {
@@ -207,7 +195,7 @@ func SetProfile(name, to, from string) (*Cortex, error) {
 	}
 	if idx < 0 {
 		return nil, conflict("not_found", "set-profile", name,
-			"register the cortex first", nil)
+			"register the cortex globally first", nil)
 	}
 	if cs[idx].Profile != from {
 		return nil, conflict("profile_conflict", "set-profile", name,
@@ -220,72 +208,9 @@ func SetProfile(name, to, from string) (*Cortex, error) {
 	cs[idx].Profile = to
 	if err := saveRegistry(cs); err != nil {
 		return nil, conflict("registration_failed", "set-profile", name,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": err.Error()})
+			"fix registry write access and retry", map[string]any{"detail": err.Error()})
 	}
 	return &cs[idx], nil
-}
-
-func checkRegisterName(name string) error {
-	if !nameRe.MatchString(name) {
-		return conflict("registration_failed", "register", name,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": fmt.Sprintf("cortex name %q must match %s", name, nameRe)})
-	}
-	return nil
-}
-
-func absRegisterPath(name, path string) (string, error) {
-	if path == "" {
-		return "", conflict("registration_failed", "register", name,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": "path is required"})
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", conflict("registration_failed", "register", path,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": err.Error()})
-	}
-	return abs, nil
-}
-
-func statRegisterDir(abs string) (string, error) {
-	st, err := os.Stat(abs)
-	if err != nil {
-		return "", conflict("registration_failed", "register", abs,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": fmt.Sprintf("cortex path %s: %v", abs, err)})
-	}
-	if !st.IsDir() {
-		return "", conflict("registration_failed", "register", abs,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": fmt.Sprintf("cortex path %s is not a directory", abs)})
-	}
-	return canon(abs), nil
-}
-
-func registerPolicy(name, abs, vcs, profile string) (string, string, error) {
-	if vcs == "" {
-		vcs = "none"
-		if _, err := os.Stat(filepath.Join(abs, ".git")); err == nil {
-			vcs = "daybook"
-		}
-	}
-	if !validVCS[vcs] {
-		return "", "", conflict("registration_failed", "register", name,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": fmt.Sprintf("vcs %q must be daybook, caller, or none", vcs)})
-	}
-	if profile == "" {
-		profile = "daybook"
-	}
-	if !profiles[profile] {
-		return "", "", conflict("registration_failed", "register", name,
-			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": fmt.Sprintf("profile %q must be daybook, strict, or okf", profile)})
-	}
-	return vcs, profile, nil
 }
 
 // Resolve maps a user-supplied path onto a cortex and a cortex-relative
