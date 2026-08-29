@@ -1,13 +1,17 @@
 name: Landmark Release
 
 on:
-  push:
-    branches:
-      - master
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub Release tag to synthesize
+        required: true
+        type: string
 
 concurrency:
-  group: landmark-release-${{ github.ref }}
+  group: landmark-release-${{ github.event.release.tag_name || inputs.release_tag }}
   cancel-in-progress: false
 
 permissions:
@@ -23,15 +27,17 @@ jobs:
       - name: Checkout repository history
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
           fetch-depth: 0
           persist-credentials: false
       - name: Run Landmark
         uses: misty-step/landmark@d3b07452500e6cdf3ddead1c11ba5584287a80c9
         with:
-          mode: full
+          mode: synthesis-only
+          release-tag: ${{ github.event.release.tag_name || inputs.release_tag }}
           healthcheck: "true"
           github-token: ${{ github.token }}
           llm-api-key: ${{ secrets.OPENROUTER_API_KEY }}
           node-version: "24"
           synthesis: "true"
-          synthesis-required: "false"
+          synthesis-required: "true"
