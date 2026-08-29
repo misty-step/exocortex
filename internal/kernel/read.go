@@ -27,26 +27,28 @@ func Get(cs []Cortex, nameFlag, p string) (*GetResult, *Conflict) {
 	if err != nil {
 		return nil, conflict("resolve_failed", "get", p, "use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
 	}
-	root, rerr := effectiveRoot(c)
-	if rerr != nil {
-		return nil, conflict("cortex_unavailable", "get", p, "publisher repository is unavailable; check remote access", map[string]any{"detail": rerr.Error()})
-	}
-	if c.VCS == "daybook" {
-		raw, gerr := git(root, "show", "HEAD:"+filepath.ToSlash(rel))
-		if gerr != nil {
-			return nil, conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
+	var out *GetResult
+	conf := withFreshPublisher(c, "get", rel, func(root string) *Conflict {
+		if c.VCS == "daybook" {
+			raw, gerr := git(root, "show", "HEAD:"+filepath.ToSlash(rel))
+			if gerr != nil {
+				return conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
+			}
+			out = getResult(c, rel, []byte(raw))
+			return nil
 		}
-		return getResult(c, rel, []byte(raw)), nil
-	}
-	abs := filepath.Join(root, rel)
-	raw, serr := os.ReadFile(abs)
-	if errors.Is(serr, fs.ErrNotExist) {
-		return nil, conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
-	}
-	if serr != nil {
-		return nil, conflict("read_failed", "get", rel, "fix filesystem access and retry", map[string]any{"detail": serr.Error()})
-	}
-	return getResult(c, rel, raw), nil
+		abs := filepath.Join(root, rel)
+		raw, serr := os.ReadFile(abs)
+		if errors.Is(serr, fs.ErrNotExist) {
+			return conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
+		}
+		if serr != nil {
+			return conflict("read_failed", "get", rel, "fix filesystem access and retry", map[string]any{"detail": serr.Error()})
+		}
+		out = getResult(c, rel, raw)
+		return nil
+	})
+	return out, conf
 }
 
 func getResult(c *Cortex, rel string, raw []byte) *GetResult {
@@ -77,29 +79,28 @@ func Log(cs []Cortex, nameFlag, p string, limit int) ([]LogEntry, *Conflict) {
 	if err != nil {
 		return nil, conflict("resolve_failed", "log", p, "use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
 	}
-	root, rerr := effectiveRoot(c)
-	if rerr != nil {
-		return nil, conflict("cortex_unavailable", "log", p, "publisher repository is unavailable; check remote access", map[string]any{"detail": rerr.Error()})
-	}
-	out, gerr := git(root, "log", fmt.Sprintf("-n%d", limit),
-		"--format=%H%x1f%an%x1f%aI%x1f%s", "--", filepath.FromSlash(rel))
-	if gerr != nil {
-		return nil, conflict("log_unavailable", "log", rel,
-			"lineage requires a git-backed cortex; check that the cortex path is a repository",
-			map[string]any{"detail": gerr.(*GitError).Stderr})
-	}
 	var entries []LogEntry
-	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-		if line == "" {
-			continue
+	conf := withFreshPublisher(c, "log", rel, func(root string) *Conflict {
+		out, gerr := git(root, "log", fmt.Sprintf("-n%d", limit),
+			"--format=%H%x1f%an%x1f%aI%x1f%s", "--", filepath.FromSlash(rel))
+		if gerr != nil {
+			return conflict("log_unavailable", "log", rel,
+				"lineage requires a git-backed cortex; check that the cortex path is a repository",
+				map[string]any{"detail": gerr.(*GitError).Stderr})
 		}
-		parts := strings.SplitN(line, "\x1f", 4)
-		if len(parts) != 4 {
-			continue
+		for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+			if line == "" {
+				continue
+			}
+			parts := strings.SplitN(line, "\x1f", 4)
+			if len(parts) != 4 {
+				continue
+			}
+			entries = append(entries, LogEntry{SHA: parts[0], Author: parts[1], Date: parts[2], Subject: parts[3]})
 		}
-		entries = append(entries, LogEntry{SHA: parts[0], Author: parts[1], Date: parts[2], Subject: parts[3]})
-	}
-	return entries, nil
+		return nil
+	})
+	return entries, conf
 }
 
 // LintResult reports tiered findings for one note or a whole cortex.
@@ -142,14 +143,12 @@ func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 		}
 		res.Findings = append(res.Findings, findings...)
 	}
-	root, rerr := effectiveRoot(c)
-	if rerr != nil {
-		return nil, conflict("cortex_unavailable", "lint", p, "publisher repository is unavailable; check remote access", map[string]any{"detail": rerr.Error()})
-	}
-	if rel != "" {
-		findings, verr := lintOne(c.Profile, filepath.Join(root, rel))
-		add(rel, findings, verr)
-	} else {
+	conf := withFreshPublisher(c, "lint", rel, func(root string) *Conflict {
+		if rel != "" {
+			findings, verr := lintOne(c.Profile, filepath.Join(root, rel))
+			add(rel, findings, verr)
+			return nil
+		}
 		werr := filepath.WalkDir(root, func(path string, d fs.DirEntry, werr error) error {
 			if werr != nil {
 				return werr
@@ -169,8 +168,12 @@ func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 			return nil
 		})
 		if werr != nil {
-			return nil, conflict("walk_failed", "lint", "", "fix filesystem access and retry", map[string]any{"detail": werr.Error()})
+			return conflict("walk_failed", "lint", "", "fix filesystem access and retry", map[string]any{"detail": werr.Error()})
 		}
+		return nil
+	})
+	if conf != nil {
+		return nil, conf
 	}
 	for _, f := range res.Findings {
 		if f.Level == "error" {
@@ -188,6 +191,41 @@ func lintOne(profile, abs string) ([]fm.Finding, error) {
 		return nil, err
 	}
 	return fm.Validate(profile, fm.ParseDocument(raw))
+}
+
+// withFreshPublisher runs fn against the publisher tree. For daybook it
+// takes the per-cortex lock, provisions if needed, fast-forwards to
+// origin when upstream exists, and holds the lock for the whole read.
+// ensureWriter stays provisioning-only and does not lock. Dirty
+// worktrees are left in place; Get/Log use git show HEAD.
+func withFreshPublisher(c *Cortex, op, rel string, fn func(root string) *Conflict) *Conflict {
+	if c.VCS != "daybook" {
+		root, err := effectiveRoot(c)
+		if err != nil {
+			return conflict("cortex_unavailable", op, rel, "publisher repository is unavailable; check remote access", map[string]any{"detail": err.Error()})
+		}
+		return fn(root)
+	}
+	lock, conf := lockNamed(c.Name, op, rel)
+	if conf != nil {
+		return conf
+	}
+	defer lock.release()
+	root, err := effectiveRoot(c)
+	if err != nil {
+		return conflict("cortex_unavailable", op, rel, "publisher repository is unavailable; check remote access", map[string]any{"detail": err.Error()})
+	}
+	if err := refreshPublisher(root); err != nil {
+		return conflict("cortex_unavailable", op, rel, "publisher repository is unavailable; check remote access", map[string]any{"detail": err.Error()})
+	}
+	return fn(root)
+}
+
+func refreshPublisher(w string) error {
+	if !hasUpstream(w) {
+		return nil
+	}
+	return ffToUpstream(w)
 }
 
 // Revision is the lowercase hex sha256 of a note's exact file bytes —
