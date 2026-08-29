@@ -15,6 +15,9 @@ func TestRegisterDoesNotPersistInheritedCortex(t *testing.T) {
 	if err := os.MkdirAll(localConfigDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(workspace, "root"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	localConfig := `[{"name":"root","path":"root","vcs":"none","profile":"daybook"}]`
 	if err := os.WriteFile(filepath.Join(localConfigDir, "cortices.json"), []byte(localConfig), 0o644); err != nil {
 		t.Fatal(err)

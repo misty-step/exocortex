@@ -284,11 +284,13 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
   "profile":"…","journal_prefix":"…"}]`. `register` writes only this
   registry. For directory-scoped cortices, `LoadRegistry` also reads every
   `.exocortex/cortices.json` from the filesystem root through the current
-  working directory. Those files augment the user registry. Duplicate names
-  within one file or across scopes fail closed so one name retains one writer
-  and lock identity. Relative `path` values resolve from the directory that
-  owns `.exocortex`. `journal_prefix` (optional, default
-  `journal`) is where `note` files land.
+  working directory. Those files augment the user registry. Every registry
+  entry receives the same name, directory, VCS, and profile validation and
+  defaults as `register`; unknown JSON fields fail closed. Duplicate names or
+  canonical cortex roots within one file or across scopes fail closed so one
+  corpus retains one writer and lock identity. Relative `path` values resolve
+  from the directory that owns `.exocortex`. `journal_prefix` (optional,
+  default `journal`) is where `note` files land.
 - **Conflict payloads** — nonzero exit + JSON body:
 
   ```json
