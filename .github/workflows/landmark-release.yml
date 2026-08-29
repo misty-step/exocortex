@@ -31,6 +31,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Run Landmark
+        id: landmark
         uses: misty-step/landmark@d3b07452500e6cdf3ddead1c11ba5584287a80c9
         with:
           mode: synthesis-only
@@ -41,3 +42,8 @@ jobs:
           node-version: "24"
           synthesis: "true"
           synthesis-required: "true"
+      - name: Require synthesized release notes
+        if: steps.landmark.outputs.synthesis-quality == 'skipped' || steps.landmark.outputs.release-notes == ''
+        run: |
+          echo "::error::Landmark synthesis quality was skipped or release notes were empty."
+          exit 1
