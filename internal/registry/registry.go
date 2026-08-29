@@ -21,7 +21,7 @@ type Cortex struct {
 }
 
 // Load combines the user registry with directory-scoped registries that apply
-// to cwd. Deeper entries replace same-named entries.
+// to cwd. Duplicate cortex names across scopes fail closed.
 func Load(userPath, cwd string) ([]Cortex, error) {
 	cs, err := LoadFile(userPath, filepath.Dir(userPath))
 	if err != nil {
@@ -44,7 +44,10 @@ func Load(userPath, cwd string) ([]Cortex, error) {
 		if lerr != nil {
 			return nil, lerr
 		}
-		cs = merge(cs, local)
+		cs, lerr = merge(cs, local, localPaths[i])
+		if lerr != nil {
+			return nil, lerr
+		}
 	}
 	return cs, nil
 }
@@ -62,7 +65,12 @@ func LoadFile(path, base string) ([]Cortex, error) {
 	if err := json.Unmarshal(raw, &cs); err != nil {
 		return nil, fmt.Errorf("registry %s is not valid JSON: %w", path, err)
 	}
+	seen := make(map[string]struct{}, len(cs))
 	for i := range cs {
+		if _, ok := seen[cs[i].Name]; ok {
+			return nil, fmt.Errorf("registry %s repeats cortex name %q", path, cs[i].Name)
+		}
+		seen[cs[i].Name] = struct{}{}
 		if cs[i].Path != "" && !filepath.IsAbs(cs[i].Path) {
 			cs[i].Path = filepath.Clean(filepath.Join(base, cs[i].Path))
 		}
@@ -70,19 +78,18 @@ func LoadFile(path, base string) ([]Cortex, error) {
 	return cs, nil
 }
 
-func merge(base, overlay []Cortex) []Cortex {
-	positions := make(map[string]int, len(base)+len(overlay))
+func merge(base, overlay []Cortex, source string) ([]Cortex, error) {
+	names := make(map[string]struct{}, len(base)+len(overlay))
 	for i := range base {
-		positions[base[i].Name] = i
+		names[base[i].Name] = struct{}{}
 	}
 	for _, c := range overlay {
-		if i, ok := positions[c.Name]; ok {
-			base[i] = c
-			continue
+		if _, ok := names[c.Name]; ok {
+			return nil, fmt.Errorf("registry %s conflicts on cortex name %q", source, c.Name)
 		}
-		positions[c.Name] = len(base)
+		names[c.Name] = struct{}{}
 		base = append(base, c)
 	}
 	sort.Slice(base, func(i, j int) bool { return base[i].Name < base[j].Name })
-	return base
+	return base, nil
 }

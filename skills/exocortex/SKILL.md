@@ -41,9 +41,10 @@ exocortex status [--cortex <name>]                   # dirty markers, last synce
 
 The user registry applies everywhere. A `.exocortex/cortices.json` applies
 only from its parent directory or a descendant. Exocortex merges every local
-registry from the filesystem root to the current working directory; deeper
-entries replace same-named entries. Local `path` values may be relative to the
-directory that owns `.exocortex`. `register` writes only the user registry.
+registry from the filesystem root to the current working directory. Duplicate
+cortex names within or across scopes fail closed because the name owns the
+writer and lock identity. Local `path` values may be relative to the directory
+that owns `.exocortex`. `register` writes only the user registry.
 
 ## Write often, write small
 

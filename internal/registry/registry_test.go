@@ -51,7 +51,7 @@ func TestLoadScopesLocalCorticesToWorkingTree(t *testing.T) {
 	}
 }
 
-func TestLoadUsesDeepestSameNamedCortex(t *testing.T) {
+func TestLoadRejectsSameNamedCortexAcrossScopes(t *testing.T) {
 	base := t.TempDir()
 	userPath := filepath.Join(base, "config", "cortices.json")
 	workspace := filepath.Join(base, "r90")
@@ -63,13 +63,23 @@ func TestLoadUsesDeepestSameNamedCortex(t *testing.T) {
   {"name":"root","path":"project-root","vcs":"none","profile":"strict"}
 ]`)
 
-	cs, err := Load(userPath, project)
-	if err != nil || len(cs) != 1 {
-		t.Fatalf("registry=%v err=%v", cs, err)
+	_, err := Load(userPath, project)
+	if err == nil || !strings.Contains(err.Error(), `conflicts on cortex name "root"`) {
+		t.Fatalf("same-name scope conflict=%v", err)
 	}
-	want := filepath.Join(project, "project-root")
-	if cs[0].Path != want || cs[0].Profile != "strict" {
-		t.Fatalf("deep override=%+v want path %q profile strict", cs[0], want)
+}
+
+func TestLoadFileRejectsRepeatedNames(t *testing.T) {
+	base := t.TempDir()
+	configPath := filepath.Join(base, "cortices.json")
+	writeRegistry(t, configPath, `[
+  {"name":"root","path":"a"},
+  {"name":"root","path":"b"}
+]`)
+
+	_, err := LoadFile(configPath, base)
+	if err == nil || !strings.Contains(err.Error(), `repeats cortex name "root"`) {
+		t.Fatalf("same-file duplicate=%v", err)
 	}
 }
 
