@@ -55,7 +55,7 @@ func ValidateIndex(raw []byte, root bool) ([]Finding, error) {
 		return nil, nil
 	}
 	sort.Strings(unknown)
-	return []Finding{warnf("unknown_keys", "root index.md extra keys: %s", strings.Join(unknown, ", "))}, nil
+	return nil, contract(errf("unknown_keys", "root index.md extra keys: %s", strings.Join(unknown, ", ")))
 }
 
 func checkIndexBody(body string) error {
@@ -78,6 +78,9 @@ func checkIndexBody(body string) error {
 			return contract(errf("index_format", "index.md list items must be * [Title](url) - description"))
 		}
 		link = true
+	}
+	if err := sc.Err(); err != nil {
+		return contract(errf("index_scan", "failed to scan index.md: %v", err))
 	}
 	if !heading {
 		return contract(errf("index_format", "index.md needs at least one markdown heading"))
@@ -107,6 +110,9 @@ func ValidateLog(raw []byte) ([]Finding, error) {
 			return nil, contract(errf("log_heading", "log.md ## headings must be ISO YYYY-MM-DD, got %q", rest))
 		}
 		dates = append(dates, rest)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, contract(errf("log_scan", "failed to scan log.md: %v", err))
 	}
 	if len(dates) == 0 {
 		return nil, contract(errf("log_dates", "log.md needs at least one ## YYYY-MM-DD heading"))
@@ -143,7 +149,7 @@ func isLinkBullet(line string) (ok, bullet bool) {
 	case strings.HasPrefix(line, "* "):
 		item = strings.TrimSpace(line[2:])
 	case strings.HasPrefix(line, "- "):
-		item = strings.TrimSpace(line[2:])
+		return false, true
 	default:
 		return false, false
 	}
