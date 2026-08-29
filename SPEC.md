@@ -274,11 +274,17 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
     via: cli | mcp
   ```
 
-- **Cortex registry** — `${XDG_CONFIG_HOME:-~/.config}/exocortex/cortices.json`:
+- **Cortex registry** — the user registry is
+  `${XDG_CONFIG_HOME:-~/.config}/exocortex/cortices.json`:
   `[{"name","path","vcs":"daybook"|"caller"|"none",
-  "profile":"…","journal_prefix":"…"}]`; `register` is the only writer.
-  `journal_prefix` (optional, default `journal`) is where `note` files
-  land.
+  "profile":"…","journal_prefix":"…"}]`. `register` writes only this
+  registry. For directory-scoped cortices, `LoadRegistry` also reads every
+  `.exocortex/cortices.json` from the filesystem root through the current
+  working directory. Those files augment the user registry. Duplicate names
+  within one file or across scopes fail closed so one name retains one writer
+  and lock identity. Relative `path` values resolve from the directory that
+  owns `.exocortex`. `journal_prefix` (optional, default
+  `journal`) is where `note` files land.
 - **Conflict payloads** — nonzero exit + JSON body:
 
   ```json

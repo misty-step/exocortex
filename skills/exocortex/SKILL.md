@@ -37,6 +37,15 @@ exocortex sync [--cortex <name>]                     # refresh QMD index + embed
 exocortex status [--cortex <name>]                   # dirty markers, last synced commit, last error
 ```
 
+## Directory-scoped cortices
+
+The user registry applies everywhere. A `.exocortex/cortices.json` applies
+only from its parent directory or a descendant. Exocortex merges every local
+registry from the filesystem root to the current working directory. Duplicate
+cortex names within or across scopes fail closed because the name owns the
+writer and lock identity. Local `path` values may be relative to the directory
+that owns `.exocortex`. `register` writes only the user registry.
+
 ## Write often, write small
 
 The journal (`note`) exists so capturing costs seconds: status updates,
