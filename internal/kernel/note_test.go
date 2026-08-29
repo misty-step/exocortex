@@ -168,7 +168,7 @@ func TestProof14ConcurrentJournalPushesBothLand(t *testing.T) {
 			os.WriteFile(filepath.Join(f.b, "journal", "2026-08-22", "B-note.md"),
 				[]byte("---\ntype: memo\ncreated: 2026-08-22T00:00:00Z\n---\n\nB landed first\n"), 0o644)
 			g(t, f.b, "add", "journal/2026-08-22/B-note.md")
-			g(t, f.b, "commit", "-m", "vault(journal): exocortex note via agent-b")
+			g(t, f.b, "commit", "-m", "cortex(journal): exocortex note via agent-b")
 			g(t, f.b, "push")
 		})
 	}

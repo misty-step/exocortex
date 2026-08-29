@@ -114,15 +114,15 @@ func lockNamed(name, op, rel string) (*cortexLock, *Conflict) {
 }
 
 func preparePutRoot(c *Cortex, rel, op, abs string) (dir, outAbs, base string, conf *Conflict) {
-	dir = c.Path // caller/none; daybook overwrites with publisher clone
+	dir = c.Path // caller/none; git overwrites with publisher clone
 	outAbs = abs
-	if c.VCS != "daybook" {
+	if c.VCS != "git" {
 		return dir, outAbs, "", nil
 	}
 	wdir, werr := ensureWriter(c.Name, c.Path)
 	if werr != nil {
 		return "", "", "", conflict("writer_unavailable", op, rel,
-			"failed to provision publisher clone; daybook cortices require a valid git origin",
+			"failed to provision publisher clone; git cortices require a valid origin remote",
 			map[string]any{"detail": werr.Error()})
 	}
 	dir = wdir
@@ -145,7 +145,7 @@ func preparePutRoot(c *Cortex, rel, op, abs string) (dir, outAbs, base string, c
 }
 
 func loadStoredBytes(c *Cortex, dir, abs, rel string) []byte {
-	if c.VCS == "daybook" {
+	if c.VCS == "git" {
 		if raw, gerr := git(dir, "show", "HEAD:"+filepath.ToSlash(rel)); gerr == nil {
 			return []byte(raw)
 		}
@@ -218,14 +218,14 @@ func commitPutNote(c *Cortex, in PutInput, payload fm.Document, abs, rel, dir, b
 		return conflict("write_failed", op, rel, "fix filesystem access and retry", map[string]any{"detail": werr.Error()})
 	}
 	res.Revision = Revision(final)
-	if c.VCS != "daybook" {
+	if c.VCS != "git" {
 		return nil
 	}
-	return daybookTail(c, in, rel, dir, abs, base, op, res, final)
+	return gitTail(c, in, rel, dir, abs, base, op, res, final)
 }
 
-func daybookTail(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult, candidate []byte) *Conflict {
-	msg := fmt.Sprintf("vault(%s): exocortex put %s via %s", commitScope(c, rel), rel, agentID(in.Agent))
+func gitTail(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult, candidate []byte) *Conflict {
+	msg := fmt.Sprintf("cortex(%s): exocortex put %s via %s", commitScope(c, rel), rel, agentID(in.Agent))
 	head, conf := commitPath(dir, rel, msg, op)
 	if conf != nil {
 		return conf
@@ -535,8 +535,7 @@ func viaID(v string) string {
 	return "cli"
 }
 
-// commitScope mirrors daybook's vault(<area>): convention — the first
-// path segment, or the cortex name for root-level notes.
+// commitScope is the first path segment, or the cortex name for root-level notes.
 func commitScope(c *Cortex, rel string) string {
 	if i := strings.IndexByte(rel, '/'); i > 0 {
 		return rel[:i]
@@ -547,7 +546,7 @@ func commitScope(c *Cortex, rel string) string {
 // writerDir returns the cortex's persistent clean-writer clone path,
 // or "" when none exists yet.
 func writerDir(c *Cortex) string {
-	if c.VCS != "daybook" {
+	if c.VCS != "git" {
 		return ""
 	}
 	cfg, err := ConfigDir()
@@ -561,12 +560,11 @@ func writerDir(c *Cortex) string {
 	return w
 }
 
-// effectiveRoot returns the kernel-owned publisher tree for daybook cortices.
-// For daybook cortices with an origin remote, it ensures the publisher
-// clone is provisioned; if provisioning fails, it returns an error
-// failing closed to prevent reading uncommitted human dirt.
+// effectiveRoot returns the kernel-owned publisher tree for git cortices.
+// It fails closed when the clone cannot be provisioned so reads never
+// observe uncommitted bytes from a registered checkout.
 func effectiveRoot(c *Cortex) (string, error) {
-	if c.VCS == "daybook" {
+	if c.VCS == "git" {
 		w, werr := ensureWriter(c.Name, c.Path)
 		if werr != nil {
 			return "", fmt.Errorf("failed to provision publisher clone for %s: %w", c.Name, werr)

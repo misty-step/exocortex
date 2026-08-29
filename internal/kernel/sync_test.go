@@ -295,7 +295,7 @@ func TestDirtyMarkerWrittenOnNoneVCSPut(t *testing.T) {
 	}
 }
 
-func TestDirtyMarkerWrittenOnRemotelessDaybookPut(t *testing.T) {
+func TestDirtyMarkerWrittenOnRemotelessGitPut(t *testing.T) {
 	f := newFixture(t)
 	if _, conf := f.put("hosta", "notes/seed-writer.md", mkNote("note", "provision writer")); conf != nil {
 		t.Fatal(conf)

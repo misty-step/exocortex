@@ -133,7 +133,7 @@ func replayCandidate(c *Cortex, in PutInput, rel, dir, abs, op string, res *PutR
 		preservePayload(in, conf)
 		return conf
 	}
-	msg := fmt.Sprintf("vault(%s): exocortex put %s via %s", commitScope(c, rel), rel, agentID(in.Agent))
+	msg := fmt.Sprintf("cortex(%s): exocortex put %s via %s", commitScope(c, rel), rel, agentID(in.Agent))
 	head, conf := commitPath(dir, rel, msg, op)
 	if conf != nil {
 		preservePayload(in, conf)

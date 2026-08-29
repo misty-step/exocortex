@@ -98,14 +98,14 @@ type statusArgs struct {
 type registerArgs struct {
 	Name          string `json:"name" jsonschema:"cortex name (lowercase slug)"`
 	Path          string `json:"path" jsonschema:"absolute path of the corpus root"`
-	VCS           string `json:"vcs,omitempty" jsonschema:"daybook | caller | none (default: auto-detect)"`
+	VCS           string `json:"vcs,omitempty" jsonschema:"git | caller | none (default: auto-detect)"`
 	Profile       string `json:"profile,omitempty" jsonschema:"daybook | strict (default daybook)"`
 	JournalPrefix string `json:"journalPrefix,omitempty" jsonschema:"where note files land (default journal)"`
 }
 
 func addTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_get", Description: "Read one note: revision (sha256), frontmatter, full content."}, get)
-	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_put", Description: "Create or CAS-update a note. Bare put creates only; updating REQUIRES expectedRevision from a prior get. Provenance is stamped automatically; the daybook cortex commits and pushes."}, put)
+	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_put", Description: "Create or CAS-update a note. Bare put creates only; updating REQUIRES expectedRevision from a prior get. Provenance is stamped automatically; git cortices commit and push through isolated publisher clones."}, put)
 	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_note", Description: "Record one journal micro-memory as an immutable file on the cortex's agent board. Cheap by design: use often for status updates, gotchas and fixes, decisions in flight."}, noteTool)
 	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_search", Description: "Search cortex content via QMD; hits carry cortex, path, score, snippet."}, search)
 	mcp.AddTool(server, &mcp.Tool{Name: "exocortex_log", Description: "Git lineage of one note."}, logTool)

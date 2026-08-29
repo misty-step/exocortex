@@ -1,6 +1,6 @@
 ---
 name: exocortex
-description: Read, search, write, and lint registered knowledge cortices (daybook first) via the exocortex CLI — use when orienting before work or writing durable results back to fleet memory.
+description: Read, search, write, and lint registered knowledge cortices via the exocortex CLI — use when orienting before work or writing durable results back to fleet memory.
 ---
 
 # Exocortex
@@ -12,10 +12,10 @@ notes — never by editing raw sources.
 
 Status: Exocortex is built, tested under race detection, and installed as
 `~/.local/bin/exocortex`. The CLI is the official, universal fleet interface.
-All operations speak structured JSON (`--json` default) and evaluate against
-an isolated, kernel-owned publisher clone. **Never edit or commit to Daybook
-via raw Git directly**; always use `exocortex note` or `exocortex put` to protect
-CAS preconditions and keep working trees clean.
+All operations speak structured JSON (`--json` default). Cortices registered
+with `vcs=git` evaluate against an isolated, kernel-owned publisher clone.
+Never use raw Git to publish into such a cortex; use `exocortex note` or
+`exocortex put` so CAS preconditions and publisher isolation remain intact.
 ## When to use
 
 - **Before work (orient):** search the cortex for prior decisions, project
@@ -66,7 +66,7 @@ Write rules enforced by `put` (do not pre-satisfy by hand):
   STORED revision (`get` reports it). A stale or malformed hash fails
   `revision_conflict`. There is no way to overwrite without the hash.
   On mismatch, re-read with `get`, re-apply your change on top, retry.
-  Never overwrite a conflict. Daybook push failures are classified:
+  Never overwrite a conflict. Push failures for every `vcs=git` cortex are classified:
   `exists`/`revision_conflict` only after the target path is observed
   to have changed; `publish_rejected` is a known non-landing result
   (auth, hook, permission, policy, or exhausted unrelated-ref replay);
@@ -77,11 +77,12 @@ Write rules enforced by `put` (do not pre-satisfy by hand):
 
 ## Sole-Publisher Isolation
 
-For Daybook cortices, the kernel manages its own persistent clone under
-`~/.config/exocortex/writers/<cortex>`. Writes land, commit, and push from
-there; `get` reads the committed Git HEAD snapshot. Registered human checkouts
-are never preflighted, stashed, or mutated by the kernel. Failures fail closed
-with structured data conflicts.
+For every cortex registered with `vcs=git`, the kernel manages a persistent
+clone under `~/.config/exocortex/writers/<cortex>`. Writes land, commit, and
+push from there; `get` reads the committed Git HEAD snapshot. Registered
+checkouts are never preflighted, stashed, or mutated by the kernel. The
+cortex's name and validation profile do not change these guarantees.
+Failures fail closed with structured conflicts.
 ## Naming and linking
 
 Notes are claims, not topics ("distribution is the moat", not "thoughts on
