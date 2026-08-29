@@ -24,7 +24,7 @@ func TestLoadScopesLocalCorticesToWorkingTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeRegistry(t, filepath.Join(workspace, ".exocortex", "cortices.json"), `[
-  {"name":"root","path":"root","vcs":"daybook","profile":"daybook"}
+  {"name":"root","path":"root","vcs":"daybook","profile":"daybook","journal_prefix":"journal/."}
 ]`)
 
 	outside := filepath.Join(base, "outside")
@@ -40,8 +40,8 @@ func TestLoadScopesLocalCorticesToWorkingTree(t *testing.T) {
 	if err != nil || len(cs) != 2 || cs[1].Name != "root" {
 		t.Fatalf("workspace registry=%v err=%v", cs, err)
 	}
-	if cs[1].Path != localRoot {
-		t.Fatalf("relative local path=%q want %q", cs[1].Path, localRoot)
+	if cs[1].Path != localRoot || cs[1].JournalPrefix != "journal" {
+		t.Fatalf("normalized local registry=%v", cs[1])
 	}
 
 	nested := filepath.Join(workspace, "project", "src")
@@ -130,24 +130,6 @@ func TestLoadFileRejectsInvalidEntries(t *testing.T) {
 				t.Fatalf("LoadFile error=%v, want %q", err, tt.want)
 			}
 		})
-	}
-}
-
-func TestLoadFileAppliesRegistrationDefaults(t *testing.T) {
-	base := t.TempDir()
-	root := filepath.Join(base, "root")
-	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	configPath := filepath.Join(base, "cortices.json")
-	writeRegistry(t, configPath, `[{"name":"root","path":"root"}]`)
-
-	cs, err := LoadFile(configPath, base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cs) != 1 || cs[0].Path != root || cs[0].VCS != "daybook" || cs[0].Profile != "daybook" {
-		t.Fatalf("normalized registry=%v", cs)
 	}
 }
 

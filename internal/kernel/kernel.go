@@ -129,7 +129,7 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 		}
 	}
 	candidate, err := cortexregistry.Normalize(Cortex{
-		Name: name, Path: path, VCS: vcs, Profile: profile,
+		Name: name, Path: path, VCS: vcs, Profile: profile, JournalPrefix: journalPrefix,
 	}, "")
 	if err != nil {
 		return nil, conflict("registration_failed", "register", name,
@@ -143,11 +143,6 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 				map[string]any{"name": c.Name})
 		}
 	}
-	jp := filepath.ToSlash(filepath.Clean(journalPrefix))
-	if jp == "." {
-		jp = "journal"
-	}
-	candidate.JournalPrefix = jp
 	global = append(global, candidate)
 	sort.Slice(global, func(i, j int) bool { return global[i].Name < global[j].Name })
 	if err := saveRegistry(global); err != nil {

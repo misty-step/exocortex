@@ -113,7 +113,15 @@ func Normalize(c Cortex, base string) (Cortex, error) {
 		return Cortex{}, err
 	}
 	c.Path = root
-	return normalizePolicy(c)
+	c, err = normalizePolicy(c)
+	if err != nil {
+		return Cortex{}, err
+	}
+	c.JournalPrefix = filepath.ToSlash(filepath.Clean(c.JournalPrefix))
+	if c.JournalPrefix == "." {
+		c.JournalPrefix = "journal"
+	}
+	return c, nil
 }
 
 func normalizeRoot(path, base string) (string, error) {
