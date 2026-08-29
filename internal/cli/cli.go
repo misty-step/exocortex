@@ -56,6 +56,8 @@ func dispatch(cmd string, rest []string, stdin io.Reader) (any, *kernel.Conflict
 	switch cmd {
 	case "register":
 		return cmdRegister(rest)
+	case "set-profile":
+		return cmdSetProfile(rest)
 	case "put":
 		return cmdPut(rest, stdin)
 	case "get":
@@ -125,6 +127,7 @@ func usage(w io.Writer) {
 
 Usage:
   exocortex register <name> <path> [--vcs daybook|caller|none] [--profile daybook|strict|okf]
+  exocortex set-profile <name> <profile> --expects <current>
   exocortex put <path> --from <file|-> [--expects <sha>] [--cortex <name>] [--agent <id>]
   exocortex get <path> [--cortex <name>]
   exocortex search "<query>" [--cortex <name>] [--mode hybrid|bm25|vector] [--type <kind>] [--limit <n>]  # omitted mode is hybrid
@@ -217,6 +220,35 @@ func cmdRegister(args []string) (any, *kernel.Conflict, error) {
 			Detail: map[string]any{"detail": err.Error()}}, nil
 	}
 	return map[string]any{"registered": c}, nil, nil
+}
+
+func cmdSetProfile(args []string) (any, *kernel.Conflict, error) {
+	fs := flag.NewFlagSet("set-profile", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Bool("json", true, "JSON output (always on)")
+	expects := fs.String("expects", "", "current profile (required)")
+	flags, pos := splitArgs(args, map[string]bool{"expects": true})
+	if err := fs.Parse(flags); err != nil {
+		return nil, inputErr("set-profile", err.Error(), "run `exocortex help` for set-profile usage"), nil
+	}
+	if len(pos) != 2 {
+		return nil, inputErr("set-profile", "set-profile requires <name> <profile>",
+			"exocortex set-profile <name> <profile> --expects <current>"), nil
+	}
+	if *expects == "" {
+		return nil, inputErr("set-profile", "--expects is required",
+			"exocortex set-profile <name> <profile> --expects <current>"), nil
+	}
+	c, err := kernel.SetProfile(pos[0], pos[1], *expects)
+	if err != nil {
+		if conf, ok := err.(*kernel.Conflict); ok {
+			return nil, conf, nil
+		}
+		return nil, &kernel.Conflict{Code: "registration_failed", Operation: "set-profile",
+			Path: pos[0], Hint: "fix the name (lowercase slug), path, vcs, or profile and retry",
+			Detail: map[string]any{"detail": err.Error()}}, nil
+	}
+	return map[string]any{"cortex": c}, nil, nil
 }
 
 func cmdPut(args []string, stdin io.Reader) (any, *kernel.Conflict, error) {

@@ -56,6 +56,45 @@ func TestRegisterAndLoad(t *testing.T) {
 	}
 }
 
+func TestSetProfileCAS(t *testing.T) {
+	testConfigEnv(t)
+	dir := t.TempDir()
+	c, err := Register("box", dir, "none", "daybook", "journal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Profile != "daybook" || c.JournalPrefix != "journal" || c.VCS != "none" {
+		t.Fatalf("seed: %+v", c)
+	}
+	got, err := SetProfile("box", "okf", "daybook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Profile != "okf" || got.JournalPrefix != "journal" || got.VCS != "none" {
+		t.Fatalf("cutover mutated extra fields: %+v", got)
+	}
+	cs, err := LoadRegistry()
+	if err != nil || len(cs) != 1 || cs[0].Profile != "okf" {
+		t.Fatalf("readback: %v %+v", err, cs)
+	}
+	_, err = SetProfile("box", "daybook", "daybook")
+	conf, ok := err.(*Conflict)
+	if !ok || conf.Code != "profile_conflict" {
+		t.Fatalf("stale expects: %v (%T)", err, err)
+	}
+	got, err = SetProfile("box", "daybook", "okf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Profile != "daybook" {
+		t.Fatalf("rollback: %+v", got)
+	}
+	cs, err = LoadRegistry()
+	if err != nil || cs[0].Profile != "daybook" {
+		t.Fatalf("rollback readback: %v %+v", err, cs)
+	}
+}
+
 func TestResolve(t *testing.T) {
 	testConfigEnv(t)
 	rootA := t.TempDir()

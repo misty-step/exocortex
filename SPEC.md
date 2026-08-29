@@ -56,8 +56,12 @@ Rejected extremes:
 
 Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
 
-- **CLI** (`--json` everywhere, CR-02):
-  - `register <name> <path>` — bind a cortex.
+  - `register <name> <path>` — bind a cortex. Same name always
+    `duplicate_cortex`; it never upserts.
+  - `set-profile <name> <profile> --expects <current>` — change only the
+    validation profile. `--expects` must match the stored profile
+    (`profile_conflict` otherwise). Other registry fields are untouched.
+    Rollback is `set-profile <name> <previous> --expects <new>`.
   - `put <path> --from <file|->` — write payload (`-` = stdin) to cortex
     destination `<path>`. Bare form is create-only: fails if `<path>`
     already exists (atomic create).

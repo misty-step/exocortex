@@ -168,6 +168,61 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 	return c, nil
 }
 
+// SetProfile changes one cortex's validation profile. from must match
+// the stored profile. Unspecified fields stay untouched.
+func SetProfile(name, to, from string) (*Cortex, error) {
+	if err := checkRegisterName(name); err != nil {
+		return nil, err
+	}
+	if from == "" {
+		return nil, conflict("invalid_input", "set-profile", name,
+			"pass --expects with the current profile and retry", nil)
+	}
+	if !profiles[to] {
+		return nil, conflict("registration_failed", "set-profile", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": fmt.Sprintf("profile %q must be daybook, strict, or okf", to)})
+	}
+	regLock, lerr := acquireLock("registry")
+	if lerr != nil {
+		return nil, conflict("registration_failed", "set-profile", name,
+			"fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
+	}
+	defer regLock.release()
+	cs, err := LoadRegistry()
+	if err != nil {
+		return nil, conflict("registration_failed", "set-profile", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": err.Error()})
+	}
+	idx := -1
+	for i, c := range cs {
+		if c.Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil, conflict("not_found", "set-profile", name,
+			"register the cortex first", nil)
+	}
+	if cs[idx].Profile != from {
+		return nil, conflict("profile_conflict", "set-profile", name,
+			"re-read status and retry with --expects matching the stored profile",
+			map[string]any{"expected": from, "actual": cs[idx].Profile})
+	}
+	if cs[idx].Profile == to {
+		return &cs[idx], nil
+	}
+	cs[idx].Profile = to
+	if err := saveRegistry(cs); err != nil {
+		return nil, conflict("registration_failed", "set-profile", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": err.Error()})
+	}
+	return &cs[idx], nil
+}
+
 func checkRegisterName(name string) error {
 	if !nameRe.MatchString(name) {
 		return conflict("registration_failed", "register", name,
