@@ -1,0 +1,34 @@
+version: "2"
+
+# Default `golangci-lint run` is the fuse only. Report linters are
+# enabled explicitly by scripts/lint-report.sh.
+linters:
+  default: none
+  enable:
+    - cyclop
+  settings:
+    cyclop:
+      max-complexity: 15
+    gocognit:
+      min-complexity: 1
+    nestif:
+      min-complexity: 1
+    funlen:
+      lines: 40
+      statements: 25
+    maintidx:
+      under: 40
+    dupl:
+      threshold: 150
+  exclusions:
+    rules:
+      # Fuse ignores tests. Report linters still run on _test.go.
+      - path: '.+_test\.go'
+        linters:
+          - cyclop
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+

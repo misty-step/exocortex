@@ -606,6 +606,9 @@ func TestProof9CrossHostUpdateRace(t *testing.T) {
 	if conf.Detail["push_stderr"] == "" {
 		t.Fatal("conflict must carry push diagnostics (evidence of real rejection)")
 	}
+	if conf.Detail["actual"] == conf.Detail["expected"] {
+		t.Fatal("revision_conflict must observe a path change; actual==expected is a false publication conflict")
+	}
 
 	// Zero trace of B's commit; branch equals remote tip; bytes equal A's.
 	rootB := mustEffectiveRoot(&f.cs[1])

@@ -1,0 +1,9 @@
+title = "exocortex"
+
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''(^|/)artifacts/''',
+]

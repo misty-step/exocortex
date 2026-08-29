@@ -67,9 +67,25 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     `--expects` is a hard error, never a silent overwrite.
   - `get <path>` — read a note.
   - `search "<query>"` — shells `qmd --format json`; never re-implements
-    retrieval. Default mode is deterministic BM25 (`qmd search`);
-    `--mode hybrid|vector` opts into qmd's LLM-backed retrieval, which
-    is environment-dependent (disabled under `CI=true`).
+    retrieval. Default (omitted) mode is hybrid (`qmd query`) with one
+    fallback to deterministic BM25 (`qmd search`) if `qmd query` errors
+    while the context is still active. Empty mode has that meaning on CLI and MCP. `--mode
+    bm25|hybrid|vector` selects explicitly. Callers that need
+    deterministic BM25 must pass `--mode bm25` / `mode: "bm25"`. The
+    kernel strips `CI`/`CI_` from the QMD environment, so `CI=true`
+    does not by itself disable hybrid; if QMD still fails, fallback is
+    the truthful path. `--type
+    decision|memo|session|note|scratch` filters hits after retrieval.
+    Memo matching uses the resolved cortex `journal_prefix`. Decision
+    and `brief` share one exclusion list and one `liveStatus` helper.
+    `--type decision` matches kind (`type: decision`, or live
+    `type: note`, or a live untyped orientation path after a successful
+    Get). A Get conflict does not fail open through path heuristics.
+    `brief` applies `liveStatus` to every candidate and keeps a looser
+    type policy (any live non-noise note, including archived decisions
+    excluded).
+  - `brief "<topic>"` — orientation packet of live canonical notes.
+    CLI-only. MCP search accepts the same optional `type` filter.
   - `note "<thought>"` — journal micro-memory as an IMMUTABLE file
     (`<journal-prefix>/YYYY-MM-DD/<ulid>-<agent>.md`, ULID = ms
     timestamp + crypto randomness; prefix is a per-cortex registry
@@ -80,18 +96,18 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     payload on every terminal conflict. Memo notes are silent under the
     daybook profile. Journal files are
     append-only: generic `put` updates under the journal prefix abort
-    `journal_immutable` (ADR-0002/0003). When the registered checkout
-    carries unrelated foreign UNSTAGED dirt (the heartbeat pattern),
-    daybook-cortex writes fall back to a persistent per-cortex
-    CLEAN-WRITER clone under
-    `<config>/exocortex/writers/<name>` (created on demand from the
-    checkout's origin, ff-synced): the write lands there and pushes.
-    The writer tree is the authoritative indexed root; the QMD
-    collection named for the cortex must point at that tree (or, for
+    `journal_immutable` (ADR-0002/0003). For `vcs=daybook`, the kernel
+    never writes, scans, stashes, or commits the registered human
+    checkout. The sole publisher is a persistent clone under
+    `<config>/exocortex/writers/<name>`, provisioned from the checkout's
+    origin and fail-closed (`writer_unavailable`) if origin or clone
+    setup fails. Preflight, refresh, CAS, and the VCS tail all run on
+    that clone. The writer tree is the authoritative indexed root; the
+    QMD collection named for the cortex must point at that tree (or, for
     `caller`/`none`, at the registered path). `sync` owns index and
-    embed freshness. Reads prefer the writer once it exists, and staged /
-    destination / foreign-staged state on the registered checkout
-    remains terminal.
+    embed freshness. `get`/`log`/`lint` read the writer once it exists
+    (`git show HEAD:<path>` for daybook). Human-checkout dirt is
+    invisible to the kernel.
   - `sync [--cortex <name>]` — acquire the same per-cortex write lock
     as `put`, snapshot dirty markers, require `qmd collection show`
     Path to equal `effectiveRoot` (fail-closed:
@@ -138,27 +154,29 @@ acquired BEFORE any state is read and released only at the end. The VCS
 policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
 
 1. lock;
-2. pre-flight — `daybook` only, all three aborts conflict-as-data, run
-   BEFORE refresh: with the tree already clean, the mandated
-   `pull --rebase --autostash` has no in-flight work to cycle through a
-   stash/pop conflict window. The create-mode existence fast-path also
-   reads here — under the lock (step 1), never before it, so a peer's
-   transient file mid-put cannot answer `exists` and then vanish with
-   its unwind;
+2. pre-flight — `daybook` only, on the writer clone, all three aborts
+   conflict-as-data, run BEFORE refresh. There is no
+   `--autostash`: the writer is kernel-owned and must stay clean, so
+   refresh never rebases an unpublished candidate. The create-mode
+   existence check is NOT a working-tree stat; CAS later answers
+   existence from `HEAD:<path>` only. Preflight still runs under the
+   lock (step 1), never before it:
    - staged paths outside this operation's touched set
      (`foreign_staged_state`) — never commit, stash away, or discard
      another worker's staged state;
    - destination staged or unstaged-dirty vs HEAD (updates only; a
-     create overwrites nothing, so CAS existence answers it) →
+     create overwrites nothing in HEAD, so CAS existence answers it) →
      `dirty_destination`;
    - unstaged modifications outside the touched set
      (`foreign_unstaged_state`) — untracked files are allowed; modified
      or deleted tracked files belong to another worker, and the step-8
      unwind must never be able to reach them;
-3. refresh — `daybook`: `git pull --rebase --autostash` (per the
-   operator decision record; normally inert behind step 2's clean-scan),
-   then REPEAT step 2's scan against post-refresh state (the pull window
-   may have changed things); `caller`/`none`: nothing;
+3. refresh — `daybook`: `git fetch`, then require `HEAD` to be an
+   ancestor of `@{u}` (equal or behind), then `git merge --ff-only @{u}`.
+   Ahead or diverged (unpublished candidate after `publish_unknown`)
+   is `refresh_failed`; nothing is written and the candidate is not
+   rebased. Then REPEAT step 2's scan against post-refresh state;
+   `caller`/`none`: nothing;
 4. CAS: re-read the stored destination revision; evaluate `--expects` or
    create-absence against fresh state;
 5. validate the payload under the cortex profile — invalid payloads fail
@@ -173,37 +191,62 @@ policy fills steps 2, 3, and 8; the CAS core (4–7) is identical everywhere:
 7. stamp provenance, atomic write (temp file + rename);
 8. VCS tail — `daybook`: record `base` = HEAD sha (post-refresh), stage
    touched paths, path-limited commit (`git commit -- <touched paths>`),
-   then push. On push rejection (non-fast-forward or any failure): NO
-   retry, NO rebase, NO force. Unwind path-scoped, so nothing outside this
-   operation can be destroyed even under a pre-flight race:
-   `git reset --soft <base>` — HEAD moves back, the index is NEVER swept
-   repo-wide, so even a foreign path staged after pre-flight keeps its
-   index entry. Restore only the touched path by its mode: an UPDATED
-   path (present in base) via `git restore --source=<base> --staged
-   --worktree -- <path>`; a CREATED path does not exist in base and is
-   dropped via `git rm --cached` plus file removal — a leftover would
-   block the ff merge. Then converge on the winner:
-   `git fetch` + `git merge --ff-only @{u}` — a lost race must not leave
-   stale bytes that make `get` lie and retries spin; if the ff-only merge
-   fails (rare race), stay at base with hint "refresh failed; next put's
-   refresh heals". Payload preserved (CLI `--from` file is the caller's;
-   MCP/stdin payloads are written to a temp file whose path is returned
-   in the conflict body). Exit code: a losing UPDATE exits
-   `revision_conflict` ("remote moved; re-read with get and retry"); a
-   losing CREATE exits `exists` — the winner's note now occupies the
-   path (operator decision 2026-08-21: existing path → `exists`).
-   `caller`/`none`: nothing;
+   then push. Force-push, merge commits, and rebase of the candidate
+   commit are forbidden. A push failure is classified before any data
+   conflict is reported:
+   - Non-fast-forward: fetch and re-evaluate the original create-absence
+     or `--expects` predicate against `@{u}:<path>`. Path absence and
+     path-observation failure are distinct; an observation failure never
+     becomes a data conflict or replay. If the target is unchanged,
+     unwind path-scoped, ff-only onto `@{u}`, and replay the immutable,
+     already-stamped candidate held by the operation (no worktree re-read,
+     no re-stamp) with a bound of two replays. If the target is observed
+     to have changed, unwind path-scoped, converge, then `exists` (create)
+     or `revision_conflict` (update) with `actual` from the converged
+     path. `actual` equal to `expected` is not a publication conflict.
+     Fetch or observation failure is `writer_unavailable` with
+     `remote: rejected`; exhaustion after two unchanged-path replays is
+     `publish_rejected` with `reason: contention_exhausted`. Both are
+     known-not-landed results, never `publish_unknown`.
+   - Auth, hook, permission, policy, and explicit `remote rejected`
+     refusals are `publish_rejected` (not a data conflict; do not retry
+     as a lost race). Unwind path-scoped; payload preserved.
+   - Transport, timeout, and accepted-but-response-lost outcomes fetch
+     and compare candidate bytes to `@{u}:<path>`: a match is proved
+     success only if the writer HEAD equals the fetched tip. Otherwise
+     `publish_unknown`. `note` must not mint a second path. If fetch or
+     path observation fails, do not unwind the local candidate.
+   - If unwind or ff-only onto the evaluated tip fails, the outcome is
+     `writer_unavailable` with `remote: landed` (bytes matched; repair
+     the publisher clone to `proved_commit`/`proved_revision`; do not
+     retry the landed write), `remote: rejected` (the push was rejected),
+     or `remote: unknown` (landing is still ambiguous). The latter two
+     expose only `observed_tip`, never a proved write identity.
+   Unwind stays path-scoped, so nothing outside this operation can be
+   destroyed even under a pre-flight race: `git reset --soft <base>` —
+   HEAD moves back, the index is NEVER swept repo-wide, so even a
+   foreign path staged after pre-flight keeps its index entry. Restore
+   only the touched path by its mode: an UPDATED path (present in base)
+   via `git restore --source=<base> --staged --worktree -- <path>`; a
+   CREATED path does not exist in base and is dropped via `git rm
+   --cached` plus file removal — a leftover would block the ff merge.
+   Then converge: `git fetch` + `git merge --ff-only @{u}`. If the
+   ff-only merge fails (rare race), stay at base with hint "refresh
+   failed; next put's refresh heals". Payload preserved (CLI `--from`
+   file is the caller's; MCP/stdin payloads are written to a temp file
+   whose path is returned in the conflict body). `caller`/`none`:
+   nothing;
 9. release lock.
 
 `index.lock` never covers this sequence; the cortex lock does. A racing
 stager cannot enter the path-limited commit even if the lock is bypassed.
 Cross-host: per-host locks cannot see each other, so the CAS guarantee on
-git cortices is enforced by push — a rejected push IS the cross-host
-`revision_conflict` for updates and `exists` for creates; the failed put
-leaves ZERO trace of itself (its own commit unwound, touched bytes
-restored to base or created file removed) and the clone converges to the
-remote tip via the ff-only restore. `none` and `caller`
-cortices are single-host by contract.
+git cortices is enforced by push. After a non-fast-forward, the kernel
+re-evaluates the path predicate; `exists`/`revision_conflict` fire only
+when that path changed. Unrelated ref movement is replayed. Auth/hook
+refusals are `publish_rejected`. A lost push acknowledgment is proved
+success or `publish_unknown`. `none` and `caller` cortices are
+single-host by contract.
 
 
 ### VCS lifecycle (per-cortex policy)
@@ -231,21 +274,35 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
     via: cli | mcp
   ```
 
-- **Cortex registry** — `${XDG_CONFIG_HOME:-~/.config}/exocortex/cortices.json`:
+- **Cortex registry** — the user registry is
+  `${XDG_CONFIG_HOME:-~/.config}/exocortex/cortices.json`:
   `[{"name","path","vcs":"daybook"|"caller"|"none",
-  "profile":"…","journal_prefix":"…"}]`; `register` is the only writer.
-  `journal_prefix` (optional, default `journal`) is where `note` files
-  land.
+  "profile":"…","journal_prefix":"…"}]`. `register` writes only this
+  registry. For directory-scoped cortices, `LoadRegistry` also reads every
+  `.exocortex/cortices.json` from the filesystem root through the current
+  working directory. Those files augment the user registry. Duplicate names
+  within one file or across scopes fail closed so one name retains one writer
+  and lock identity. Relative `path` values resolve from the directory that
+  owns `.exocortex`. `journal_prefix` (optional, default
+  `journal`) is where `note` files land.
 - **Conflict payloads** — nonzero exit + JSON body:
 
   ```json
   {"error":"exists","operation":"create","path":"…"}
   {"error":"revision_conflict","operation":"update","path":"…","expected":"…","actual":"…"}
+  {"error":"publish_rejected","operation":"create","path":"…"}
+  {"error":"publish_unknown","operation":"update","path":"…"}
+  {"error":"writer_unavailable","operation":"create","path":"…","remote":"landed","proved_commit":"…","proved_revision":"…","converged":false,"unwind":[],"push_stderr":"…"}
+  {"error":"writer_unavailable","operation":"update","path":"…","remote":"rejected","observed_tip":"…","converged":false,"unwind":[],"push_stderr":"…"}
+  {"error":"writer_unavailable","operation":"update","path":"…","remote":"unknown","observed_tip":"…","converged":false,"unwind":[],"push_stderr":"…"}
   {"error":"dirty_destination","path":"…","state":"staged"|"unstaged"}
   {"error":"foreign_staged_state","paths":["…"]}
   {"error":"foreign_unstaged_state","paths":["…"]}
   {"error":"created_immutable","operation":"update","path":"…","stored":"…","submitted":"…"}
   {"error":"journal_immutable","operation":"update","path":"…"}
+  {"error":"duplicate_cortex","operation":"register","path":"…"}
+  {"error":"duplicate_path","operation":"register","path":"…","name":"…"}
+
   ```
 
   Input-class failures (`invalid_input`, `unknown_command`,
@@ -279,12 +336,14 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
 
 ### v0 acceptance proofs
 
-1. Bare put on any existing path — tracked, staged, or untracked — exits
-   nonzero with `exists` and a hint directing get → `--expects`. There is
-   no intent inference and no `missing_expects` code (operator decision
-   2026-08-21): overwriting without a stored-revision hash is impossible
-   in every mode, and a stale or malformed hash falls out as an ordinary
-   `revision_conflict`.
+1. Bare put on a path that exists in HEAD (the committed snapshot)
+   exits nonzero with `exists` and a hint directing get → `--expects`.
+   Existence is `git show HEAD:<path>` for daybook, not a working-tree
+   stat: an untracked leftover in the writer clone is crash residue and
+   create overwrites it. There is no intent inference and no
+   `missing_expects` code (operator decision 2026-08-21): overwriting a
+   committed note without a stored-revision hash is impossible, and a
+   stale or malformed hash falls out as an ordinary `revision_conflict`.
 2. Bare put on existing path: `exists`. Create race under concurrency:
    exactly one creator wins; the loser gets `exists` and leaves no trace.
 3. `--expects` mismatch: `revision_conflict` carrying actual revision.
@@ -324,19 +383,34 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
     gone from disk, and B's branch and target bytes equal the remote
     (A's content).
 12. Two journal writers racing across clones both land: the loser's
-    push is rejected, its unique path is retried against converged
-    state, and BOTH notes exist on the winner's tip afterward. Every
-    terminal `note` conflict carries a preserved-payload path.
+    push is non-fast-forward, Put replays the unchanged unique path on
+    the converged tip, and BOTH notes exist afterward. Every terminal
+    `note` conflict carries a preserved-payload path. `publish_unknown`
+    does not mint a second journal path.
 13. Concurrent registration from two PROCESSES survives: both entries
     exist afterward (registry transaction lock + unique save temp).
+14. Generic different-path creates and updates both land after unrelated
+    ref movement. `exists`/`revision_conflict` fire only after the
+    target path is observed to have changed.
+15. A pre-receive hook or auth refusal exits `publish_rejected` with
+    payload preserved, zero remote effect, and the local candidate
+    unwound. It is not `exists` or `revision_conflict`.
+16. Accepted-but-response-lost: when `@{u}:<path>` bytes match the
+    candidate, the put is proved success. Otherwise `publish_unknown`.
 
 ## Fleet delivery
 
 The CLI is the universal baseline: every harness execs shell commands, and
 the bundled skill (`skill://exocortex`) teaches agents the interface. The
 fleet runs on OMP; per-harness MCP fleet registration (Slice 2) was retired
-by operator decision (2026-08-24) as unnecessary complexity. The canonical
-skill is installed directly into `omp-config`.
+by operator decision (2026-08-24) as unnecessary complexity. Skill source
+is `skills/exocortex/SKILL.md` in this repository.
+`scripts/install-skill.sh` writes the committed omp-config copy
+(`omp-config/skills/exocortex/SKILL.md`). omp-config `./install` deploys
+that copy to the live harness (`PI_CODING_AGENT_DIR`, default
+`~/.omp/agent`). Do not run `install-skill.sh` against the live agent
+dir. omp-config `skills/exocortex/check-source.sh` fails if the committed
+copy drifts. SPEC and `exocortex help` own binding product semantics.
 ## Rejected options
 
 - **Standalone memory service** (daemon + own DB) — duplicates versioning and

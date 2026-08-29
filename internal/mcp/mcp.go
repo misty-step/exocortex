@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/misty-step/exocortex/internal/kernel"
+	"github.com/misty-step/exocortex/internal/orient"
 	"github.com/misty-step/exocortex/internal/qmd"
 )
 
@@ -30,17 +31,10 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 // conflict as an error result carrying the pinned conflict body.
 func toolResult(payload any, conf *kernel.Conflict) (*mcp.CallToolResult, any, error) {
 	if conf != nil {
-		body := map[string]any{"error": conf.Code, "hint": conf.Hint}
-		if conf.Operation != "" {
-			body["operation"] = conf.Operation
+		raw, err := json.Marshal(conf.Body())
+		if err != nil {
+			return nil, nil, err
 		}
-		if conf.Path != "" {
-			body["path"] = conf.Path
-		}
-		for k, v := range conf.Detail {
-			body[k] = v
-		}
-		raw, _ := json.Marshal(body)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}},
 			IsError: true,
@@ -72,7 +66,8 @@ type searchArgs struct {
 	Query  string `json:"query" jsonschema:"search text"`
 	Cortex string `json:"cortex,omitempty" jsonschema:"restrict to one cortex (qmd collection of the same name)"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"max hits (default 20, max 100)"`
-	Mode   string `json:"mode,omitempty" jsonschema:"bm25 (deterministic default) | hybrid | vector"`
+	Mode   string `json:"mode,omitempty" jsonschema:"hybrid (default, BM25 fallback) | bm25 | vector"`
+	Type   string `json:"type,omitempty" jsonschema:"filter by content kind: decision | memo | session | note | scratch"`
 }
 
 type noteArgs struct {
@@ -150,7 +145,11 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 	if a.Cortex != "" {
 		collections = []string{a.Cortex}
 	}
-	hits, err := qmd.Search(ctx, a.Query, collections, a.Mode, a.Limit)
+	limit := a.Limit
+	if limit <= 0 {
+		limit = qmd.DefaultSearchLimit
+	}
+	hits, err := qmd.Search(ctx, a.Query, collections, a.Mode, mcpFetchLimit(limit, a.Type))
 	if err != nil {
 		return toolResult(nil, &kernel.Conflict{
 			Code:      "search_unavailable",
@@ -160,24 +159,74 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 			Detail:    map[string]any{"detail": err.Error()},
 		})
 	}
+	var cs []kernel.Cortex
+	if a.Type != "" {
+		cs, err = kernel.LoadRegistry()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return toolResult(projectMCPHits(hits, cs, a.Type, limit), nil)
+}
+
+func mcpFetchLimit(limit int, typeFilter string) int {
+	if typeFilter == "" || limit >= qmd.MaxSearchLimit {
+		return limit
+	}
+	fetchLimit := limit * 5
+	if fetchLimit > qmd.MaxSearchLimit {
+		return qmd.MaxSearchLimit
+	}
+	return fetchLimit
+}
+
+func projectMCPHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, limit int) []map[string]any {
 	out := make([]map[string]any, 0, len(hits))
 	for _, h := range hits {
-		entry := map[string]any{
-			"docid":   h.DocID,
-			"score":   h.Score,
-			"line":    h.Line,
-			"title":   h.Title,
-			"context": h.Context,
-			"snippet": h.Snippet,
-			"file":    h.File,
-		}
-		if collection, rel, ok := qmd.SplitURI(h.File); ok {
-			entry["cortex"] = collection
-			entry["path"] = rel
+		entry, keep := projectMCPHit(h, cs, typeFilter)
+		if !keep {
+			continue
 		}
 		out = append(out, entry)
+		if len(out) >= limit {
+			break
+		}
 	}
-	return toolResult(out, nil)
+	return out
+}
+
+func projectMCPHit(h qmd.Hit, cs []kernel.Cortex, typeFilter string) (map[string]any, bool) {
+	entry := map[string]any{
+		"docid":   h.DocID,
+		"score":   h.Score,
+		"line":    h.Line,
+		"title":   h.Title,
+		"context": h.Context,
+		"snippet": h.Snippet,
+		"file":    h.File,
+	}
+	var (
+		c       *kernel.Cortex
+		rel     string
+		fm      map[string]any
+		fetched bool
+	)
+	if collection, path, ok := qmd.SplitURI(h.File); ok {
+		entry["cortex"] = collection
+		entry["path"] = path
+		rel = path
+		c = kernel.CortexNamed(cs, collection)
+		if typeFilter != "" && c != nil && path != "" {
+			if res, conf := kernel.Get(cs, collection, path); conf == nil && res != nil {
+				fm = res.Frontmatter
+				fetched = true
+			}
+		}
+	}
+	if typeFilter != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, typeFilter, fm, fetched) {
+		return nil, false
+	}
+	return entry, true
 }
 
 func noteTool(ctx context.Context, req *mcp.CallToolRequest, a noteArgs) (*mcp.CallToolResult, any, error) {
@@ -227,7 +276,16 @@ func lint(ctx context.Context, req *mcp.CallToolRequest, a lintArgs) (*mcp.CallT
 func register(ctx context.Context, req *mcp.CallToolRequest, a registerArgs) (*mcp.CallToolResult, any, error) {
 	c, err := kernel.Register(a.Name, a.Path, a.VCS, a.Profile, a.JournalPrefix)
 	if err != nil {
-		return nil, nil, err
+		if conf, ok := err.(*kernel.Conflict); ok {
+			return toolResult(nil, conf)
+		}
+		return toolResult(nil, &kernel.Conflict{
+			Code:      "registration_failed",
+			Operation: "register",
+			Path:      a.Path,
+			Hint:      "fix the name (lowercase slug), path, vcs, or profile and retry",
+			Detail:    map[string]any{"detail": err.Error()},
+		})
 	}
 	return toolResult(map[string]any{"registered": c}, nil)
 }

@@ -234,3 +234,88 @@ exit 0
 		t.Fatalf("status after sync = %v, want clean %s", st[0], rev)
 	}
 }
+
+func TestCLIAbsolutePathAndRegisterConflicts(t *testing.T) {
+	repo := setupCortex(t)
+	code, body, raw := runMain(t, "", "register", "box", repo, "--vcs", "none")
+	if code != 0 {
+		t.Fatalf("register: exit=%d %s", code, raw)
+	}
+
+	payload := "---\ntype: note\nstatus: active\ncreated: 2026-08-21T00:00:00Z\n---\n\nabs\n"
+	abs := filepath.Join(repo, "notes", "abs.md")
+	code, body, raw = runMain(t, payload, "put", abs, "--from", "-", "--cortex", "box")
+	if code != 0 {
+		t.Fatalf("explicit abs put: exit=%d %s", code, raw)
+	}
+	if body["path"] != "notes/abs.md" {
+		t.Fatalf("explicit abs path=%v", body["path"])
+	}
+	code, body, raw = runMain(t, "", "get", abs, "--cortex", "box")
+	if code != 0 || !strings.Contains(fmtString(body["content"]), "abs") {
+		t.Fatalf("explicit abs get: exit=%d %v", code, body)
+	}
+	code, body, raw = runMain(t, "", "get", abs)
+	if code != 0 || body["path"] != "notes/abs.md" {
+		t.Fatalf("implicit abs get: exit=%d %v", code, body)
+	}
+
+	other := t.TempDir()
+	code, body, _ = runMain(t, "", "register", "box", other, "--vcs", "none")
+	if code == 0 || body["error"] != "duplicate_cortex" {
+		t.Fatalf("name dup: exit=%d body=%v", code, body)
+	}
+	code, body, _ = runMain(t, "", "register", "other", repo, "--vcs", "none")
+	if code == 0 || body["error"] != "duplicate_path" {
+		t.Fatalf("path dup: exit=%d body=%v", code, body)
+	}
+}
+
+func fmtString(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func TestCLISearchModeTable(t *testing.T) {
+	setupCortex(t)
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "cmd.log")
+	script := `#!/bin/sh
+while [ "$1" = "--index" ]; do shift 2; done
+echo "$1" >> ` + logPath + `
+echo '[]'
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "qmd"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	cases := []struct {
+		args []string
+		cmd  string
+	}{
+		{[]string{"search", "q"}, "query"},
+		{[]string{"search", "q", "--mode", "hybrid"}, "query"},
+		{[]string{"search", "q", "--mode", "bm25"}, "search"},
+		{[]string{"search", "q", "--mode", "vector"}, "vsearch"},
+	}
+	for _, tc := range cases {
+		os.Remove(logPath)
+		code, _, raw := runMain(t, "", tc.args...)
+		if code != 0 {
+			t.Fatalf("args %v exit=%d %s", tc.args, code, raw)
+		}
+		got, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatalf("args %v log: %v", tc.args, err)
+		}
+		if strings.TrimSpace(string(got)) != tc.cmd {
+			t.Errorf("args %v invoked %q, want %q", tc.args, strings.TrimSpace(string(got)), tc.cmd)
+		}
+	}
+	code, body, _ := runMain(t, "", "search", "q", "--mode", "semantic")
+	if code == 0 || body["error"] != "search_unavailable" {
+		t.Fatalf("unknown mode: exit=%d body=%v", code, body)
+	}
+}

@@ -22,7 +22,7 @@ and executive orientation briefs (`brief`). The CLI and bundled skill
 ```sh
 exocortex register daybook ~/Development/misty-step/daybook
 exocortex brief "<topic>"                               # executive orientation briefing
-exocortex search "<query>" [--type decision|memo|session] # hybrid semantic search (BM25 + Qwen rerank)
+exocortex search "<query>" [--mode hybrid|bm25|vector] [--type decision|memo|session] # omitted mode is hybrid; pass bm25 for deterministic
 exocortex get <path>                                    # read from committed Git HEAD snapshot
 exocortex note "<thought>"                              # atomic memo capture (~2s)
 exocortex put <path> --from draft.md                    # create-only (fails if path exists)
@@ -33,13 +33,48 @@ exocortex sync [--cortex <name>]                       # refresh QMD index and e
 exocortex status [--cortex <name>]                     # dirty markers, last sync, last error
 ```
 
+## Develop
+
+Clone-to-green:
+
+```sh
+./scripts/check.sh
+```
+
+That is the owned gate: `gofmt`, `go vet`, `golangci-lint` cyclop ≤ 15
+(failing fuse), gitleaks, govulncheck, module token budgets,
+`go test -race`, and a CLI smoke (`register` → `put` → `get` → `lint`
+on a temp cortex). `scripts/lint-report.sh` prints gocognit, nestif,
+funlen, maintidx, staticcheck, errcheck, and dupl without failing.
+Go 1.26.6 is required (`go.mod`); 1.26.5 stdlib is govulncheck-red.
+
+
+
+Install the binary so `go version -m` names this module:
+
+```sh
+go install -trimpath ./cmd/exocortex
+```
+
+The user timer runs `~/.local/bin/exocortex`. Rebuild after merge. Roll
+back by installing the previous commit the same way.
+
+```sh
+./scripts/install-hooks.sh   # core.hooksPath=.githooks
+```
+
+
 ## Docs
 
 - [SPEC.md](SPEC.md) — full design: decisions, contracts, delivery plan
 - [VISION.md](VISION.md) — why this exists
 - [ADR-0001](docs/adr/0001-exocortex-kernel.md) — accepted kernel decision
 - [skills/exocortex/SKILL.md](skills/exocortex/SKILL.md) — bundled agent skill
-  (canonical copy installed into omp-config)
+  (source; `scripts/install-skill.sh` writes omp-config; omp-config `./install` deploys live)
+
+Clone-to-green: `go test ./...`. Generate the omp-config copy with
+`scripts/install-skill.sh <omp-config>/skills/exocortex`. Deploy live with
+omp-config `./install`. Drift fails `skills/exocortex/check-source.sh` in omp-config.
 
 ## Provenance
 

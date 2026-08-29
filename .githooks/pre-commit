@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+if ! command -v go >/dev/null 2>&1; then
+	echo "pre-commit: missing go" >&2
+	exit 2
+fi
+
+bad=$(gofmt -l cmd internal)
+if [ -n "$bad" ]; then
+	printf '%s\n' "pre-commit: gofmt needed:" $bad >&2
+	echo "repair: gofmt -w cmd internal" >&2
+	exit 1
+fi
+
+if ! command -v golangci-lint >/dev/null 2>&1; then
+	echo "pre-commit: missing golangci-lint; go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1" >&2
+	exit 2
+fi
+golangci-lint run --enable-only=cyclop ./...
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+	echo "pre-commit: missing gitleaks v8.30.1" >&2
+	exit 2
+fi
+gitleaks detect --no-git --source "$repo_root" --no-banner --redact --exit-code 1

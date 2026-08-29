@@ -50,120 +50,139 @@ var beforePushHook func()
 // validate → no-op short-circuit → stamp → atomic write → VCS tail,
 // all inside one per-cortex critical section.
 func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) {
+	c, rel, op, abs, conf := bindPutTarget(cs, in)
+	if conf != nil {
+		return nil, conf
+	}
+	lock, conf := lockNamed(c.Name, op, rel)
+	if conf != nil {
+		return nil, conf
+	}
+	defer lock.release()
+
+	res := &PutResult{Operation: op, Cortex: c.Name, Path: rel}
+	dir, abs, base, conf := preparePutRoot(c, rel, op, abs)
+	if conf != nil {
+		return nil, conf
+	}
+	stored := loadStoredBytes(c, dir, abs, rel)
+	if conf = evaluatePutCAS(op, rel, stored, in); conf != nil {
+		return nil, conf
+	}
+	payload, conf := validatePutNote(c, op, rel, stored, in, res)
+	if conf != nil {
+		return nil, conf
+	}
+	if res.Noop {
+		return res, nil
+	}
+	if conf = commitPutNote(c, in, payload, abs, rel, dir, base, op, res); conf != nil {
+		return nil, conf
+	}
+	recordDirty(res, c.Name)
+	return res, nil
+}
+
+func bindPutTarget(cs []Cortex, in PutInput) (*Cortex, string, string, string, *Conflict) {
 	op := "create"
 	if in.Expects != "" {
 		op = "update"
 	}
 	c, rel, err := Resolve(cs, in.CortexName, in.Path)
 	if err != nil {
-		return nil, conflict("resolve_failed", op, in.Path,
+		return nil, "", op, "", conflict("resolve_failed", op, in.Path,
 			"use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
 	}
 	rel = filepath.ToSlash(rel)
 	abs := filepath.Join(c.Path, filepath.FromSlash(rel))
-
-	// Journal files are an append-only raw stream (ADR-0002): once
-	// written they are never updated, by anyone, including instructed
-	// agents. Enforced structurally on the resolved cortex prefix.
 	if pfx := effectiveJournalPrefix(c); rel == pfx || strings.HasPrefix(rel, pfx+"/") {
 		if op == "update" {
-			return nil, conflict("journal_immutable", op, rel,
+			return nil, "", op, "", conflict("journal_immutable", op, rel,
 				"journal micro-memories are append-only; supersede by writing a new note that links back to this one",
 				nil)
 		}
 	}
+	return c, rel, op, abs, nil
+}
 
-	// Note: there is no intent inference and no separate missing_expects
-	// code (operator decision 2026-08-21): bare put on any existing path
-	// conflicts `exists`; updates simply require --expects. A malformed
-	// or stale hash falls out as an ordinary CAS revision_conflict.
-
-	lock, lerr := acquireLock(c.Name)
+func lockNamed(name, op, rel string) (*cortexLock, *Conflict) {
+	lock, lerr := acquireLock(name)
 	if lerr != nil {
 		return nil, conflict("lock_failed", op, rel, "fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
 	}
-	defer lock.release()
+	return lock, nil
+}
 
-	res := &PutResult{Operation: op, Cortex: c.Name, Path: rel}
-
-	// Publisher resolution — the persistent clean-writer clone is the
-	// sole publisher for daybook cortices. All existence and CAS
-	// checks run against the publisher tree, never the human checkout.
-
-	var base string
-	dir := c.Path // write target: the registered checkout, or its clean-writer clone
-	if c.VCS == "daybook" {
-		// The persistent clean-writer clone is the SOLE publisher for
-		// daybook cortices. The registered human checkout is never
-		// scanned, stashed, or used as transaction state.
-		wdir, werr := ensureWriter(c.Name, c.Path)
-		if werr != nil {
-			return nil, conflict("writer_unavailable", op, rel,
-				"failed to provision publisher clone; daybook cortices require a valid git origin",
-				map[string]any{"detail": werr.Error()})
-		}
-		dir = wdir
-		abs = filepath.Join(dir, filepath.FromSlash(rel))
-		// Step 2 scan on the SELECTED root before refresh — a dirty or
-		// leftover-warm writer must not be modified if unclean.
-		if conf := preflight(dir, rel, op == "update"); conf != nil {
-			return nil, conf
-		}
-		if hasUpstream(dir) {
-			if _, gerr := git(dir, "pull", "--rebase"); gerr != nil {
-				return nil, conflict("refresh_failed", op, rel,
-					"resolve the pull failure and retry; nothing was written",
-					map[string]any{"detail": gerr.(*GitError).Stderr})
-			}
-		}
-		b, gerr := git(dir, "rev-parse", "HEAD")
-		if gerr != nil {
-			return nil, conflict("refresh_failed", op, rel, "the cortex has no HEAD commit; make an initial commit", map[string]any{"detail": gerr.(*GitError).Stderr})
-		}
-		base = strings.TrimSpace(b)
-
-		// Step 3 recheck: the pull window may have changed state
-		// (SPEC — REPEAT step 2's scan post-refresh).
-		if conf := preflight(dir, rel, op == "update"); conf != nil {
-			return nil, conf
-		}
+func preparePutRoot(c *Cortex, rel, op, abs string) (dir, outAbs, base string, conf *Conflict) {
+	dir = c.Path // caller/none; daybook overwrites with publisher clone
+	outAbs = abs
+	if c.VCS != "daybook" {
+		return dir, outAbs, "", nil
 	}
+	wdir, werr := ensureWriter(c.Name, c.Path)
+	if werr != nil {
+		return "", "", "", conflict("writer_unavailable", op, rel,
+			"failed to provision publisher clone; daybook cortices require a valid git origin",
+			map[string]any{"detail": werr.Error()})
+	}
+	dir = wdir
+	outAbs = filepath.Join(dir, filepath.FromSlash(rel))
+	if conf = preflight(dir, rel, op == "update"); conf != nil {
+		return "", "", "", conf
+	}
+	if conf = refreshWriter(dir, op, rel); conf != nil {
+		return "", "", "", conf
+	}
+	b, gerr := git(dir, "rev-parse", "HEAD")
+	if gerr != nil {
+		return "", "", "", conflict("refresh_failed", op, rel, "the cortex has no HEAD commit; make an initial commit", map[string]any{"detail": gerr.(*GitError).Stderr})
+	}
+	base = strings.TrimSpace(b)
+	if conf = preflight(dir, rel, op == "update"); conf != nil {
+		return "", "", "", conf
+	}
+	return dir, outAbs, base, nil
+}
 
-	// CAS against fresh committed state.
-	var stored []byte
+func loadStoredBytes(c *Cortex, dir, abs, rel string) []byte {
 	if c.VCS == "daybook" {
 		if raw, gerr := git(dir, "show", "HEAD:"+filepath.ToSlash(rel)); gerr == nil {
-			stored = []byte(raw)
+			return []byte(raw)
 		}
-	} else {
-		if raw, serr := os.ReadFile(abs); serr == nil {
-			stored = raw
-		}
+		return nil
 	}
+	if raw, serr := os.ReadFile(abs); serr == nil {
+		return raw
+	}
+	return nil
+}
 
+func evaluatePutCAS(op, rel string, stored []byte, in PutInput) *Conflict {
 	switch {
 	case op == "create" && stored != nil:
-		return nil, conflict("exists", op, rel, "bare put creates only; read the note with get and update it with --expects", nil)
+		return conflict("exists", op, rel, "bare put creates only; read the note with get and update it with --expects", nil)
 	case op == "update" && stored == nil:
-		return nil, conflict("not_found", op, rel, "the note vanished; search the cortex and re-apply on top of current state", nil)
+		return conflict("not_found", op, rel, "the note vanished; search the cortex and re-apply on top of current state", nil)
 	}
-	storedRev := ""
 	if op == "update" {
-		storedRev = Revision(stored)
+		storedRev := Revision(stored)
 		if storedRev != in.Expects {
 			conf := conflict("revision_conflict", op, rel,
 				"remote or a peer moved this note; re-read with get, re-apply your change on top, retry with the new revision",
 				map[string]any{"expected": in.Expects, "actual": storedRev})
 			preservePayload(in, conf)
-			return nil, conf
+			return conf
 		}
 	}
+	return nil
+}
 
-	// Validate under the cortex profile BEFORE any comparison or write.
-	findings, verr := fm.Validate(c.Profile, fm.Split(in.Payload))
+func validatePutNote(c *Cortex, op, rel string, stored []byte, in PutInput, res *PutResult) (fm.Document, *Conflict) {
+	payload := fm.ParseDocument(in.Payload)
+	findings, verr := fm.Validate(c.Profile, payload)
 	if verr != nil {
 		f, _ := fm.ContractFinding(verr)
-		return nil, conflict("invalid_note", op, rel,
+		return fm.Document{}, conflict("invalid_note", op, rel,
 			"fix the payload frontmatter; the cortex profile is "+c.Profile,
 			map[string]any{"rule": f.Rule, "message": f.Message})
 	}
@@ -172,99 +191,58 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 			res.Warnings = append(res.Warnings, f)
 		}
 	}
-
-	// created is immutable (SPEC): an update that changes or drops an
-	// existing non-empty created aborts as data; filling a MISSING
-	// created is legal. Comparison uses the lexical scalar text —
-	// yaml.v3 would decode unquoted timestamps to time.Time and hide
-	// the common case from map assertions.
 	if op == "update" {
-		storedNote := fm.Split(stored)
-		if storedCreated, ok := fm.TopLevelScalar(storedNote, "created"); ok && strings.TrimSpace(storedCreated) != "" {
-			submitted, pok := fm.TopLevelScalar(fm.Split(in.Payload), "created")
+		storedDoc := fm.ParseDocument(stored)
+		if storedCreated, ok := storedDoc.Scalar("created"); ok && strings.TrimSpace(storedCreated) != "" {
+			submitted, pok := payload.Scalar("created")
 			if !pok || submitted != storedCreated {
-				return nil, conflict("created_immutable", op, rel,
+				return fm.Document{}, conflict("created_immutable", op, rel,
 					"created never changes; resubmit with created: "+storedCreated,
 					map[string]any{"stored": storedCreated, "submitted": submitted})
 			}
 		}
 	}
-	// No-op short-circuit: identical retries are free. Two forms
-	// qualify: the PINNED byte-equality against stored content (the
-	// get → put-unchanged round trip carries the stamp back), and
-	// draft-retry equivalence, where the payload matches stored minus
-	// the kernel-owned provenance block.
 	if op == "update" && (bytes.Equal(stored, in.Payload) ||
 		bytes.Equal(fm.StripProvenance(stored), in.Payload)) {
 		res.Noop = true
-		res.Revision = storedRev
-		return res, nil
+		res.Revision = Revision(stored)
 	}
+	return payload, nil
+}
 
-	// Stamp provenance, atomic write.
-	final := fm.SpliceProvenance(in.Payload, fm.Provenance{
+func commitPutNote(c *Cortex, in PutInput, payload fm.Document, abs, rel, dir, base, op string, res *PutResult) *Conflict {
+	final := fm.SpliceProvenance(payload.Note.Raw, fm.Provenance{
 		Agent: agentID(in.Agent), At: time.Now(), Via: viaID(in.Via),
 	})
 	if werr := atomicWrite(abs, final); werr != nil {
-		return nil, conflict("write_failed", op, rel, "fix filesystem access and retry", map[string]any{"detail": werr.Error()})
+		return conflict("write_failed", op, rel, "fix filesystem access and retry", map[string]any{"detail": werr.Error()})
 	}
 	res.Revision = Revision(final)
-
-	// VCS tail.
-	if c.VCS == "daybook" {
-		if _, gerr := git(dir, "add", "--", filepath.FromSlash(rel)); gerr != nil {
-			return nil, conflict("stage_failed", op, rel, "inspect the repository state; the file is written but uncommitted", map[string]any{"detail": gerr.(*GitError).Stderr})
-		}
-		msg := fmt.Sprintf("vault(%s): exocortex put %s via %s", commitScope(c, rel), rel, agentID(in.Agent))
-		if _, gerr := git(dir, "commit", "-m", msg, "--", filepath.FromSlash(rel)); gerr != nil {
-			return nil, conflict("commit_failed", op, rel, "inspect the repository state; the file is written but uncommitted", map[string]any{"detail": gerr.(*GitError).Stderr})
-		}
-		head, gerr := git(dir, "rev-parse", "HEAD")
-		if gerr != nil {
-			return nil, conflict("commit_failed", op, rel, "the file is written and committed; revision lookup failed", map[string]any{"detail": gerr.(*GitError).Stderr})
-		}
-		res.Commit = strings.TrimSpace(head)
-		if h := beforePushHook; h != nil {
-			beforePushHook = nil
-			h()
-		}
-		if hasUpstream(dir) {
-			if _, perr := git(dir, "push"); perr != nil {
-				ge := perr.(*GitError)
-				unwindErrs := unwindAndConverge(dir, base, rel)
-				actual := Revision(mustRead(abs))
-				var conf *Conflict
-				if op == "create" {
-					// A create that loses a push race means the winner's
-					// note now exists at this path (operator decision:
-					// existing path -> exists).
-					conf = conflict("exists", op, rel,
-						"a peer created this note first; after the automatic restore-to-remote, re-read with get and update it with --expects",
-						map[string]any{
-							"actual":      actual,
-							"push_stderr": strings.TrimSpace(ge.Stderr),
-							"unwind":      unwindErrs,
-							"base":        base,
-						})
-				} else {
-					conf = conflict("revision_conflict", op, rel,
-						"remote moved; re-read with get and retry",
-						map[string]any{
-							"expected":    in.Expects,
-							"actual":      actual,
-							"push_stderr": strings.TrimSpace(ge.Stderr),
-							"unwind":      unwindErrs,
-							"base":        base,
-						})
-				}
-				preservePayload(in, conf)
-				return nil, conf
-			}
-			res.Pushed = true
-		}
+	if c.VCS != "daybook" {
+		return nil
 	}
-	recordDirty(res, c.Name)
-	return res, nil
+	return daybookTail(c, in, rel, dir, abs, base, op, res, final)
+}
+
+func daybookTail(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult, candidate []byte) *Conflict {
+	msg := fmt.Sprintf("vault(%s): exocortex put %s via %s", commitScope(c, rel), rel, agentID(in.Agent))
+	head, conf := commitPath(dir, rel, msg, op)
+	if conf != nil {
+		return conf
+	}
+	res.Commit = head
+	if h := beforePushHook; h != nil {
+		beforePushHook = nil
+		h()
+	}
+	if !hasUpstream(dir) {
+		return nil
+	}
+	if perr := pushRepo(dir); perr != nil {
+		return handlePushFailure(c, in, rel, dir, abs, base, op, res, candidate, perr, maxPublishReplay)
+	}
+	res.Pushed = true
+	return nil
 }
 
 // recordDirty writes a sync marker after a successful durable write.
@@ -307,53 +285,9 @@ func preflight(repo, rel string, checkDest bool) *Conflict {
 	if err != nil {
 		return conflict("status_failed", "put", rel, "inspect the repository state and retry", map[string]any{"detail": err.(*GitError).Stderr})
 	}
-	var stagedForeign, unstagedForeign []string
-	destState := ""
-	rest := out
-	for len(rest) >= 4 { // "XY " + at least a 1-byte path
-		x, y := rest[0], rest[1]
-		if rest[2] != ' ' {
-			return conflict("status_failed", "put", rel,
-				"git status produced an unexpected record; inspect the repository manually",
-				map[string]any{"detail": fmt.Sprintf("malformed porcelain record %q", rest[:min(16, len(rest))])})
-		}
-		rest = rest[3:] // XY plus its separator space
-		var path string
-		if i := strings.IndexByte(rest, 0); i >= 0 {
-			path, rest = rest[:i], rest[i+1:]
-		} else {
-			path, rest = rest, ""
-		}
-		if x == 'R' || x == 'C' { // rename/copy: second NUL-separated orig path follows
-			if i := strings.IndexByte(rest, 0); i >= 0 {
-				rest = rest[i+1:]
-			} else {
-				rest = ""
-			}
-		}
-		untracked := x == '?' && y == '?'
-		staged := x != ' ' && !untracked // index differs from HEAD
-		worktreeDirty := y == 'M' || y == 'D' || y == 'T' || y == 'C'
-		switch {
-		case path == rel:
-			// The destination is never "foreign". For creates the CAS
-			// existence check answers `exists` regardless of state;
-			// only updates abort on destination dirtiness.
-			if checkDest {
-				switch {
-				case staged:
-					destState = "staged"
-				case untracked || worktreeDirty:
-					destState = "unstaged"
-				}
-			}
-		case untracked:
-			// untracked foreign files are someone's fresh work; allowed
-		case staged:
-			stagedForeign = append(stagedForeign, path)
-		case worktreeDirty:
-			unstagedForeign = append(unstagedForeign, path)
-		}
+	stagedForeign, unstagedForeign, destState, conf := classifyPorcelain(out, rel, checkDest)
+	if conf != nil {
+		return conf
 	}
 	if len(stagedForeign) > 0 {
 		return conflict("foreign_staged_state", "put", rel,
@@ -373,6 +307,64 @@ func preflight(repo, rel string, checkDest bool) *Conflict {
 	return nil
 }
 
+func classifyPorcelain(out, rel string, checkDest bool) (stagedForeign, unstagedForeign []string, destState string, conf *Conflict) {
+	rest := out
+	for len(rest) >= 4 { // "XY " + at least a 1-byte path
+		x, y := rest[0], rest[1]
+		if rest[2] != ' ' {
+			conf = conflict("status_failed", "put", rel,
+				"git status produced an unexpected record; inspect the repository manually",
+				map[string]any{"detail": fmt.Sprintf("malformed porcelain record %q", rest[:min(16, len(rest))])})
+			return
+		}
+		path, next, ok := takePorcelainPath(rest[3:], x)
+		if !ok {
+			return
+		}
+		rest = next
+		classifyPorcelainPath(path, x, y, rel, checkDest, &stagedForeign, &unstagedForeign, &destState)
+	}
+	return
+}
+
+func takePorcelainPath(rest string, x byte) (path, next string, ok bool) {
+	if i := strings.IndexByte(rest, 0); i >= 0 {
+		path, rest = rest[:i], rest[i+1:]
+	} else {
+		path, rest = rest, ""
+	}
+	if x == 'R' || x == 'C' { // rename/copy: second NUL-separated orig path follows
+		if i := strings.IndexByte(rest, 0); i >= 0 {
+			rest = rest[i+1:]
+		} else {
+			rest = ""
+		}
+	}
+	return path, rest, true
+}
+
+func classifyPorcelainPath(path string, x, y byte, rel string, checkDest bool, stagedForeign, unstagedForeign *[]string, destState *string) {
+	untracked := x == '?' && y == '?'
+	staged := x != ' ' && !untracked
+	worktreeDirty := y == 'M' || y == 'D' || y == 'T' || y == 'C'
+	switch {
+	case path == rel:
+		if checkDest {
+			switch {
+			case staged:
+				*destState = "staged"
+			case untracked || worktreeDirty:
+				*destState = "unstaged"
+			}
+		}
+	case untracked:
+	case staged:
+		*stagedForeign = append(*stagedForeign, path)
+	case worktreeDirty:
+		*unstagedForeign = append(*unstagedForeign, path)
+	}
+}
+
 // unwindAndConverge restores the pre-put state path-scoped and then
 // converges the clone onto the remote tip so a lost race never leaves
 // stale bytes behind. HEAD moves with `reset --soft` — the index is
@@ -384,12 +376,19 @@ func preflight(repo, rel string, checkDest bool) *Conflict {
 // Errors are collected as strings; every step is best-effort and
 // non-destructive beyond the touched path.
 func unwindAndConverge(repo, base, rel string) []string {
+	errs := unwindPath(repo, base, rel)
+	if _, err := git(repo, "fetch"); err != nil {
+		return append(errs, err.Error())
+	}
+	return append(errs, convergeTo(repo, "@{u}")...)
+}
+
+func unwindPath(repo, base, rel string) []string {
 	var errs []string
 	if _, err := git(repo, "reset", "--soft", base); err != nil {
 		errs = append(errs, err.Error())
 	}
 	if _, cerr := git(repo, "cat-file", "-e", base+":"+rel); cerr != nil {
-		// Created by this operation: drop it from index and disk.
 		if _, err := git(repo, "rm", "--cached", "--force", "--", filepath.FromSlash(rel)); err != nil {
 			errs = append(errs, err.Error())
 		}
@@ -399,14 +398,36 @@ func unwindAndConverge(repo, base, rel string) []string {
 	} else if _, err := git(repo, "restore", "--source="+base, "--staged", "--worktree", "--", filepath.FromSlash(rel)); err != nil {
 		errs = append(errs, err.Error())
 	}
-	if _, err := git(repo, "fetch"); err != nil {
-		errs = append(errs, err.Error())
-		return errs
-	}
-	if _, err := git(repo, "merge", "--ff-only", "@{u}"); err != nil {
-		errs = append(errs, "ff-only restore failed; next put's refresh heals: "+err.Error())
-	}
 	return errs
+}
+
+func convergeTo(repo, tip string) []string {
+	if _, err := git(repo, "merge", "--ff-only", tip); err != nil {
+		return []string{"ff-only restore failed; next put's refresh heals: " + err.Error()}
+	}
+	return nil
+}
+
+func refreshWriter(dir, op, rel string) *Conflict {
+	if !hasUpstream(dir) {
+		return nil
+	}
+	if _, gerr := git(dir, "fetch"); gerr != nil {
+		return conflict("refresh_failed", op, rel,
+			"resolve the fetch failure and retry; nothing was written",
+			map[string]any{"detail": gerr.(*GitError).Stderr})
+	}
+	if _, gerr := git(dir, "merge-base", "--is-ancestor", "HEAD", "@{u}"); gerr != nil {
+		return conflict("refresh_failed", op, rel,
+			"writer HEAD is not an ancestor of upstream (unpublished candidate or divergence); inspect the publisher clone; nothing was written",
+			map[string]any{"detail": "HEAD is ahead of or diverged from @{u}"})
+	}
+	if _, gerr := git(dir, "merge", "--ff-only", "@{u}"); gerr != nil {
+		return conflict("refresh_failed", op, rel,
+			"writer is not a fast-forward of upstream; inspect the publisher clone; nothing was written",
+			map[string]any{"detail": gerr.(*GitError).Stderr})
+	}
+	return nil
 }
 
 // preservePayload persists an in-memory payload (stdin/MCP) when a put
@@ -540,11 +561,7 @@ func writerDir(c *Cortex) string {
 	return w
 }
 
-// effectiveRoot is where this cortex's bytes live for ALL kernel
-// operations: once a clean-writer clone exists it is the root (the
-// shared checkout may be stale or dirty); otherwise the registered
-// checkout.
-// effectiveRoot returns the kernel-owned publisher tree for the cortex.
+// effectiveRoot returns the kernel-owned publisher tree for daybook cortices.
 // For daybook cortices with an origin remote, it ensures the publisher
 // clone is provisioned; if provisioning fails, it returns an error
 // failing closed to prevent reading uncommitted human dirt.
@@ -568,14 +585,6 @@ func mustEffectiveRoot(c *Cortex) string {
 	return root
 }
 
-// effectiveJournalPrefix is the cortex's note-file directory: the
-// registered field, or the plain default for legacy registry entries.
-func effectiveJournalPrefix(c *Cortex) string {
-	if c.JournalPrefix != "" {
-		return c.JournalPrefix
-	}
-	return "journal"
-}
 func ensureWriter(name, shared string) (string, error) {
 	cfg, err := ConfigDir()
 	if err != nil {

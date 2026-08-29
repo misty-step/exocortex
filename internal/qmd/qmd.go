@@ -25,6 +25,10 @@ type Hit struct {
 	Snippet string  `json:"snippet"`
 }
 
+// DefaultMode is the omitted-mode contract: hybrid retrieval with a
+// single BM25 fallback owned by Search.
+const DefaultMode = "hybrid"
+
 // subcommand maps retrieval modes onto qmd subcommands.
 var subcommand = map[string]string{
 	"hybrid": "query",
@@ -34,7 +38,7 @@ var subcommand = map[string]string{
 
 func subcommandFor(mode string) (string, error) {
 	if mode == "" {
-		mode = "bm25"
+		mode = DefaultMode
 	}
 	sub, ok := subcommand[mode]
 	if !ok {
@@ -76,7 +80,9 @@ func qmdArgs(args ...string) []string {
 }
 
 // Search runs one qmd retrieval with a sanitized environment and returns raw hits.
-// If hybrid query expansion fails, it falls back to deterministic BM25 search.
+// Omitted mode is hybrid. If qmd query errors while the context remains
+// active, Search falls back once to deterministic BM25. Explicit bm25 and
+// vector do not fall back.
 func Search(ctx context.Context, query string, collections []string, mode string, limit int) ([]Hit, error) {
 	sub, err := subcommandFor(mode)
 	if err != nil {
@@ -112,7 +118,7 @@ func Search(ctx context.Context, query string, collections []string, mode string
 		return parseJSONHits(cmdName, stdoutBuf.Bytes())
 	}
 	hits, err := run(sub)
-	if err != nil && (mode == "hybrid" || (mode == "" && sub == "query")) && ctx.Err() == nil {
+	if err != nil && sub == "query" && ctx.Err() == nil {
 		return run("search")
 	}
 	return hits, err
@@ -123,21 +129,12 @@ func Search(ctx context.Context, query string, collections []string, mode string
 // appear at a line boundary followed by valid array contents ('{' or ']').
 func findJSONArrayStart(data []byte) (int, bool) {
 	for offset := 0; offset < len(data); {
-		// Skip leading line-break and whitespace bytes
-		for offset < len(data) && (data[offset] == ' ' || data[offset] == '\t' || data[offset] == '\r' || data[offset] == '\n') {
-			offset++
-		}
+		offset = skipWS(data, offset)
 		if offset >= len(data) {
 			break
 		}
-		if data[offset] == '[' {
-			rest := data[offset+1:]
-			for len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\r' || rest[0] == '\n') {
-				rest = rest[1:]
-			}
-			if len(rest) > 0 && (rest[0] == '{' || rest[0] == ']') {
-				return offset, true
-			}
+		if data[offset] == '[' && arrayOpener(data[offset+1:]) {
+			return offset, true
 		}
 		nl := bytes.IndexByte(data[offset:], '\n')
 		if nl < 0 {
@@ -146,6 +143,18 @@ func findJSONArrayStart(data []byte) (int, bool) {
 		offset += nl + 1
 	}
 	return -1, false
+}
+
+func skipWS(data []byte, offset int) int {
+	for offset < len(data) && (data[offset] == ' ' || data[offset] == '\t' || data[offset] == '\r' || data[offset] == '\n') {
+		offset++
+	}
+	return offset
+}
+
+func arrayOpener(rest []byte) bool {
+	rest = rest[skipWS(rest, 0):]
+	return len(rest) > 0 && (rest[0] == '{' || rest[0] == ']')
 }
 
 // parseJSONHits parses stdout into a slice of Hit records in memory.

@@ -18,7 +18,7 @@ Source artifact: daybook `misty-step/exocortex-kernel.md`.
 - Daybook is cortex #1. Core operations: `register/put/get/search/brief/note/sync/status/log/lint`.
 - Sole-publisher architecture: for Daybook cortices, the kernel-owned clone in
   `~/.config/exocortex/writers/<cortex>` is the exclusive write and read authority.
-  The kernel runs `pull --rebase`, stages touched paths only, commits, and pushes
+  The kernel fetches, requires HEAD to be an ancestor of upstream, fast-forwards, stages touched paths only, commits, and pushes
   from the isolated clone. Registered human workspaces are never preflighted,
   stashed, committed to, or mutated.
 - Fail-closed operations: a missing origin remote or provisioning error fails
@@ -27,7 +27,9 @@ Source artifact: daybook `misty-step/exocortex-kernel.md`.
 - Fleet delivery: the CLI (`exocortex`) and bundled skill (`skill://exocortex`)
   is the official, universal fleet interface. The fleet runs on OMP; per-harness
   MCP fleet installations (Slice 2) were retired by operator decision (2026-08-24)
-  as unnecessary complexity.
+  as unnecessary complexity. Skill source is `skills/exocortex/SKILL.md`.
+  `scripts/install-skill.sh` generates the omp-config committed copy.
+  omp-config `./install` deploys live. Do not hand-edit generated copies.
 ## Open decisions
 
 - Language: Go recommended (velocity, single-binary fleet distribution);
@@ -51,6 +53,8 @@ Source artifact: daybook `misty-step/exocortex-kernel.md`.
 - Trunk-based on `master`; semantic commits (`type(scope): subject`).
 - Never force-push. Stage only files you touched; concurrent agents work in
   this repo.
+- Clone-to-green is `./scripts/check.sh`. CI runs the same command.
+
 - Org defaults apply: Go or Rust (CR-01), minimal docs surface (DC-01), ADRs
   immutable once accepted (DC-02).
 - History note: this repo previously hosted an "evidence core" concept
