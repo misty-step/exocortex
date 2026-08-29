@@ -25,7 +25,7 @@ func TestLintReservedIndexAndLog(t *testing.T) {
 	writeFile(t, dir, "tools/index.md", "# Tools\n\n* [OKF](../systems/okf.md) - floor\n")
 	writeFile(t, dir, "systems/okf.md", "---\ntype: Concept\n---\nbody\n")
 
-	c, err := Register("box", dir, "none", "daybook", "")
+	c, err := Register("box", dir, "none", "okf", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestLintRejectsMalformedReservedFiles(t *testing.T) {
 	testConfigEnv(t)
 	dir := t.TempDir()
 	writeFile(t, dir, "index.md", "anything")
-	c, err := Register("box", dir, "none", "daybook", "")
+	c, err := Register("box", dir, "none", "okf", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,5 +72,22 @@ func TestLintRejectsMalformedReservedFiles(t *testing.T) {
 	}
 	if res.Errors == 0 {
 		t.Fatal("non-ISO log heading must fail lint")
+	}
+}
+
+func TestLintDaybookMocIndexStillANote(t *testing.T) {
+	testConfigEnv(t)
+	dir := t.TempDir()
+	writeFile(t, dir, "journal/2026/index.md", "---\ntype: moc\n---\n\n```dataview\nLIST\n```\n")
+	c, err := Register("day", dir, "none", "daybook", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, conf := Lint([]Cortex{*c}, "day", "journal/2026/index.md")
+	if conf != nil {
+		t.Fatal(conf.Code)
+	}
+	if res.Errors != 0 {
+		t.Fatalf("daybook moc index must remain a type-floor note: %+v", res.Findings)
 	}
 }

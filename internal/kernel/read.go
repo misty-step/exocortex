@@ -113,8 +113,8 @@ type LintResult struct {
 
 // Lint runs the cortex's validation profile over one note or every .md
 // file in the cortex. Findings are tiered; only errors block.
-// Reserved OKF files index.md and log.md use dedicated format checks
-// instead of the type floor. Every other .md file still requires type.
+// Profile okf treats reserved index.md and log.md as OKF catalogs, not notes.
+// Profiles daybook and strict still apply the type floor to every .md file.
 func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 	var c *Cortex
 	var rel string
@@ -190,15 +190,7 @@ func lintOne(profile, abs, rel string) ([]fm.Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	kind, rootIndex := fm.ReservedMarkdown(rel)
-	switch kind {
-	case "index":
-		return fm.ValidateIndex(raw, rootIndex)
-	case "log":
-		return fm.ValidateLog(raw)
-	default:
-		return fm.Validate(profile, fm.ParseDocument(raw))
-	}
+	return fm.ValidatePath(profile, rel, raw)
 }
 
 // Revision is the lowercase hex sha256 of a note's exact file bytes —

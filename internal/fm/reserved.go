@@ -9,6 +9,22 @@ import (
 	"time"
 )
 
+// ValidatePath applies the named profile to raw at cortex-relative rel.
+// Profile okf uses reserved index.md / log.md formats; other profiles
+// apply the note type floor to every path.
+func ValidatePath(profile, rel string, raw []byte) ([]Finding, error) {
+	if profile == "okf" {
+		kind, rootIndex := ReservedMarkdown(rel)
+		switch kind {
+		case "index":
+			return ValidateIndex(raw, rootIndex)
+		case "log":
+			return ValidateLog(raw)
+		}
+	}
+	return Validate(profile, ParseDocument(raw))
+}
+
 // ValidateIndex checks an OKF reserved index.md.
 // Nested indexes must have no frontmatter. The bundle-root index.md MAY
 // carry only okf_version. Body requires at least one ATX heading and at

@@ -292,15 +292,17 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
   - `strict` — the five-key floor (`type`, `status`, `created`,
     `description`, `tags` all present and non-empty; RFC3339 `created`);
     opt-in for future cortices that want it.
+  - `okf` — same note floor as `daybook`, plus OKF reserved-file formats
+    for `index.md` and `log.md`. `daybook` is unchanged: yearly MOC
+    indexes with `type` remain notes. `okf` is what Root registers.
   `lint` reports failures and warnings tiered; consumers of `daybook`
-  cortices MUST NOT hard-fail on warnings. Reserved basenames `index.md`
-  and `log.md` (any directory) are not notes: `lint` does not apply the
-  type floor. `index.md` has no frontmatter except the bundle-root file,
-  which MAY carry only `okf_version`; its body needs at least one ATX
-  heading and at least one `* [Title](url)` catalog bullet. `log.md` has
-  no frontmatter; every `##` heading is ISO `YYYY-MM-DD`, newest-first,
-  at least one date heading. Every other `.md` file still requires
-  non-empty `type`.
+  cortices MUST NOT hard-fail on warnings. Under `okf` only, reserved
+  basenames `index.md` and `log.md` (any directory) are not notes:
+  nested `index.md` has no frontmatter; bundle-root `index.md` MAY carry
+  only `okf_version`; body needs at least one ATX heading and at least
+  one `* [Title](url)` catalog bullet. `log.md` has no frontmatter;
+  every `##` heading is ISO `YYYY-MM-DD`, newest-first, at least one
+  date heading. Every other `.md` file still requires non-empty `type`.
 
 ### v0 acceptance proofs
 

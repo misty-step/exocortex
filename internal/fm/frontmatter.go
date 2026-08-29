@@ -114,7 +114,7 @@ var knownKeys = map[string]bool{
 // blocking under any profile.
 func Validate(profile string, d Document) ([]Finding, error) {
 	switch profile {
-	case "daybook":
+	case "daybook", "okf":
 		return validateDaybook(d)
 	case "strict":
 		return validateStrict(d)

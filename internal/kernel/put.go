@@ -183,7 +183,7 @@ func evaluatePutCAS(op, rel string, stored []byte, in PutInput) *Conflict {
 
 func validatePutNote(c *Cortex, op, rel string, stored []byte, in PutInput, res *PutResult) (fm.Document, *Conflict) {
 	payload := fm.ParseDocument(in.Payload)
-	findings, verr := fm.Validate(c.Profile, payload)
+	findings, verr := fm.ValidatePath(c.Profile, rel, in.Payload)
 	if verr != nil {
 		f, _ := fm.ContractFinding(verr)
 		return fm.Document{}, conflict("invalid_note", op, rel,
@@ -195,7 +195,7 @@ func validatePutNote(c *Cortex, op, rel string, stored []byte, in PutInput, res 
 			res.Warnings = append(res.Warnings, f)
 		}
 	}
-	if op == "update" {
+	if op == "update" && !okfReserved(c.Profile, rel) {
 		storedDoc := fm.ParseDocument(stored)
 		if storedCreated, ok := storedDoc.Scalar("created"); ok && strings.TrimSpace(storedCreated) != "" {
 			submitted, pok := payload.Scalar("created")
@@ -215,9 +215,17 @@ func validatePutNote(c *Cortex, op, rel string, stored []byte, in PutInput, res 
 }
 
 func commitPutNote(c *Cortex, in PutInput, payload fm.Document, abs, rel, dir, base, op string, res *PutResult) *Conflict {
-	final := fm.SpliceProvenance(payload.Note.Raw, fm.Provenance{
-		Agent: agentID(in.Agent), At: time.Now(), Via: viaID(in.Via),
-	})
+	final := payload.Note.Raw
+	if !okfReserved(c.Profile, rel) {
+		final = fm.SpliceProvenance(payload.Note.Raw, fm.Provenance{
+			Agent: agentID(in.Agent), At: time.Now(), Via: viaID(in.Via),
+		})
+	} else if _, verr := fm.ValidatePath(c.Profile, rel, final); verr != nil {
+		f, _ := fm.ContractFinding(verr)
+		return conflict("invalid_note", op, rel,
+			"reserved index.md/log.md must remain valid after write",
+			map[string]any{"rule": f.Rule, "message": f.Message})
+	}
 	if werr := atomicWrite(abs, final); werr != nil {
 		return conflict("write_failed", op, rel, "fix filesystem access and retry", map[string]any{"detail": werr.Error()})
 	}
@@ -226,6 +234,14 @@ func commitPutNote(c *Cortex, in PutInput, payload fm.Document, abs, rel, dir, b
 		return nil
 	}
 	return daybookTail(c, in, rel, dir, abs, base, op, res)
+}
+
+func okfReserved(profile, rel string) bool {
+	if profile != "okf" {
+		return false
+	}
+	kind, _ := fm.ReservedMarkdown(rel)
+	return kind != ""
 }
 
 func daybookTail(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult) *Conflict {

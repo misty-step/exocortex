@@ -124,7 +124,7 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `exocortex — fleet memory kernel over registered cortices
 
 Usage:
-  exocortex register <name> <path> [--vcs daybook|caller|none] [--profile daybook|strict]
+  exocortex register <name> <path> [--vcs daybook|caller|none] [--profile daybook|strict|okf]
   exocortex put <path> --from <file|-> [--expects <sha>] [--cortex <name>] [--agent <id>]
   exocortex get <path> [--cortex <name>]
   exocortex search "<query>" [--cortex <name>] [--mode hybrid|bm25|vector] [--type <kind>] [--limit <n>]  # omitted mode is hybrid
@@ -197,7 +197,7 @@ func cmdRegister(args []string) (any, *kernel.Conflict, error) {
 	fs.SetOutput(io.Discard)
 	fs.Bool("json", true, "JSON output (always on)")
 	vcs := fs.String("vcs", "", "vcs policy: daybook | caller | none (default: auto-detect)")
-	profile := fs.String("profile", "", "validation profile: daybook | strict (default daybook)")
+	profile := fs.String("profile", "", "validation profile: daybook | strict | okf (default daybook)")
 	jprefix := fs.String("journal-prefix", "", "where note files land inside the cortex (default journal)")
 	flags, pos := splitArgs(args, map[string]bool{"vcs": true, "profile": true, "journal-prefix": true})
 	if err := fs.Parse(flags); err != nil {

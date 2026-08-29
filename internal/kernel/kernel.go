@@ -28,7 +28,7 @@ type Cortex struct {
 var (
 	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	validVCS  = map[string]bool{"daybook": true, "caller": true, "none": true}
-	profiles  = map[string]bool{"daybook": true, "strict": true}
+	profiles  = map[string]bool{"daybook": true, "strict": true, "okf": true}
 	dupSuffix = ".tmp-exocortex"
 )
 
@@ -225,7 +225,7 @@ func registerPolicy(name, abs, vcs, profile string) (string, string, error) {
 	if !profiles[profile] {
 		return "", "", conflict("registration_failed", "register", name,
 			"fix the name (lowercase slug), path, vcs, or profile and retry",
-			map[string]any{"detail": fmt.Sprintf("profile %q must be daybook or strict", profile)})
+			map[string]any{"detail": fmt.Sprintf("profile %q must be daybook, strict, or okf", profile)})
 	}
 	return vcs, profile, nil
 }
