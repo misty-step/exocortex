@@ -152,9 +152,9 @@ func walkHasMarkdown(t *testing.T, root string) bool {
 }
 
 // Proof 14: two journal writers racing across clones BOTH land. A's
-// push is genuinely rejected after B's different-path note lands; the
-// retry finds A's unique path still free and publishes on top of B's
-// commit. No memory is lost to a cross-host race.
+// push is genuinely rejected after B's different-path note lands; Put
+// replays the unchanged journal path on the converged tip. No memory
+// is lost to a cross-host race.
 func TestProof14ConcurrentJournalPushesBothLand(t *testing.T) {
 	f := newFixture(t)
 	aWritten := make(chan struct{})

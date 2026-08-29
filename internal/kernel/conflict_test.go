@@ -30,6 +30,8 @@ func TestConflictClassTable(t *testing.T) {
 		{"writer_unavailable", ClassUnavailable},
 		{"cortex_unavailable", ClassUnavailable},
 		{"log_unavailable", ClassUnavailable},
+		{"publish_rejected", ClassUnavailable},
+		{"publish_unknown", ClassUnavailable},
 		{"empty_note", ClassOperation},
 		{"resolve_failed", ClassOperation},
 		{"lock_failed", ClassOperation},
@@ -170,6 +172,14 @@ func TestConflictBodyGolden(t *testing.T) {
 				t.Fatalf("Body mismatch\ngot  %#v\nwant %#v", gotNorm, wantNorm)
 			}
 		})
+	}
+}
+func TestPublicationConflictCleanUnwindIsJSONArray(t *testing.T) {
+	conf := publicationConflict("publish_rejected", "create", "notes/x.md", PutInput{}, nil, nil, "retry")
+	body := jsonRoundTrip(t, conf.Body())
+	unwind, ok := body["unwind"].([]any)
+	if !ok || len(unwind) != 0 {
+		t.Fatalf("unwind=%#v want empty JSON array", body["unwind"])
 	}
 }
 

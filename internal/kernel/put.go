@@ -130,12 +130,8 @@ func preparePutRoot(c *Cortex, rel, op, abs string) (dir, outAbs, base string, c
 	if conf = preflight(dir, rel, op == "update"); conf != nil {
 		return "", "", "", conf
 	}
-	if hasUpstream(dir) {
-		if _, gerr := git(dir, "pull", "--rebase"); gerr != nil {
-			return "", "", "", conflict("refresh_failed", op, rel,
-				"resolve the pull failure and retry; nothing was written",
-				map[string]any{"detail": gerr.(*GitError).Stderr})
-		}
+	if conf = refreshWriter(dir, op, rel); conf != nil {
+		return "", "", "", conf
 	}
 	b, gerr := git(dir, "rev-parse", "HEAD")
 	if gerr != nil {
@@ -233,7 +229,7 @@ func commitPutNote(c *Cortex, in PutInput, payload fm.Document, abs, rel, dir, b
 	if c.VCS != "daybook" {
 		return nil
 	}
-	return daybookTail(c, in, rel, dir, abs, base, op, res)
+	return daybookTail(c, in, rel, dir, abs, base, op, res, final)
 }
 
 func okfReserved(profile, rel string) bool {
@@ -244,19 +240,13 @@ func okfReserved(profile, rel string) bool {
 	return kind != ""
 }
 
-func daybookTail(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult) *Conflict {
-	if _, gerr := git(dir, "add", "--", filepath.FromSlash(rel)); gerr != nil {
-		return conflict("stage_failed", op, rel, "inspect the repository state; the file is written but uncommitted", map[string]any{"detail": gerr.(*GitError).Stderr})
-	}
+func daybookTail(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *PutResult, candidate []byte) *Conflict {
 	msg := fmt.Sprintf("vault(%s): exocortex put %s via %s", commitScope(c, rel), rel, agentID(in.Agent))
-	if _, gerr := git(dir, "commit", "-m", msg, "--", filepath.FromSlash(rel)); gerr != nil {
-		return conflict("commit_failed", op, rel, "inspect the repository state; the file is written but uncommitted", map[string]any{"detail": gerr.(*GitError).Stderr})
+	head, conf := commitPath(dir, rel, msg, op)
+	if conf != nil {
+		return conf
 	}
-	head, gerr := git(dir, "rev-parse", "HEAD")
-	if gerr != nil {
-		return conflict("commit_failed", op, rel, "the file is written and committed; revision lookup failed", map[string]any{"detail": gerr.(*GitError).Stderr})
-	}
-	res.Commit = strings.TrimSpace(head)
+	res.Commit = head
 	if h := beforePushHook; h != nil {
 		beforePushHook = nil
 		h()
@@ -264,40 +254,11 @@ func daybookTail(c *Cortex, in PutInput, rel, dir, abs, base, op string, res *Pu
 	if !hasUpstream(dir) {
 		return nil
 	}
-	if _, perr := git(dir, "push"); perr != nil {
-		return rejectedPush(op, rel, dir, abs, base, in, perr)
+	if perr := pushRepo(dir); perr != nil {
+		return handlePushFailure(c, in, rel, dir, abs, base, op, res, candidate, perr, maxPublishReplay)
 	}
 	res.Pushed = true
 	return nil
-}
-
-func rejectedPush(op, rel, dir, abs, base string, in PutInput, perr error) *Conflict {
-	ge := perr.(*GitError)
-	unwindErrs := unwindAndConverge(dir, base, rel)
-	actual := Revision(mustRead(abs))
-	var conf *Conflict
-	if op == "create" {
-		conf = conflict("exists", op, rel,
-			"a peer created this note first; after the automatic restore-to-remote, re-read with get and update it with --expects",
-			map[string]any{
-				"actual":      actual,
-				"push_stderr": strings.TrimSpace(ge.Stderr),
-				"unwind":      unwindErrs,
-				"base":        base,
-			})
-	} else {
-		conf = conflict("revision_conflict", op, rel,
-			"remote moved; re-read with get and retry",
-			map[string]any{
-				"expected":    in.Expects,
-				"actual":      actual,
-				"push_stderr": strings.TrimSpace(ge.Stderr),
-				"unwind":      unwindErrs,
-				"base":        base,
-			})
-	}
-	preservePayload(in, conf)
-	return conf
 }
 
 // recordDirty writes a sync marker after a successful durable write.
@@ -431,12 +392,19 @@ func classifyPorcelainPath(path string, x, y byte, rel string, checkDest bool, s
 // Errors are collected as strings; every step is best-effort and
 // non-destructive beyond the touched path.
 func unwindAndConverge(repo, base, rel string) []string {
+	errs := unwindPath(repo, base, rel)
+	if _, err := git(repo, "fetch"); err != nil {
+		return append(errs, err.Error())
+	}
+	return append(errs, convergeTo(repo, "@{u}")...)
+}
+
+func unwindPath(repo, base, rel string) []string {
 	var errs []string
 	if _, err := git(repo, "reset", "--soft", base); err != nil {
 		errs = append(errs, err.Error())
 	}
 	if _, cerr := git(repo, "cat-file", "-e", base+":"+rel); cerr != nil {
-		// Created by this operation: drop it from index and disk.
 		if _, err := git(repo, "rm", "--cached", "--force", "--", filepath.FromSlash(rel)); err != nil {
 			errs = append(errs, err.Error())
 		}
@@ -446,14 +414,36 @@ func unwindAndConverge(repo, base, rel string) []string {
 	} else if _, err := git(repo, "restore", "--source="+base, "--staged", "--worktree", "--", filepath.FromSlash(rel)); err != nil {
 		errs = append(errs, err.Error())
 	}
-	if _, err := git(repo, "fetch"); err != nil {
-		errs = append(errs, err.Error())
-		return errs
-	}
-	if _, err := git(repo, "merge", "--ff-only", "@{u}"); err != nil {
-		errs = append(errs, "ff-only restore failed; next put's refresh heals: "+err.Error())
-	}
 	return errs
+}
+
+func convergeTo(repo, tip string) []string {
+	if _, err := git(repo, "merge", "--ff-only", tip); err != nil {
+		return []string{"ff-only restore failed; next put's refresh heals: " + err.Error()}
+	}
+	return nil
+}
+
+func refreshWriter(dir, op, rel string) *Conflict {
+	if !hasUpstream(dir) {
+		return nil
+	}
+	if _, gerr := git(dir, "fetch"); gerr != nil {
+		return conflict("refresh_failed", op, rel,
+			"resolve the fetch failure and retry; nothing was written",
+			map[string]any{"detail": gerr.(*GitError).Stderr})
+	}
+	if _, gerr := git(dir, "merge-base", "--is-ancestor", "HEAD", "@{u}"); gerr != nil {
+		return conflict("refresh_failed", op, rel,
+			"writer HEAD is not an ancestor of upstream (unpublished candidate or divergence); inspect the publisher clone; nothing was written",
+			map[string]any{"detail": "HEAD is ahead of or diverged from @{u}"})
+	}
+	if _, gerr := git(dir, "merge", "--ff-only", "@{u}"); gerr != nil {
+		return conflict("refresh_failed", op, rel,
+			"writer is not a fast-forward of upstream; inspect the publisher clone; nothing was written",
+			map[string]any{"detail": gerr.(*GitError).Stderr})
+	}
+	return nil
 }
 
 // preservePayload persists an in-memory payload (stdin/MCP) when a put

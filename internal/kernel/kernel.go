@@ -7,23 +7,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	cortexregistry "github.com/misty-step/exocortex/internal/registry"
 )
 
 // Cortex is a registered knowledge corpus.
-type Cortex struct {
-	Name          string `json:"name"`
-	Path          string `json:"path"` // absolute filesystem root
-	VCS           string `json:"vcs"`  // "daybook" | "caller" | "none"
-	Profile       string `json:"profile"`
-	JournalPrefix string `json:"journal_prefix,omitempty"` // where note files land, e.g. "meta/agents-board/memo"
-}
+type Cortex = cortexregistry.Cortex
 
 var (
 	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -52,24 +47,26 @@ func registryPath() (string, error) {
 	return filepath.Join(dir, "cortices.json"), nil
 }
 
-// LoadRegistry reads cortices.json. A missing file is an empty registry.
+// LoadRegistry combines the user registry with directory-scoped registries
+// inherited from the current working directory.
 func LoadRegistry() ([]Cortex, error) {
 	p, err := registryPath()
 	if err != nil {
 		return nil, err
 	}
-	raw, err := os.ReadFile(p)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
+	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
-	var cs []Cortex
-	if err := json.Unmarshal(raw, &cs); err != nil {
-		return nil, fmt.Errorf("registry %s is not valid JSON: %w", p, err)
+	return cortexregistry.Load(p, cwd)
+}
+
+func loadGlobalRegistry() ([]Cortex, error) {
+	p, err := registryPath()
+	if err != nil {
+		return nil, err
 	}
-	return cs, nil
+	return cortexregistry.LoadFile(p, filepath.Dir(p))
 }
 
 // saveRegistry atomically replaces cortices.json via a UNIQUE
@@ -125,13 +122,19 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 			"fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
 	}
 	defer regLock.release()
-	cs, err := LoadRegistry()
+	effective, err := LoadRegistry()
 	if err != nil {
 		return nil, conflict("registration_failed", "register", name,
 			"fix the name (lowercase slug), path, vcs, or profile and retry",
 			map[string]any{"detail": err.Error()})
 	}
-	for _, c := range cs {
+	global, err := loadGlobalRegistry()
+	if err != nil {
+		return nil, conflict("registration_failed", "register", name,
+			"fix the name (lowercase slug), path, vcs, or profile and retry",
+			map[string]any{"detail": err.Error()})
+	}
+	for _, c := range effective {
 		if c.Name == name {
 			return nil, conflict("duplicate_cortex", "register", name,
 				"pick a new name or inspect the existing cortex with get/search",
@@ -146,7 +149,7 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, c := range cs {
+	for _, c := range effective {
 		if sameRoot(c.Path, abs) {
 			return nil, conflict("duplicate_path", "register", abs,
 				"pick a new path or use the existing cortex",
@@ -158,9 +161,9 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 		jp = "journal"
 	}
 	c := &Cortex{Name: name, Path: abs, VCS: vcs, Profile: profile, JournalPrefix: jp}
-	cs = append(cs, *c)
-	sort.Slice(cs, func(i, j int) bool { return cs[i].Name < cs[j].Name })
-	if err := saveRegistry(cs); err != nil {
+	global = append(global, *c)
+	sort.Slice(global, func(i, j int) bool { return global[i].Name < global[j].Name })
+	if err := saveRegistry(global); err != nil {
 		return nil, conflict("registration_failed", "register", name,
 			"fix the name (lowercase slug), path, vcs, or profile and retry",
 			map[string]any{"detail": err.Error()})
