@@ -340,9 +340,10 @@ func searchFetchLimit(limit int, typeFilter string) int {
 }
 
 func projectSearchHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, limit int) []map[string]any {
+	fetched := kernel.GetHits(cs, hits)
 	out := make([]map[string]any, 0)
-	for _, h := range hits {
-		entry, keep := projectSearchHit(h, cs, typeFilter)
+	for i, h := range hits {
+		entry, keep := projectSearchHit(h, cs, typeFilter, fetched[i])
 		if !keep {
 			continue
 		}
@@ -354,20 +355,16 @@ func projectSearchHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, li
 	return out
 }
 
-func projectSearchHit(h qmd.Hit, cs []kernel.Cortex, typeFilter string) (map[string]any, bool) {
+func projectSearchHit(h qmd.Hit, cs []kernel.Cortex, typeFilter string, res *kernel.GetResult) (map[string]any, bool) {
 	collection, rel, isURI := qmd.SplitURI(h.File)
 	var (
-		c   *kernel.Cortex
-		fm  map[string]any
-		res *kernel.GetResult
+		c  *kernel.Cortex
+		fm map[string]any
 	)
 	if isURI {
 		c = kernel.CortexNamed(cs, collection)
-		if c != nil && rel != "" {
-			if got, conf := kernel.Get(cs, collection, rel); conf == nil {
-				res = got
-				fm = got.Frontmatter
-			}
+		if res != nil {
+			fm = res.Frontmatter
 		}
 	}
 	if typeFilter != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, typeFilter, fm, res != nil) {
@@ -459,10 +456,11 @@ func cmdBrief(args []string) (any, *kernel.Conflict, error) {
 }
 
 func collectBriefNotes(cs []kernel.Cortex, hits []qmd.Hit, limit int) []map[string]any {
+	fetched := kernel.GetHits(cs, hits)
 	var notes []map[string]any
 	seen := map[string]bool{}
-	for _, h := range hits {
-		note, ok := briefNoteFromHit(cs, h, seen)
+	for i, h := range hits {
+		note, ok := briefNoteFromHit(cs, h, fetched[i], seen)
 		if !ok {
 			continue
 		}
@@ -474,15 +472,14 @@ func collectBriefNotes(cs []kernel.Cortex, hits []qmd.Hit, limit int) []map[stri
 	return notes
 }
 
-func briefNoteFromHit(cs []kernel.Cortex, h qmd.Hit, seen map[string]bool) (map[string]any, bool) {
+func briefNoteFromHit(cs []kernel.Cortex, h qmd.Hit, res *kernel.GetResult, seen map[string]bool) (map[string]any, bool) {
 	cName, rel, ok := qmd.SplitURI(h.File)
 	key := cName + "\x00" + rel
 	if !ok || seen[key] {
 		return nil, false
 	}
 	c := kernel.CortexNamed(cs, cName)
-	res, conf := kernel.Get(cs, cName, rel)
-	if conf != nil || res == nil {
+	if res == nil {
 		return nil, false
 	}
 	if !orient.BriefOK(kernel.JournalPrefix(c), rel, h.File, res.Frontmatter) {

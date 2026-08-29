@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/misty-step/exocortex/internal/fm"
+	"github.com/misty-step/exocortex/internal/qmd"
 )
 
 // GetResult is the pinned `get` output.
@@ -22,33 +23,100 @@ type GetResult struct {
 	Content     string         `json:"content"`
 }
 
+// GetRequest identifies one note for a batched committed-snapshot read.
+type GetRequest struct {
+	CortexName string
+	Path       string
+}
+
+// GetOutcome preserves the result or conflict for one GetRequest.
+type GetOutcome struct {
+	Result   *GetResult
+	Conflict *Conflict
+}
+
 func Get(cs []Cortex, nameFlag, p string) (*GetResult, *Conflict) {
-	c, rel, err := Resolve(cs, nameFlag, p)
-	if err != nil {
-		return nil, conflict("resolve_failed", "get", p, "use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
+	outcome := GetMany(cs, []GetRequest{{CortexName: nameFlag, Path: p}})[0]
+	return outcome.Result, outcome.Conflict
+}
+
+// GetMany refreshes each referenced cortex once, then reads every requested
+// path from that pinned committed snapshot.
+func GetMany(cs []Cortex, requests []GetRequest) []GetOutcome {
+	outcomes := make([]GetOutcome, len(requests))
+	rels := make([]string, len(requests))
+	groups := make(map[string][]int)
+	cortices := make(map[string]*Cortex)
+	var order []string
+	for i, request := range requests {
+		c, rel, err := Resolve(cs, request.CortexName, request.Path)
+		if err != nil {
+			outcomes[i].Conflict = conflict("resolve_failed", "get", request.Path,
+				"use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
+			continue
+		}
+		rels[i] = rel
+		if _, ok := groups[c.Name]; !ok {
+			order = append(order, c.Name)
+			cortices[c.Name] = c
+		}
+		groups[c.Name] = append(groups[c.Name], i)
 	}
-	var out *GetResult
-	conf := withFreshPublisher(c, "get", rel, func(root string) *Conflict {
-		if c.VCS == "daybook" {
-			raw, gerr := git(root, "show", "HEAD:"+filepath.ToSlash(rel))
-			if gerr != nil {
-				return conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
+	for _, name := range order {
+		c := cortices[name]
+		indexes := groups[name]
+		conf := withFreshPublisher(c, "get", rels[indexes[0]], false, func(root string) *Conflict {
+			for _, i := range indexes {
+				outcomes[i].Result, outcomes[i].Conflict = getFromRoot(c, root, rels[i])
 			}
-			out = getResult(c, rel, []byte(raw))
 			return nil
+		})
+		if conf != nil {
+			for _, i := range indexes {
+				outcomes[i].Conflict = conf
+			}
 		}
-		abs := filepath.Join(root, rel)
-		raw, serr := os.ReadFile(abs)
-		if errors.Is(serr, fs.ErrNotExist) {
-			return conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
+	}
+	return outcomes
+}
+
+// GetHits projects QMD URIs onto one refresh per referenced cortex.
+func GetHits(cs []Cortex, hits []qmd.Hit) []*GetResult {
+	results := make([]*GetResult, len(hits))
+	var requests []GetRequest
+	var indexes []int
+	for i, hit := range hits {
+		cortex, rel, ok := qmd.SplitURI(hit.File)
+		if !ok || rel == "" || CortexNamed(cs, cortex) == nil {
+			continue
 		}
-		if serr != nil {
-			return conflict("read_failed", "get", rel, "fix filesystem access and retry", map[string]any{"detail": serr.Error()})
+		requests = append(requests, GetRequest{CortexName: cortex, Path: rel})
+		indexes = append(indexes, i)
+	}
+	for i, outcome := range GetMany(cs, requests) {
+		if outcome.Conflict == nil {
+			results[indexes[i]] = outcome.Result
 		}
-		out = getResult(c, rel, raw)
-		return nil
-	})
-	return out, conf
+	}
+	return results
+}
+
+func getFromRoot(c *Cortex, root, rel string) (*GetResult, *Conflict) {
+	if c.VCS == "daybook" {
+		raw, gerr := git(root, "show", "HEAD:"+filepath.ToSlash(rel))
+		if gerr != nil {
+			return nil, conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
+		}
+		return getResult(c, rel, []byte(raw)), nil
+	}
+	raw, err := os.ReadFile(filepath.Join(root, rel))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
+	}
+	if err != nil {
+		return nil, conflict("read_failed", "get", rel, "fix filesystem access and retry", map[string]any{"detail": err.Error()})
+	}
+	return getResult(c, rel, raw), nil
 }
 
 func getResult(c *Cortex, rel string, raw []byte) *GetResult {
@@ -80,7 +148,7 @@ func Log(cs []Cortex, nameFlag, p string, limit int) ([]LogEntry, *Conflict) {
 		return nil, conflict("resolve_failed", "log", p, "use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
 	}
 	var entries []LogEntry
-	conf := withFreshPublisher(c, "log", rel, func(root string) *Conflict {
+	conf := withFreshPublisher(c, "log", rel, false, func(root string) *Conflict {
 		out, gerr := git(root, "log", fmt.Sprintf("-n%d", limit),
 			"--format=%H%x1f%an%x1f%aI%x1f%s", "--", filepath.FromSlash(rel))
 		if gerr != nil {
@@ -143,7 +211,7 @@ func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 		}
 		res.Findings = append(res.Findings, findings...)
 	}
-	conf := withFreshPublisher(c, "lint", rel, func(root string) *Conflict {
+	conf := withFreshPublisher(c, "lint", rel, true, func(root string) *Conflict {
 		if rel != "" {
 			findings, verr := lintOne(c.Profile, filepath.Join(root, rel))
 			add(rel, findings, verr)
@@ -193,12 +261,9 @@ func lintOne(profile, abs string) ([]fm.Finding, error) {
 	return fm.Validate(profile, fm.ParseDocument(raw))
 }
 
-// withFreshPublisher runs fn against the publisher tree. For daybook it
-// takes the per-cortex lock, provisions if needed, fast-forwards to
-// origin when upstream exists, and holds the lock for the whole read.
-// ensureWriter stays provisioning-only and does not lock. Dirty
-// worktrees are left in place; Get/Log use git show HEAD.
-func withFreshPublisher(c *Cortex, op, rel string, fn func(root string) *Conflict) *Conflict {
+// withFreshPublisher holds the per-cortex lock while it refreshes and reads
+// the publisher snapshot.
+func withFreshPublisher(c *Cortex, op, rel string, requireClean bool, fn func(root string) *Conflict) *Conflict {
 	if c.VCS != "daybook" {
 		root, err := effectiveRoot(c)
 		if err != nil {
@@ -215,17 +280,38 @@ func withFreshPublisher(c *Cortex, op, rel string, fn func(root string) *Conflic
 	if err != nil {
 		return conflict("cortex_unavailable", op, rel, "publisher repository is unavailable; check remote access", map[string]any{"detail": err.Error()})
 	}
-	if err := refreshPublisher(root); err != nil {
+	if err := refreshPublisher(root, requireClean); err != nil {
 		return conflict("cortex_unavailable", op, rel, "publisher repository is unavailable; check remote access", map[string]any{"detail": err.Error()})
 	}
 	return fn(root)
 }
 
-func refreshPublisher(w string) error {
-	if !hasUpstream(w) {
-		return nil
+func refreshPublisher(w string, clean bool) error {
+	if clean {
+		if err := requireCleanPublisher(w); err != nil {
+			return err
+		}
 	}
-	return ffToUpstream(w)
+	if hasUpstream(w) {
+		if err := ffToUpstream(w); err != nil {
+			return err
+		}
+	}
+	if clean {
+		return requireCleanPublisher(w)
+	}
+	return nil
+}
+
+func requireCleanPublisher(w string) error {
+	out, err := git(w, "status", "--porcelain=v1", "--untracked-files=all")
+	if err != nil {
+		return fmt.Errorf("publisher status failed: %w", err)
+	}
+	if strings.TrimSpace(out) != "" {
+		return fmt.Errorf("publisher clone is dirty; inspect %s before retrying", w)
+	}
+	return nil
 }
 
 // Revision is the lowercase hex sha256 of a note's exact file bytes —

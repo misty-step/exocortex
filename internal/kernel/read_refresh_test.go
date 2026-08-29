@@ -2,10 +2,13 @@ package kernel
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/misty-step/exocortex/internal/qmd"
 )
 
 func TestHumanPushVisibleToGetAndLint(t *testing.T) {
@@ -60,6 +63,63 @@ func TestHumanPushVisibleToGetAndLint(t *testing.T) {
 	}
 	if lint.Errors == 0 {
 		t.Fatal("lint must see human-pushed invalid note")
+	}
+}
+
+func TestLintRejectsDirtyPublisherTree(t *testing.T) {
+	f := newFixture(t)
+	if _, conf := f.put("hosta", "notes/x.md", mkNote("Concept", "clean")); conf != nil {
+		t.Fatal(conf.Code)
+	}
+	writer := writerDir(&f.cs[0])
+	dirty := filepath.Join(writer, "notes", "uncommitted.md")
+	if err := os.WriteFile(dirty, []byte(mkNote("Concept", "dirty")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, conf := Lint(f.cs, "hosta", "")
+	if conf == nil || conf.Code != "cortex_unavailable" {
+		t.Fatalf("dirty publisher lint conflict=%#v", conf)
+	}
+	if _, err := os.Stat(dirty); err != nil {
+		t.Fatalf("dirty publisher bytes were changed: %v", err)
+	}
+}
+
+func TestGetHitsRefreshesEachCortexOnce(t *testing.T) {
+	f := newFixture(t)
+	for _, path := range []string{"notes/a.md", "notes/b.md"} {
+		if _, conf := f.put("hosta", path, mkNote("Concept", path)); conf != nil {
+			t.Fatal(conf.Code)
+		}
+	}
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "fetch.log")
+	wrapper := "#!/bin/sh\nif [ \"$1\" = fetch ]; then echo fetch >> \"$EXOCORTEX_FETCH_LOG\"; fi\nexec " + realGit + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EXOCORTEX_FETCH_LOG", logPath)
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	results := GetHits(f.cs, []qmd.Hit{
+		{File: "qmd://hosta/notes/a.md"},
+		{File: "qmd://hosta/notes/b.md"},
+	})
+	if len(results) != 2 || results[0] == nil || results[1] == nil {
+		t.Fatalf("batched results=%#v", results)
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(raw), "fetch\n"); got != 1 {
+		t.Fatalf("fetch count=%d want 1; log=%q", got, raw)
 	}
 }
 
