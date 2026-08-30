@@ -26,8 +26,8 @@ echo "==> go vet"
 go vet ./...
 
 need golangci-lint "go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1"
-echo "==> golangci-lint (cyclop fuse)"
-golangci-lint run --enable-only=cyclop ./...
+echo "==> golangci-lint (fuse)"
+golangci-lint run ./...
 echo "==> golangci-lint (visibility report)"
 "$repo_root/scripts/lint-report.sh"
 

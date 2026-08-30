@@ -21,7 +21,9 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 	server := mcp.NewServer(&mcp.Implementation{Name: "exocortex", Version: "v0"}, nil)
 	addTools(server)
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-		fmt.Fprintf(stderr, "exocortex mcp: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "exocortex mcp: %v\n", err); werr != nil {
+			return 1
+		}
 		return 1
 	}
 	return 0
@@ -182,24 +184,9 @@ func mcpFetchLimit(limit int, typeFilter string) int {
 }
 
 func projectMCPHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, limit int) ([]map[string]any, *kernel.Conflict) {
-	fetched := make([]*kernel.GetResult, len(hits))
-	if typeFilter != "" {
-		requests := make([]kernel.GetRequest, 0, len(hits))
-		indexes := make([]int, 0, len(hits))
-		for i, h := range hits {
-			collection, path, ok := qmd.SplitURI(h.File)
-			if !ok || path == "" || kernel.CortexNamed(cs, collection) == nil {
-				continue
-			}
-			requests = append(requests, kernel.GetRequest{CortexName: collection, Path: path})
-			indexes = append(indexes, i)
-		}
-		for i, outcome := range kernel.GetMany(cs, requests) {
-			if outcome.Conflict != nil {
-				return nil, outcome.Conflict
-			}
-			fetched[indexes[i]] = outcome.Result
-		}
+	fetched, conf := hydrateMCPHits(hits, cs, typeFilter)
+	if conf != nil {
+		return nil, conf
 	}
 	out := make([]map[string]any, 0, len(hits))
 	for i, h := range hits {
@@ -213,6 +200,30 @@ func projectMCPHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, limit
 		}
 	}
 	return out, nil
+}
+
+func hydrateMCPHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string) ([]*kernel.GetResult, *kernel.Conflict) {
+	fetched := make([]*kernel.GetResult, len(hits))
+	if typeFilter == "" {
+		return fetched, nil
+	}
+	requests := make([]kernel.GetRequest, 0, len(hits))
+	indexes := make([]int, 0, len(hits))
+	for i, h := range hits {
+		collection, path, ok := qmd.SplitURI(h.File)
+		if !ok || path == "" || kernel.CortexNamed(cs, collection) == nil {
+			continue
+		}
+		requests = append(requests, kernel.GetRequest{CortexName: collection, Path: path})
+		indexes = append(indexes, i)
+	}
+	for i, outcome := range kernel.GetMany(cs, requests) {
+		if outcome.Conflict != nil {
+			return nil, outcome.Conflict
+		}
+		fetched[indexes[i]] = outcome.Result
+	}
+	return fetched, nil
 }
 
 func projectMCPHit(h qmd.Hit, cs []kernel.Cortex, typeFilter string, res *kernel.GetResult) (map[string]any, bool) {

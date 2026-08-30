@@ -32,40 +32,56 @@ func ValidatePath(profile, rel string, d Document) (reserved bool, findings []Fi
 }
 
 func validateIndex(d Document, root bool) error {
-	if d.Note.HasFM {
-		if !root {
-			return contract(errf("reserved_frontmatter", "nested index.md forbids frontmatter"))
-		}
-		if d.err != nil {
-			return contract(errf("fm_unparseable", "invalid frontmatter YAML: %v", d.err))
-		}
-		var extra []string
-		for key := range d.Map {
-			if key != "okf_version" {
-				extra = append(extra, key)
-			}
-		}
-		if len(extra) != 0 {
-			sort.Strings(extra)
-			return contract(errf("unknown_keys", "root index extra keys: %s", strings.Join(extra, ", ")))
+	if err := indexFrontmatter(d, root); err != nil {
+		return err
+	}
+	return indexCatalog(indexBody(d))
+}
+
+func indexFrontmatter(d Document, root bool) error {
+	if !d.Note.HasFM {
+		return nil
+	}
+	if !root {
+		return contract(errf("reserved_frontmatter", "nested index.md forbids frontmatter"))
+	}
+	if d.err != nil {
+		return contract(errf("fm_unparseable", "invalid frontmatter YAML: %v", d.err))
+	}
+	var extra []string
+	for key := range d.Map {
+		if key != "okf_version" {
+			extra = append(extra, key)
 		}
 	}
-	body := string(d.Note.Raw)
-	if d.Note.HasFM {
-		body = d.Note.Body
+	if len(extra) == 0 {
+		return nil
 	}
+	sort.Strings(extra)
+	return contract(errf("unknown_keys", "root index extra keys: %s", strings.Join(extra, ", ")))
+}
+
+func indexBody(d Document) string {
+	if d.Note.HasFM {
+		return d.Note.Body
+	}
+	return string(d.Note.Raw)
+}
+
+func indexCatalog(body string) error {
 	var heading, catalog bool
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSpace(line)
 		if headingRE.MatchString(line) {
 			heading = true
 		}
-		if strings.HasPrefix(line, "* ") {
-			if !catalogRE.MatchString(line) {
-				return contract(errf("index_format", "catalog item must match * [Title](url)"))
-			}
-			catalog = true
+		if !strings.HasPrefix(line, "* ") {
+			continue
 		}
+		if !catalogRE.MatchString(line) {
+			return contract(errf("index_format", "catalog item must match * [Title](url)"))
+		}
+		catalog = true
 	}
 	if !heading {
 		return contract(errf("index_format", "index.md needs a heading"))

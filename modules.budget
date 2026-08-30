@@ -4,10 +4,13 @@
 # PR #30: typed publication outcomes and cross-host recovery proofs; duplicate
 # candidate-path coverage was folded before raising this package ceiling.
 # PR #32: locked publisher refresh, batched read snapshots, and race proofs.
-kernel	internal/kernel	57200
+# Complexity ratchet: split Lint/index/GetMany/sync helpers and takeaways
+# scanner so gocognit 16 and nestif 5 can fail closed. Unlock/cleanup
+# errors join the primary failure instead of blank assignment.
+kernel	internal/kernel	57700
 # FlagSet-driven splitArgs: VisitAll replaces per-command value-flag maps.
-cli	internal/cli	16100
-fm	internal/fm	8000
+cli	internal/cli	16200
+fm	internal/fm	8100
 mcp	internal/mcp	5000
 orient	internal/orient	4500
 qmd	internal/qmd	9000
