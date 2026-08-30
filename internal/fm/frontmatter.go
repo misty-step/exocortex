@@ -116,8 +116,6 @@ var knownKeys = map[string]bool{
 	"executor": true, "attester": true, "usage_window": true,
 }
 
-var okfActorRE = regexp.MustCompile(`^(?:[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*|(?:human|process):[A-Za-z0-9][A-Za-z0-9._:@+-]*)$`)
-
 func validateStrict(d Document) ([]Finding, error) {
 	if err := requireFrontmatter(d); err != nil {
 		return nil, err
@@ -256,12 +254,12 @@ func validateVerified(root *yaml.Node, strict bool) []Finding {
 	}
 	switch verified.Kind {
 	case yaml.MappingNode:
-		return validateOKFEventFields("verified", "verified", verified, strict)
+		return validateOKFEventFields("verified", "verified", verified, strict, true)
 	case yaml.SequenceNode:
 		var fs []Finding
 		for i, event := range verified.Content {
 			fs = append(fs, validateOKFEventFields(
-				fmt.Sprintf("verified[%d]", i), "verified", unwrapNode(event), strict,
+				fmt.Sprintf("verified[%d]", i), "verified", unwrapNode(event), strict, true,
 			)...)
 		}
 		return fs
@@ -280,7 +278,7 @@ func validateStaleAfter(root *yaml.Node, strict bool) []Finding {
 		return nil
 	}
 	return []Finding{okfFinding(strict, "stale_after_format",
-		"stale_after %q must be an ISO date or UTC RFC3339 datetime", value)}
+		"stale_after %q must be an RFC3339 datetime with an explicit UTC offset", value)}
 }
 
 func validateProvenance(root *yaml.Node, strict bool) []Finding {
@@ -309,10 +307,11 @@ func validateOKFEvent(field string, event *yaml.Node, strict bool) []Finding {
 	if event == nil || event.Kind != yaml.MappingNode {
 		return []Finding{okfFinding(strict, field+"_format", "%s must be a mapping", field)}
 	}
-	return validateOKFEventFields(field, field, event, strict)
+	// generated.at is optional when the production time is unknown.
+	return validateOKFEventFields(field, field, event, strict, false)
 }
 
-func validateOKFEventFields(field, ruleBase string, event *yaml.Node, strict bool) []Finding {
+func validateOKFEventFields(field, ruleBase string, event *yaml.Node, strict, requireAt bool) []Finding {
 	var fs []Finding
 	if event == nil || event.Kind != yaml.MappingNode {
 		return []Finding{okfFinding(strict, ruleBase+"_format", "%s must be a mapping", field)}
@@ -320,14 +319,16 @@ func validateOKFEventFields(field, ruleBase string, event *yaml.Node, strict boo
 	by, ok := mappingValue(event, "by")
 	if !ok {
 		fs = append(fs, okfFinding(strict, ruleBase+"_by_missing", "%s.by is required", field))
-	} else if value, scalar := nodeScalar(by); !scalar || !okfActorRE.MatchString(value) {
+	} else if value, scalar := nodeScalar(by); !scalar || !validOKFActor(value) {
 		value, _ := nodeScalar(by)
 		fs = append(fs, okfFinding(strict, ruleBase+"_by_format",
 			"%s.by %q must be <producer>/<version>, human:<id>, or process:<id>", field, value))
 	}
 	at, ok := mappingValue(event, "at")
 	if !ok {
-		fs = append(fs, okfFinding(strict, ruleBase+"_at_missing", "%s.at is required", field))
+		if requireAt {
+			fs = append(fs, okfFinding(strict, ruleBase+"_at_missing", "%s.at is required", field))
+		}
 	} else if value, scalar := nodeScalar(at); !scalar || !validUTCDateTime(value) {
 		value, _ := nodeScalar(at)
 		fs = append(fs, okfFinding(strict, ruleBase+"_at_format",
@@ -355,14 +356,48 @@ func topMappingNode(d Document) *yaml.Node {
 }
 
 func mappingValue(mapping *yaml.Node, key string) (*yaml.Node, bool) {
-	mapping = unwrapNode(mapping)
+	return mappingValueWithMerges(unwrapNode(mapping), key)
+}
+
+func mappingValueWithMerges(mapping *yaml.Node, key string) (*yaml.Node, bool) {
 	if mapping == nil || mapping.Kind != yaml.MappingNode {
 		return nil, false
 	}
+	var merges []*yaml.Node
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
 		name := unwrapNode(mapping.Content[i])
-		if name.Kind == yaml.ScalarNode && name.Value == key {
+		if name == nil || name.Kind != yaml.ScalarNode {
+			continue
+		}
+		if name.Value == key {
 			return mapping.Content[i+1], true
+		}
+		if name.Value == "<<" {
+			merges = append(merges, mapping.Content[i+1])
+		}
+	}
+	for _, merged := range merges {
+		if value, ok := mergedMappingValue(merged, key); ok {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func mergedMappingValue(merged *yaml.Node, key string) (*yaml.Node, bool) {
+	merged = unwrapNode(merged)
+	if merged == nil {
+		return nil, false
+	}
+	if merged.Kind == yaml.MappingNode {
+		return mappingValueWithMerges(merged, key)
+	}
+	if merged.Kind != yaml.SequenceNode {
+		return nil, false
+	}
+	for _, item := range merged.Content {
+		if value, ok := mergedMappingValue(item, key); ok {
+			return value, true
 		}
 	}
 	return nil, false
@@ -383,21 +418,25 @@ func nodeScalar(n *yaml.Node) (string, bool) {
 	return n.Value, true
 }
 
-func validUTCDateTime(value string) bool {
-	parsed, err := time.Parse(time.RFC3339, value)
-	if err != nil {
+func validOKFActor(value string) bool {
+	if value == "" || strings.TrimSpace(value) != value || len(strings.Fields(value)) != 1 {
 		return false
 	}
-	_, offset := parsed.Zone()
-	return offset == 0 && (strings.HasSuffix(value, "Z") || strings.HasSuffix(value, "+00:00"))
+	for _, prefix := range []string{"human:", "process:"} {
+		if strings.HasPrefix(value, prefix) {
+			return len(value) > len(prefix)
+		}
+	}
+	parts := strings.Split(value, "/")
+	return len(parts) == 2 && parts[0] != "" && parts[1] != ""
+}
+
+func validUTCDateTime(value string) bool {
+	_, err := time.Parse(time.RFC3339, value)
+	return err == nil
 }
 
 func validStaleAfter(value string) bool {
-	if len(value) == len("2006-01-02") {
-		if _, err := time.Parse("2006-01-02", value); err == nil {
-			return true
-		}
-	}
 	return validUTCDateTime(value)
 }
 

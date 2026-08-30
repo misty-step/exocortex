@@ -130,7 +130,7 @@ verified:
     at: 2026-06-25T09:00:00Z
   - by: process:finance-nightly
     at: 2026-06-26T02:00:00+00:00
-stale_after: 2026-12-31
+stale_after: 2026-12-31T00:00:00+01:00
 runtime: bigquery
 parameters:
   - name: year
@@ -185,7 +185,7 @@ generated:
   at: 2026-06-20
 verified:
   - by: agent
-    at: 2026-06-25T09:00:00+01:00
+    at: 2026-06-25
 stale_after: not-a-date
 provenance:
   at: yesterday
@@ -219,6 +219,43 @@ body
 `
 	if fs, err := validate("daybook", raw); err != nil || hasRule(fs, "verified_format") {
 		t.Fatalf("bare verified mapping is valid OKF v0.2: findings=%+v err=%v", fs, err)
+	}
+}
+
+func TestValidateOKFV02GeneratedAtOptional(t *testing.T) {
+	raw := `---
+type: Metric
+status: stable
+created: 2026-06-20T22:53:05Z
+description: Revenue.
+tags: [finance]
+generated:
+  by: human:alice
+---
+body
+`
+	if _, err := validate("strict", raw); err != nil {
+		t.Fatalf("generated.at is optional: %v", err)
+	}
+}
+
+func TestValidateOKFV02MergeKeys(t *testing.T) {
+	raw := `---
+defaults: &defaults
+  type: Metric
+  generated:
+    by: "bad actor"
+    at: 2026-06-20T22:53:05Z
+<<: *defaults
+---
+body
+`
+	fs, err := validate("daybook", raw)
+	if err != nil {
+		t.Fatalf("merged OKF metadata must still validate: %v", err)
+	}
+	if !hasRule(fs, "generated_by_format") {
+		t.Fatalf("merged generated metadata was skipped: %+v", fs)
 	}
 }
 
