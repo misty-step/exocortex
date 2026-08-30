@@ -257,6 +257,20 @@ body
 	if !hasRule(fs, "generated_by_format") {
 		t.Fatalf("merged generated metadata was skipped: %+v", fs)
 	}
+	quoted := `---
+type: Metric
+"<<":
+  generated:
+    by: "bad actor"
+    at: 2026-06-20T22:53:05Z
+---
+body
+`
+	qfs, qerr := validate("daybook", quoted)
+	if qerr != nil || hasRule(qfs, "generated_by_format") {
+		t.Fatalf("quoted << key must not act as a merge: findings=%+v err=%v", qfs, qerr)
+	}
+
 }
 
 const richNote = `---

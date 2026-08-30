@@ -372,7 +372,7 @@ func mappingValueWithMerges(mapping *yaml.Node, key string) (*yaml.Node, bool) {
 		if name.Value == key {
 			return mapping.Content[i+1], true
 		}
-		if name.Value == "<<" {
+		if name.Value == "<<" && name.Tag == "!!merge" {
 			merges = append(merges, mapping.Content[i+1])
 		}
 	}
