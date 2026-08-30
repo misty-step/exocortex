@@ -373,8 +373,7 @@ func mappingValueWithMerges(mapping *yaml.Node, key string) (*yaml.Node, bool) {
 		if name.Value == key {
 			return mapping.Content[i+1], true
 		}
-		if rawName != nil && rawName.Kind == yaml.ScalarNode &&
-			rawName.Value == "<<" && rawName.ShortTag() == "!!merge" {
+		if isYAMLMergeKey(rawName) {
 			merges = append(merges, mapping.Content[i+1])
 		}
 	}
@@ -405,7 +404,12 @@ func mergedMappingValue(merged *yaml.Node, key string) (*yaml.Node, bool) {
 	return nil, false
 }
 
+func isYAMLMergeKey(n *yaml.Node) bool {
+	return n != nil && n.Kind == yaml.ScalarNode && n.Value == "<<" &&
+		(n.Tag == "" || n.Tag == "!" || n.ShortTag() == "!!merge")
+}
 func unwrapNode(n *yaml.Node) *yaml.Node {
+
 	for n != nil && n.Kind == yaml.AliasNode {
 		n = n.Alias
 	}

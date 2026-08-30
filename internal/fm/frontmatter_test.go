@@ -300,6 +300,20 @@ body
 	if aerr != nil || hasRule(afs, "generated_by_format") {
 		t.Fatalf("aliased << key must not act as a merge: findings=%+v err=%v", afs, aerr)
 	}
+	explicitTag := `---
+type: Metric
+defaults: &defaults
+  generated:
+    by: "bad actor"
+    at: 2026-06-20T22:53:05Z
+! <<: *defaults
+---
+body
+`
+	efs, eerr := validate("daybook", explicitTag)
+	if eerr != nil || !hasRule(efs, "generated_by_format") {
+		t.Fatalf("explicit non-specific merge tag must act as a merge: findings=%+v err=%v", efs, eerr)
+	}
 }
 
 const richNote = `---
