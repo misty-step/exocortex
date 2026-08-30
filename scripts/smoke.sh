@@ -67,6 +67,33 @@ d = json.load(open(sys.argv[1]))
 assert "error" not in d or d.get("error") in (None, ""), d
 ' "$tmp/lint.json"
 
+"$bin" put --from "$tmp/note.md" --cortex smoke notes/mixed.md --json >"$tmp/put-mixed.json"
+python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d.get("operation") == "create", d
+assert d.get("path") == "notes/mixed.md", d
+' "$tmp/put-mixed.json"
+
+"$bin" get --cortex smoke notes/mixed.md --json >"$tmp/get-mixed.json"
+python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d.get("path") == "notes/mixed.md", d
+assert "foundation smoke" in d.get("content", ""), d
+' "$tmp/get-mixed.json"
+
+if "$bin" get notes/hello.md --json extra --cortex smoke >"$tmp/get-extra.json"; then
+	printf '%s\n' "bool flag consumed extra positional" >&2
+	exit 1
+fi
+python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d.get("error") == "invalid_input", d
+assert d.get("detail") == "get requires <path>", d
+' "$tmp/get-extra.json"
+
 okf="$tmp/okf"
 mkdir -p "$okf"
 "$bin" register root "$okf" --vcs none --profile okf --json >/dev/null
