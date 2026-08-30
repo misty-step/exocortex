@@ -35,7 +35,7 @@ func Note(ctx context.Context, cs []Cortex, in NoteInput) (*PutResult, *Conflict
 			"register a cortex or pass --cortex <name>",
 			map[string]any{"detail": err.Error()})
 	}
-	prefix := effectiveJournalPrefix(c)
+	prefix := JournalPrefix(c)
 
 	// Journal captures must never lose a memory to remote movement.
 	// Paths are unique, so a same-path exists/revision_conflict is

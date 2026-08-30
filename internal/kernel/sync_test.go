@@ -240,8 +240,11 @@ func TestSyncUpdateFailureOmitsIndexedCommit(t *testing.T) {
 
 func TestMalformedDirtyMarkerFailsStateFailedAndRetainsMarkers(t *testing.T) {
 	f := newFixture(t)
-	dDir, err := dirtyMarkerDir("hosta")
+	dDir, err := dirtyMarkerPath("hosta")
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	brokenFile := filepath.Join(dDir, "9999999999-broken.json")
@@ -369,8 +372,11 @@ func TestSyncContinuesAfterSiblingFailure(t *testing.T) {
 	if _, conf := f.put("hostb", "notes/ok.md", mkNote("note", "sibling survives")); conf != nil {
 		t.Fatal(conf)
 	}
-	dDir, err := dirtyMarkerDir("hosta")
+	dDir, err := dirtyMarkerPath("hosta")
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	broken := filepath.Join(dDir, "0001-broken.json")
@@ -426,8 +432,11 @@ func TestStatusDoesNotCreateStateOrWriter(t *testing.T) {
 
 func TestUnreadableDirtyPathFailsStateFailed(t *testing.T) {
 	f := newFixture(t)
-	sDir, err := cortexStateDir("hosta")
+	sDir, err := cortexStatePath("hosta")
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(sDir, "dirty"), []byte("not-a-directory"), 0o644); err != nil {
