@@ -107,6 +107,52 @@ func warnf(rule, format string, a ...any) Finding {
 var knownKeys = map[string]bool{
 	"type": true, "status": true, "created": true,
 	"description": true, "tags": true, "provenance": true,
+	// OKF v0.2's optional provenance, lifecycle, and computation
+	// families are part of the frontmatter vocabulary even when a
+	// particular concept does not use them.
+	"title": true, "resource": true, "sources": true,
+	"generated": true, "verified": true, "stale_after": true,
+	"runtime": true, "parameters": true, "computation": true,
+	"executor": true, "attester": true, "usage_window": true,
+}
+
+var okfActorRE = regexp.MustCompile(`^(?:[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*|(?:human|process):[A-Za-z0-9][A-Za-z0-9._:@+-]*)$`)
+
+func validateStrict(d Document) ([]Finding, error) {
+	if err := requireFrontmatter(d); err != nil {
+		return nil, err
+	}
+	var fs []Finding
+	for _, k := range []string{"type", "status", "created", "description", "tags"} {
+		if empty(d.Map[k]) {
+			fs = append(fs, errf("key_missing", "strict profile requires non-empty %q", k))
+		}
+	}
+	if c, ok := d.Scalar("created"); ok && strings.TrimSpace(c) != "" {
+		if _, perr := time.Parse(time.RFC3339, c); perr != nil {
+			fs = append(fs, errf("created_format", "created %q is not RFC3339", c))
+		}
+	}
+	fs = append(fs, validateOKF(d, true)...)
+	for _, f := range fs {
+		if f.Level == "error" {
+			return fs, contract(f)
+		}
+	}
+	return fs, nil
+}
+
+// contract wraps a finding as a validation error.
+type contractError struct{ f Finding }
+
+func contract(f Finding) error { return contractError{f} }
+
+func (e contractError) Error() string { return e.f.Rule + ": " + e.f.Message }
+
+// ContractFinding exposes the finding behind a validation error.
+func ContractFinding(err error) (Finding, bool) {
+	ce, ok := err.(contractError)
+	return ce.f, ok
 }
 
 // Validate applies a named profile to an already-parsed document.
@@ -143,42 +189,6 @@ func validateDaybook(d Document) ([]Finding, error) {
 	return daybookWarnings(d), nil
 }
 
-func validateStrict(d Document) ([]Finding, error) {
-	if err := requireFrontmatter(d); err != nil {
-		return nil, err
-	}
-	var fs []Finding
-	for _, k := range []string{"type", "status", "created", "description", "tags"} {
-		if empty(d.Map[k]) {
-			fs = append(fs, errf("key_missing", "strict profile requires non-empty %q", k))
-		}
-	}
-	if c, ok := d.Scalar("created"); ok && strings.TrimSpace(c) != "" {
-		if _, perr := time.Parse(time.RFC3339, c); perr != nil {
-			fs = append(fs, errf("created_format", "created %q is not RFC3339", c))
-		}
-	}
-	for _, f := range fs {
-		if f.Level == "error" {
-			return fs, contract(f)
-		}
-	}
-	return fs, nil
-}
-
-// contract wraps a finding as a validation error.
-type contractError struct{ f Finding }
-
-func contract(f Finding) error { return contractError{f} }
-
-func (e contractError) Error() string { return e.f.Rule + ": " + e.f.Message }
-
-// ContractFinding exposes the finding behind a validation error.
-func ContractFinding(err error) (Finding, bool) {
-	ce, ok := err.(contractError)
-	return ce.f, ok
-}
-
 func daybookWarnings(d Document) []Finding {
 	// Journal micro-notes (type: memo) are quiet under the daybook
 	// profile: they are not wiki notes, and constant key warnings would
@@ -197,6 +207,7 @@ func daybookWarnings(d Document) []Finding {
 			fs = append(fs, warnf("created_format", "created %q is not RFC3339", c))
 		}
 	}
+	fs = append(fs, validateOKF(d, false)...)
 	var unknown []string
 	for k := range d.Map {
 		if !knownKeys[k] {
@@ -208,6 +219,186 @@ func daybookWarnings(d Document) []Finding {
 		fs = append(fs, warnf("unknown_keys", "unknown frontmatter keys: %s", strings.Join(unknown, ", ")))
 	}
 	return fs
+}
+
+// validateOKF applies the structural checks shared by the OKF v0.2
+// provenance and lifecycle fields. Daybook reports malformed optional
+// fields as warnings; strict promotes the same findings to errors.
+func validateOKF(d Document, strict bool) []Finding {
+	root := topMappingNode(d)
+	if root == nil {
+		return nil
+	}
+	var fs []Finding
+	fs = append(fs, validateGenerated(root, strict)...)
+	fs = append(fs, validateVerified(root, strict)...)
+	fs = append(fs, validateStaleAfter(root, strict)...)
+	fs = append(fs, validateProvenance(root, strict)...)
+	return fs
+}
+
+func validateGenerated(root *yaml.Node, strict bool) []Finding {
+	generated, ok := mappingValue(root, "generated")
+	if !ok {
+		return nil
+	}
+	return validateOKFEvent("generated", generated, strict)
+}
+
+func validateVerified(root *yaml.Node, strict bool) []Finding {
+	verified, ok := mappingValue(root, "verified")
+	if !ok {
+		return nil
+	}
+	verified = unwrapNode(verified)
+	if verified == nil {
+		return []Finding{okfFinding(strict, "verified_format", "verified must be a mapping or list of mappings")}
+	}
+	switch verified.Kind {
+	case yaml.MappingNode:
+		return validateOKFEventFields("verified", "verified", verified, strict)
+	case yaml.SequenceNode:
+		var fs []Finding
+		for i, event := range verified.Content {
+			fs = append(fs, validateOKFEventFields(
+				fmt.Sprintf("verified[%d]", i), "verified", unwrapNode(event), strict,
+			)...)
+		}
+		return fs
+	default:
+		return []Finding{okfFinding(strict, "verified_format", "verified must be a mapping or list of mappings")}
+	}
+}
+
+func validateStaleAfter(root *yaml.Node, strict bool) []Finding {
+	staleAfter, ok := mappingValue(root, "stale_after")
+	if !ok {
+		return nil
+	}
+	value, scalar := nodeScalar(staleAfter)
+	if scalar && validStaleAfter(value) {
+		return nil
+	}
+	return []Finding{okfFinding(strict, "stale_after_format",
+		"stale_after %q must be an ISO date or UTC RFC3339 datetime", value)}
+}
+
+func validateProvenance(root *yaml.Node, strict bool) []Finding {
+	provenance, ok := mappingValue(root, "provenance")
+	if !ok {
+		return nil
+	}
+	provenance = unwrapNode(provenance)
+	if provenance == nil || provenance.Kind != yaml.MappingNode {
+		return []Finding{okfFinding(strict, "provenance_format", "provenance must be a mapping")}
+	}
+	at, present := mappingValue(provenance, "at")
+	if !present {
+		return nil
+	}
+	value, scalar := nodeScalar(at)
+	if scalar && validUTCDateTime(value) {
+		return nil
+	}
+	return []Finding{okfFinding(strict, "provenance_at_format",
+		"provenance.at %q must be a UTC RFC3339 datetime", value)}
+}
+
+func validateOKFEvent(field string, event *yaml.Node, strict bool) []Finding {
+	event = unwrapNode(event)
+	if event == nil || event.Kind != yaml.MappingNode {
+		return []Finding{okfFinding(strict, field+"_format", "%s must be a mapping", field)}
+	}
+	return validateOKFEventFields(field, field, event, strict)
+}
+
+func validateOKFEventFields(field, ruleBase string, event *yaml.Node, strict bool) []Finding {
+	var fs []Finding
+	if event == nil || event.Kind != yaml.MappingNode {
+		return []Finding{okfFinding(strict, ruleBase+"_format", "%s must be a mapping", field)}
+	}
+	by, ok := mappingValue(event, "by")
+	if !ok {
+		fs = append(fs, okfFinding(strict, ruleBase+"_by_missing", "%s.by is required", field))
+	} else if value, scalar := nodeScalar(by); !scalar || !okfActorRE.MatchString(value) {
+		value, _ := nodeScalar(by)
+		fs = append(fs, okfFinding(strict, ruleBase+"_by_format",
+			"%s.by %q must be <producer>/<version>, human:<id>, or process:<id>", field, value))
+	}
+	at, ok := mappingValue(event, "at")
+	if !ok {
+		fs = append(fs, okfFinding(strict, ruleBase+"_at_missing", "%s.at is required", field))
+	} else if value, scalar := nodeScalar(at); !scalar || !validUTCDateTime(value) {
+		value, _ := nodeScalar(at)
+		fs = append(fs, okfFinding(strict, ruleBase+"_at_format",
+			"%s.at %q must be a UTC RFC3339 datetime", field, value))
+	}
+	return fs
+}
+
+func okfFinding(strict bool, rule, format string, args ...any) Finding {
+	if strict {
+		return errf(rule, format, args...)
+	}
+	return warnf(rule, format, args...)
+}
+
+func topMappingNode(d Document) *yaml.Node {
+	if len(d.root.Content) == 0 {
+		return nil
+	}
+	root := unwrapNode(d.root.Content[0])
+	if root.Kind != yaml.MappingNode {
+		return nil
+	}
+	return root
+}
+
+func mappingValue(mapping *yaml.Node, key string) (*yaml.Node, bool) {
+	mapping = unwrapNode(mapping)
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return nil, false
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		name := unwrapNode(mapping.Content[i])
+		if name.Kind == yaml.ScalarNode && name.Value == key {
+			return mapping.Content[i+1], true
+		}
+	}
+	return nil, false
+}
+
+func unwrapNode(n *yaml.Node) *yaml.Node {
+	for n != nil && n.Kind == yaml.AliasNode {
+		n = n.Alias
+	}
+	return n
+}
+
+func nodeScalar(n *yaml.Node) (string, bool) {
+	n = unwrapNode(n)
+	if n == nil || n.Kind != yaml.ScalarNode || n.Tag == "!!null" {
+		return "", false
+	}
+	return n.Value, true
+}
+
+func validUTCDateTime(value string) bool {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return false
+	}
+	_, offset := parsed.Zone()
+	return offset == 0 && (strings.HasSuffix(value, "Z") || strings.HasSuffix(value, "+00:00"))
+}
+
+func validStaleAfter(value string) bool {
+	if len(value) == len("2006-01-02") {
+		if _, err := time.Parse("2006-01-02", value); err == nil {
+			return true
+		}
+	}
+	return validUTCDateTime(value)
 }
 
 func empty(v any) bool {

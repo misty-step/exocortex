@@ -114,6 +114,114 @@ func TestValidateStrict(t *testing.T) {
 	}
 }
 
+func TestValidateOKFV02(t *testing.T) {
+	raw := `---
+type: Attested Computation
+title: Revenue
+description: Recognized revenue.
+resource: https://example.test/revenue
+sources:
+  - resource: https://example.test/policy
+generated:
+  by: reference_agent/gemini-2.5-pro
+  at: 2026-06-20T22:53:05Z
+verified:
+  - by: human:ahormati
+    at: 2026-06-25T09:00:00Z
+  - by: process:finance-nightly
+    at: 2026-06-26T02:00:00+00:00
+stale_after: 2026-12-31
+runtime: bigquery
+parameters:
+  - name: year
+    type: integer
+    required: true
+computation: references/revenue.sql
+executor:
+  resource: references/run.md
+attester:
+  resource: references/check.py
+usage_window:
+  from: 2026-06-01
+  to: 2026-06-30
+provenance:
+  agent: kernel
+  at: 2026-06-28T14:00:00Z
+  via: cli
+status: stable
+created: 2026-06-20T22:53:05Z
+tags: [finance]
+---
+body
+`
+	fs, err := validate("daybook", raw)
+	if err != nil {
+		t.Fatalf("valid OKF v0.2 note must pass daybook: %v", err)
+	}
+	for _, f := range fs {
+		if f.Rule == "unknown_keys" {
+			t.Fatalf("OKF v0.2 keys should be known: %+v", fs)
+		}
+		if f.Rule == "generated_by_format" || f.Rule == "generated_at_format" ||
+			f.Rule == "verified_by_format" || f.Rule == "verified_at_format" ||
+			f.Rule == "stale_after_format" || f.Rule == "provenance_at_format" {
+			t.Fatalf("valid OKF v0.2 signal should not be flagged: %+v", f)
+		}
+	}
+	if _, err := validate("strict", raw); err != nil {
+		t.Fatalf("valid OKF v0.2 note must pass strict: %v", err)
+	}
+}
+
+func TestValidateOKFV02RejectsMalformedSignals(t *testing.T) {
+	raw := `---
+type: Metric
+status: stable
+created: 2026-06-20T22:53:05Z
+description: Revenue.
+tags: [finance]
+generated:
+  by: "human:"
+  at: 2026-06-20
+verified:
+  - by: agent
+    at: 2026-06-25T09:00:00+01:00
+stale_after: not-a-date
+provenance:
+  at: yesterday
+---
+body
+`
+	fs, err := validate("daybook", raw)
+	if err != nil {
+		t.Fatalf("malformed optional signals must warn, not fail, under daybook: %v", err)
+	}
+	for _, rule := range []string{
+		"generated_by_format", "generated_at_format",
+		"verified_by_format", "verified_at_format",
+		"stale_after_format", "provenance_at_format",
+	} {
+		if !hasRule(fs, rule) {
+			t.Fatalf("daybook missing %s in %+v", rule, fs)
+		}
+	}
+	if _, err := validate("strict", raw); err == nil {
+		t.Fatal("strict must reject malformed OKF v0.2 signals")
+	}
+}
+
+func TestValidateOKFV02VerifiedMapping(t *testing.T) {
+	raw := `---
+type: Metric
+verified: {by: process:nightly, at: 2026-06-25T09:00:00Z}
+---
+body
+`
+	if fs, err := validate("daybook", raw); err != nil || hasRule(fs, "verified_format") {
+		t.Fatalf("bare verified mapping is valid OKF v0.2: findings=%+v err=%v", fs, err)
+	}
+}
+
 const richNote = `---
 type: decision
 status: active # keep this comment
