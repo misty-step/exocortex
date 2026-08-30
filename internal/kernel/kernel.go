@@ -91,12 +91,12 @@ func loadGlobalRegistry() ([]Cortex, error) {
 // same-directory temp (a shared fixed name collides between concurrent
 // writers). Callers must hold the registry lock: this is the write
 // half of a load-modify-write transaction.
-func saveRegistry(cs []Cortex) error {
+func saveRegistry(cs []Cortex) (err error) {
 	p, err := registryPath()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+	if err = os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
 	raw, err := json.MarshalIndent(cs, "", "  ")
@@ -104,25 +104,30 @@ func saveRegistry(cs []Cortex) error {
 		return err
 	}
 	raw = append(raw, '\n')
-	tmp, err := os.CreateTemp(filepath.Dir(p), ".cortices-*.json")
-	if err != nil {
-		return err
+	tmp, cerr := os.CreateTemp(filepath.Dir(p), ".cortices-*.json")
+	if cerr != nil {
+		return cerr
 	}
 	name := tmp.Name()
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(name)
+	defer func() {
+		if name != "" {
+			err = errors.Join(err, os.Remove(name))
+		}
+	}()
+	if _, err = tmp.Write(raw); err != nil {
+		return errors.Join(err, tmp.Close())
+	}
+	if err = tmp.Close(); err != nil {
 		return err
 	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(name)
+	if err = os.Chmod(name, 0o644); err != nil {
 		return err
 	}
-	if err := os.Chmod(name, 0o644); err != nil {
-		_ = os.Remove(name)
+	if err = os.Rename(name, p); err != nil {
 		return err
 	}
-	return os.Rename(name, p)
+	name = ""
+	return nil
 }
 
 // Register binds a cortex into the registry.
@@ -132,7 +137,11 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 		return nil, conflict("registration_failed", "register", name,
 			"fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
 	}
-	defer regLock.release()
+	c, err := registerLocked(name, path, vcs, profile, journalPrefix)
+	return c, attachUnlockErr(err, regLock.release(), "register", name)
+}
+
+func registerLocked(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 	effective, err := LoadRegistry()
 	if err != nil {
 		return nil, conflict("registration_failed", "register", name,

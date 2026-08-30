@@ -49,19 +49,22 @@ var beforePushHook func()
 // Put runs the pinned pipeline: lock → refresh → pre-flight → CAS →
 // validate → no-op short-circuit → stamp → atomic write → VCS tail,
 // all inside one per-cortex critical section.
-func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) {
-	c, rel, op, abs, conf := bindPutTarget(cs, in)
-	if conf != nil {
-		return nil, conf
+func Put(ctx context.Context, cs []Cortex, in PutInput) (res *PutResult, conf *Conflict) {
+	c, rel, op, abs, bound := bindPutTarget(cs, in)
+	if bound != nil {
+		return nil, bound
 	}
-	lock, conf := lockNamed(c.Name, op, rel)
-	if conf != nil {
-		return nil, conf
+	lock, bound := lockNamed(c.Name, op, rel)
+	if bound != nil {
+		return nil, bound
 	}
-	defer lock.release()
+	defer func() {
+		conf = attachUnlock(conf, lock.release(), op, rel)
+	}()
 
-	res := &PutResult{Operation: op, Cortex: c.Name, Path: rel}
-	dir, abs, base, conf := preparePutRoot(c, rel, op, abs)
+	res = &PutResult{Operation: op, Cortex: c.Name, Path: rel}
+	var dir, base string
+	dir, abs, base, conf = preparePutRoot(c, rel, op, abs)
 	if conf != nil {
 		return nil, conf
 	}
@@ -459,49 +462,73 @@ func acquireLock(name string) (*cortexLock, error) {
 		return nil, err
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		_ = f.Close()
-		return nil, err
+		return nil, errors.Join(err, f.Close())
 	}
 	return &cortexLock{f: f}, nil
 }
 
 type cortexLock struct{ f *os.File }
 
-func (l *cortexLock) release() {
-	_ = syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
-	_ = l.f.Close()
+func (l *cortexLock) release() error {
+	return errors.Join(syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN), l.f.Close())
 }
 
-func atomicWrite(abs string, data []byte) error {
-	dir := filepath.Dir(abs)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+func attachUnlock(conf *Conflict, rerr error, operation, path string) *Conflict {
+	if rerr == nil {
+		return conf
+	}
+	if conf == nil {
+		return conflict("lock_failed", operation, path, "fix lock-file access and retry",
+			map[string]any{"detail": rerr.Error()})
+	}
+	if conf.Detail == nil {
+		conf.Detail = map[string]any{}
+	}
+	conf.Detail["unlock"] = rerr.Error()
+	return conf
+}
+
+func attachUnlockErr(err, rerr error, operation, path string) error {
+	if rerr == nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".exocortex-put-*")
-	if err != nil {
+	if err == nil {
+		return attachUnlock(nil, rerr, operation, path)
+	}
+	if conf, ok := err.(*Conflict); ok {
+		return attachUnlock(conf, rerr, operation, path)
+	}
+	return errors.Join(err, rerr)
+}
+
+func atomicWrite(abs string, data []byte) (err error) {
+	dir := filepath.Dir(abs)
+	if err = os.MkdirAll(dir, 0o755); err != nil {
 		return err
+	}
+	tmp, cerr := os.CreateTemp(dir, ".exocortex-put-*")
+	if cerr != nil {
+		return cerr
 	}
 	tmpName := tmp.Name()
 	defer func() {
 		if tmpName != "" {
-			_ = os.Remove(tmpName)
+			err = errors.Join(err, os.Remove(tmpName))
 		}
 	}()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
+	if _, err = tmp.Write(data); err != nil {
+		return errors.Join(err, tmp.Close())
+	}
+	if err = tmp.Chmod(0o644); err != nil {
+		return errors.Join(err, tmp.Close())
+	}
+	if err = tmp.Close(); err != nil {
 		return err
 	}
-	if err := tmp.Chmod(0o644); err != nil {
-		_ = tmp.Close()
+	if err = os.Rename(tmpName, abs); err != nil {
 		return err
 	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, abs); err != nil {
-		return err
-	}
-	tmpName = "" // renamed away; nothing to clean
+	tmpName = ""
 	return nil
 }
 

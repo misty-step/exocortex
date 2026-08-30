@@ -21,7 +21,9 @@ func Run(stdin io.Reader, stdout, stderr io.Writer) int {
 	server := mcp.NewServer(&mcp.Implementation{Name: "exocortex", Version: "v0"}, nil)
 	addTools(server)
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-		_, _ = fmt.Fprintf(stderr, "exocortex mcp: %v\n", err)
+		if _, werr := fmt.Fprintf(stderr, "exocortex mcp: %v\n", err); werr != nil {
+			return 1
+		}
 		return 1
 	}
 	return 0

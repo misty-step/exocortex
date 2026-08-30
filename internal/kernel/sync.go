@@ -163,12 +163,14 @@ func failedSyncResult(name string, res *SyncResult, conf *Conflict) SyncResult {
 	return sr
 }
 
-func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
+func syncOne(ctx context.Context, c Cortex) (out *SyncResult, conf *Conflict) {
 	lock, lerr := acquireLock(c.Name)
 	if lerr != nil {
 		return nil, conflict("lock_failed", "sync", c.Name, "fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
 	}
-	defer lock.release()
+	defer func() {
+		conf = attachUnlock(conf, lock.release(), "sync", c.Name)
+	}()
 
 	dDir, err := dirtyMarkerPath(c.Name)
 	if err != nil {
@@ -186,7 +188,7 @@ func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
 		return &SyncResult{Cortex: c.Name, Updated: false, Embedded: false}, nil
 	}
 
-	out := &SyncResult{Cortex: c.Name}
+	out = &SyncResult{Cortex: c.Name}
 	recordError := func(stage, detail string) {
 		writeSyncError(c.Name, newestCommit, stage, detail)
 	}

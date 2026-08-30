@@ -45,7 +45,9 @@ func dispatchSpecial(cmd string, stdin io.Reader, stdout, stderr io.Writer) (int
 	case "mcp":
 		return mcp.Run(stdin, stdout, stderr), true
 	case "help", "-h", "--help":
-		usage(stdout)
+		if err := usage(stdout); err != nil {
+			return 2, true
+		}
 		return 0, true
 	default:
 		return 0, false
@@ -120,8 +122,8 @@ func inputErr(cmd, detail, hint string) *kernel.Conflict {
 	}
 }
 
-func usage(w io.Writer) {
-	_, _ = fmt.Fprint(w, `exocortex — fleet memory kernel over registered cortices
+func usage(w io.Writer) error {
+	_, err := fmt.Fprint(w, `exocortex — fleet memory kernel over registered cortices
 
 Usage:
   exocortex register <name> <path> [--vcs daybook|caller|none] [--profile daybook|strict|okf]
@@ -139,6 +141,7 @@ Usage:
 Every command returns a JSON document on stdout. Failures speak JSON (CR-04)
 naming the error, operation, path, and recovery hint.
 `)
+	return err
 }
 
 // splitArgs separates flag tokens from positional arguments regardless
