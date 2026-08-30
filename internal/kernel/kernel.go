@@ -19,7 +19,31 @@ import (
 // Cortex is a registered knowledge corpus.
 type Cortex = cortexregistry.Cortex
 
-var dupSuffix = ".tmp-exocortex"
+// JournalPrefix is the cortex's note-file directory: the registered
+// field, or "journal" for a registered cortex with an empty field.
+// A nil cortex has no prefix.
+func JournalPrefix(c *Cortex) string {
+	if c == nil {
+		return ""
+	}
+	if c.JournalPrefix != "" {
+		return c.JournalPrefix
+	}
+	return "journal"
+}
+
+// CortexNamed returns the registered cortex with name, or nil.
+func CortexNamed(cs []Cortex, name string) *Cortex {
+	if name == "" {
+		return nil
+	}
+	for i := range cs {
+		if cs[i].Name == name {
+			return &cs[i]
+		}
+	}
+	return nil
+}
 
 // ConfigDir returns ${XDG_CONFIG_HOME:-~/.config}/exocortex.
 func ConfigDir() (string, error) {

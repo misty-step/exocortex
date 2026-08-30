@@ -62,33 +62,11 @@ func dirtyMarkerPath(cortexName string) (string, error) {
 	return filepath.Join(sDir, "dirty"), nil
 }
 
-func cortexStateDir(cortexName string) (string, error) {
-	dir, err := cortexStatePath(cortexName)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	return dir, nil
-}
-
-func dirtyMarkerDir(cortexName string) (string, error) {
-	dir, err := dirtyMarkerPath(cortexName)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	return dir, nil
-}
-
 // markDirty atomically writes an immutable marker after a durable write.
 // commit is the sync identity: a git SHA when one exists, otherwise the
 // content revision. Empty identities are rejected by syncOne.
 func markDirty(cortexName, commit string) error {
-	dir, err := dirtyMarkerDir(cortexName)
+	dir, err := dirtyMarkerPath(cortexName)
 	if err != nil {
 		return err
 	}
@@ -126,9 +104,6 @@ var syncHook func(cortexName string)
 // does not point at the indexed root.
 
 func writeSyncError(name, commit, stage, detail string) {
-	if _, err := cortexStateDir(name); err != nil {
-		return
-	}
 	sDir, err := cortexStatePath(name)
 	if err != nil {
 		return
@@ -318,9 +293,6 @@ func persistSyncedState(c Cortex, snapshotFiles []string, newestCommit, dDir, er
 	syncedData, err := json.MarshalIndent(syncedMarker, "", "  ")
 	if err != nil {
 		return out, conflict("state_failed", "sync", c.Name, "failed to marshal sync state", map[string]any{"detail": err.Error()})
-	}
-	if _, derr := cortexStateDir(c.Name); derr != nil {
-		return out, conflict("state_failed", "sync", c.Name, "failed to write synced state; markers retained", map[string]any{"detail": derr.Error()})
 	}
 	if err := atomicWrite(syncedPath, syncedData); err != nil {
 		writeSyncError(c.Name, newestCommit, "synced", err.Error())

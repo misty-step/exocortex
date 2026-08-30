@@ -95,7 +95,7 @@ func bindPutTarget(cs []Cortex, in PutInput) (*Cortex, string, string, string, *
 	}
 	rel = filepath.ToSlash(rel)
 	abs := filepath.Join(c.Path, filepath.FromSlash(rel))
-	if pfx := effectiveJournalPrefix(c); rel == pfx || strings.HasPrefix(rel, pfx+"/") {
+	if pfx := JournalPrefix(c); rel == pfx || strings.HasPrefix(rel, pfx+"/") {
 		if op == "update" {
 			return nil, "", op, "", conflict("journal_immutable", op, rel,
 				"journal micro-memories are append-only; supersede by writing a new note that links back to this one",
@@ -569,15 +569,6 @@ func effectiveRoot(c *Cortex) (string, error) {
 		return w, nil
 	}
 	return c.Path, nil
-}
-
-// mustEffectiveRoot returns effectiveRoot or panics on failure (test helper).
-func mustEffectiveRoot(c *Cortex) string {
-	root, err := effectiveRoot(c)
-	if err != nil {
-		panic(err)
-	}
-	return root
 }
 
 func ensureWriter(name, shared string) (string, error) {
