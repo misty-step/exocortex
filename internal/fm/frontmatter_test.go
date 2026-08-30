@@ -271,6 +271,20 @@ body
 		t.Fatalf("quoted << key must not act as a merge: findings=%+v err=%v", qfs, qerr)
 	}
 
+	longTag := `---
+defaults: &defaults
+  type: Metric
+  generated:
+    by: "bad actor"
+    at: 2026-06-20T22:53:05Z
+!<tag:yaml.org,2002:merge> "<<": *defaults
+---
+body
+`
+	lfs, lerr := validate("daybook", longTag)
+	if lerr != nil || !hasRule(lfs, "generated_by_format") {
+		t.Fatalf("long-form merge tag must act as a merge: findings=%+v err=%v", lfs, lerr)
+	}
 }
 
 const richNote = `---
