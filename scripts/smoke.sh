@@ -67,4 +67,30 @@ d = json.load(open(sys.argv[1]))
 assert "error" not in d or d.get("error") in (None, ""), d
 ' "$tmp/lint.json"
 
+okf="$tmp/okf"
+mkdir -p "$okf"
+"$bin" register root "$okf" --vcs none --profile okf --json >/dev/null
+printf '%s\n' '---' 'okf_version: "0.1"' '---' '# Root' '* [Tools](tools/index.md) - catalog' >"$tmp/index.md"
+printf '%s\n' '## 2026-08-29' '* **Init** | deployed.' >"$tmp/log.md"
+"$bin" put index.md --from "$tmp/index.md" --cortex root --json >/dev/null
+"$bin" put log.md --from "$tmp/log.md" --cortex root --json >/dev/null
+"$bin" lint --cortex root --json >"$tmp/okf-lint.json"
+python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d.get("errors") == 0, d
+' "$tmp/okf-lint.json"
+"$bin" get index.md --cortex root --json >"$tmp/okf-get.json"
+python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d.get("frontmatter", {}).get("okf_version") == "0.1", d
+assert "provenance" not in d.get("frontmatter", {}), d
+' "$tmp/okf-get.json"
+printf '%s\n' 'not a note' >"$tmp/plain.md"
+if "$bin" put tools.md --from "$tmp/plain.md" --cortex root --json >/dev/null 2>&1; then
+	printf '%s\n' "okf ordinary markdown accepted without type" >&2
+	exit 1
+fi
+
 printf '%s\n' "smoke passed: register/put/get/lint on temp none-vcs cortex"

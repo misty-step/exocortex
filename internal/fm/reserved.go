@@ -1,190 +1,102 @@
 package fm
 
 import (
-	"bufio"
-	"bytes"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
 
-// ValidatePath applies the named profile to raw at cortex-relative rel.
-// Profile okf uses reserved index.md / log.md formats; other profiles
-// apply the note type floor to every path.
-func ValidatePath(profile, rel string, raw []byte) ([]Finding, error) {
-	if profile == "okf" {
-		kind, rootIndex := ReservedMarkdown(rel)
-		switch kind {
-		case "index":
-			return ValidateIndex(raw, rootIndex)
-		case "log":
-			return ValidateLog(raw)
-		}
+var (
+	headingRE = regexp.MustCompile(`^#{1,6}(?:[ \t]|$)`)
+	catalogRE = regexp.MustCompile(`^\* \[[^]]+\]\([^)]+\)(?: (?:-|—) .+)?$`)
+)
+
+// ValidatePath validates one parsed document and reports whether it is an OKF catalog.
+func ValidatePath(profile, rel string, d Document) (reserved bool, findings []Finding, err error) {
+	if profile != "okf" {
+		findings, err = Validate(profile, d)
+		return false, findings, err
 	}
-	return Validate(profile, ParseDocument(raw))
+	clean := path.Clean(rel)
+	switch path.Base(clean) {
+	case "index.md":
+		return true, nil, validateIndex(d, clean == "index.md")
+	case "log.md":
+		return true, nil, validateLog(d)
+	default:
+		findings, err = validateDaybook(d)
+		return false, findings, err
+	}
 }
 
-// ValidateIndex checks an OKF reserved index.md.
-// Nested indexes must have no frontmatter. The bundle-root index.md MAY
-// carry only okf_version. Body requires at least one ATX heading and at
-// least one "* [Title](url)" catalog bullet.
-func ValidateIndex(raw []byte, root bool) ([]Finding, error) {
-	d := ParseDocument(raw)
+func validateIndex(d Document, root bool) error {
 	if d.Note.HasFM {
 		if !root {
-			return nil, contract(errf("reserved_frontmatter", "nested index.md must not have frontmatter"))
+			return contract(errf("reserved_frontmatter", "nested index.md forbids frontmatter"))
 		}
 		if d.err != nil {
-			return nil, contract(errf("fm_unparseable", "frontmatter is not parseable YAML: %v", d.err))
+			return contract(errf("fm_unparseable", "invalid frontmatter YAML: %v", d.err))
+		}
+		var extra []string
+		for key := range d.Map {
+			if key != "okf_version" {
+				extra = append(extra, key)
+			}
+		}
+		if len(extra) != 0 {
+			sort.Strings(extra)
+			return contract(errf("unknown_keys", "root index extra keys: %s", strings.Join(extra, ", ")))
 		}
 	}
-	if err := checkIndexBody(markdownBody(d, raw)); err != nil {
-		return nil, err
+	body := string(d.Note.Raw)
+	if d.Note.HasFM {
+		body = d.Note.Body
 	}
-	if !d.Note.HasFM {
-		return nil, nil
-	}
-	var unknown []string
-	for k := range d.Map {
-		if k != "okf_version" {
-			unknown = append(unknown, k)
-		}
-	}
-	if len(unknown) == 0 {
-		return nil, nil
-	}
-	sort.Strings(unknown)
-	return nil, contract(errf("unknown_keys", "root index.md extra keys: %s", strings.Join(unknown, ", ")))
-}
-
-func checkIndexBody(body string) error {
-	var heading, link bool
-	sc := bufio.NewScanner(strings.NewReader(body))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		if isATXHeading(line) {
+	var heading, catalog bool
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if headingRE.MatchString(line) {
 			heading = true
-			continue
 		}
-		ok, bullet := isLinkBullet(line)
-		if !bullet {
-			continue
+		if strings.HasPrefix(line, "* ") {
+			if !catalogRE.MatchString(line) {
+				return contract(errf("index_format", "catalog item must match * [Title](url)"))
+			}
+			catalog = true
 		}
-		if !ok {
-			return contract(errf("index_format", "index.md list items must be * [Title](url) - description"))
-		}
-		link = true
-	}
-	if err := sc.Err(); err != nil {
-		return contract(errf("index_scan", "failed to scan index.md: %v", err))
 	}
 	if !heading {
-		return contract(errf("index_format", "index.md needs at least one markdown heading"))
+		return contract(errf("index_format", "index.md needs a heading"))
 	}
-	if !link {
-		return contract(errf("index_format", "index.md needs at least one * [Title](url) bullet"))
+	if !catalog {
+		return contract(errf("index_format", "index.md needs * [Title](url)"))
 	}
 	return nil
 }
 
-// ValidateLog checks an OKF reserved log.md: no frontmatter, every ##
-// heading is an ISO date, headings newest-first, at least one date heading.
-func ValidateLog(raw []byte) ([]Finding, error) {
-	d := ParseDocument(raw)
+func validateLog(d Document) error {
 	if d.Note.HasFM {
-		return nil, contract(errf("reserved_frontmatter", "log.md must not have frontmatter"))
+		return contract(errf("reserved_frontmatter", "log.md must not have frontmatter"))
 	}
-	var dates []string
-	sc := bufio.NewScanner(bytes.NewReader(raw))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if !strings.HasPrefix(line, "## ") {
+	var previous string
+	for _, line := range strings.Split(string(d.Note.Raw), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "##") || len(line) > 2 && line[2] != ' ' && line[2] != '\t' {
 			continue
 		}
-		rest := strings.TrimSpace(strings.TrimPrefix(line, "## "))
-		if _, err := time.Parse("2006-01-02", rest); err != nil {
-			return nil, contract(errf("log_heading", "log.md ## headings must be ISO YYYY-MM-DD, got %q", rest))
+		date := strings.TrimSpace(line[2:])
+		if _, err := time.Parse("2006-01-02", date); err != nil {
+			return contract(errf("log_heading", "log.md date must be YYYY-MM-DD, got %q", date))
 		}
-		dates = append(dates, rest)
-	}
-	if err := sc.Err(); err != nil {
-		return nil, contract(errf("log_scan", "failed to scan log.md: %v", err))
-	}
-	if len(dates) == 0 {
-		return nil, contract(errf("log_dates", "log.md needs at least one ## YYYY-MM-DD heading"))
-	}
-	for i := 1; i < len(dates); i++ {
-		if dates[i-1] < dates[i] {
-			return nil, contract(errf("log_order", "log.md date headings must be newest-first"))
+		if previous != "" && previous < date {
+			return contract(errf("log_order", "log.md dates must be newest-first"))
 		}
+		previous = date
 	}
-	return nil, nil
-}
-
-func markdownBody(d Document, raw []byte) string {
-	if d.Note.HasFM {
-		return d.Note.Body
+	if previous == "" {
+		return contract(errf("log_dates", "log.md needs a dated heading"))
 	}
-	return string(raw)
-}
-
-func isATXHeading(line string) bool {
-	n := 0
-	for n < len(line) && line[n] == '#' {
-		n++
-	}
-	if n == 0 || n > 6 {
-		return false
-	}
-	return n == len(line) || line[n] == ' ' || line[n] == '\t'
-}
-
-func isLinkBullet(line string) (ok, bullet bool) {
-	var item string
-	switch {
-	case strings.HasPrefix(line, "* "):
-		item = strings.TrimSpace(line[2:])
-	case strings.HasPrefix(line, "- "):
-		return false, true
-	default:
-		return false, false
-	}
-	if len(item) < 5 || item[0] != '[' {
-		return false, true
-	}
-	rb := strings.IndexByte(item, ']')
-	if rb < 2 || rb+1 >= len(item) || item[rb+1] != '(' {
-		return false, true
-	}
-	closeParen := strings.IndexByte(item[rb+2:], ')')
-	if closeParen < 0 {
-		return false, true
-	}
-	url := strings.TrimSpace(item[rb+2 : rb+2+closeParen])
-	if url == "" {
-		return false, true
-	}
-	rest := strings.TrimSpace(item[rb+2+closeParen+1:])
-	if rest == "" || strings.HasPrefix(rest, "- ") || strings.HasPrefix(rest, "— ") {
-		return true, true
-	}
-	return false, true
-}
-
-// ReservedMarkdown reports whether rel is an OKF reserved basename.
-func ReservedMarkdown(rel string) (kind string, rootIndex bool) {
-	base := path.Base(strings.ReplaceAll(rel, "\\", "/"))
-	switch base {
-	case "index.md":
-		slash := path.Clean(strings.ReplaceAll(rel, "\\", "/"))
-		return "index", slash == "index.md"
-	case "log.md":
-		return "log", false
-	default:
-		return "", false
-	}
+	return nil
 }

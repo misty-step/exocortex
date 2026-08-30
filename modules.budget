@@ -1,13 +1,12 @@
 # name	include	budget
 # Packed-output tokens via repomix --no-file-summary --no-directory-structure.
 # Raise only with a recorded reason after delete-or-split.
-# 2026-08-29 fm 8000→10000: OKF reserved index.md/log.md validators (Root vault).
 # PR #30: typed publication outcomes and cross-host recovery proofs; duplicate
 # candidate-path coverage was folded before raising this package ceiling.
-# PR #31: OKF reserved-file validation, put semantics, and profile CAS proofs.
-kernel	internal/kernel	57500
+# PR #32: locked publisher refresh, batched read snapshots, and race proofs.
+kernel	internal/kernel	57200
 cli	internal/cli	16000
-fm	internal/fm	10000
+fm	internal/fm	8000
 mcp	internal/mcp	5000
 orient	internal/orient	4500
 qmd	internal/qmd	9000

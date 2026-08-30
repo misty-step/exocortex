@@ -56,12 +56,8 @@ Rejected extremes:
 
 Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
 
-  - `register <name> <path>` — bind a cortex. Same name always
-    `duplicate_cortex`; it never upserts.
-  - `set-profile <name> <profile> --expects <current>` — change only the
-    validation profile. `--expects` must match the stored profile
-    (`profile_conflict` otherwise). Other registry fields are untouched.
-    Rollback is `set-profile <name> <previous> --expects <new>`.
+- **CLI** (`--json` everywhere, CR-02):
+  - `register <name> <path>` — bind a cortex.
   - `put <path> --from <file|->` — write payload (`-` = stdin) to cortex
     destination `<path>`. Bare form is create-only: fails if `<path>`
     already exists (atomic create).
@@ -109,9 +105,15 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     that clone. The writer tree is the authoritative indexed root; the
     QMD collection named for the cortex must point at that tree (or, for
     `caller`/`none`, at the registered path). `sync` owns index and
-    embed freshness. `get`/`log`/`lint` read the writer once it exists
-    (`git show HEAD:<path>` for daybook). Human-checkout dirt is
-    invisible to the kernel.
+    embed freshness. `get`/`log`/`lint` use one private read-snapshot
+    owner: it acquires the same per-cortex lock as `put`, provisions and
+    refreshes the publisher once, rejects tracked, staged, or untracked
+    publisher dirt after refresh, pins immutable `HEAD` to a commit SHA,
+    releases the lock, and then reads only that committed snapshot
+    (`git show <sha>:<path>`, `git log <sha>`, and `git ls-tree <sha>`).
+    Snapshot acquisition or committed-read failure is
+    `cortex_unavailable`; every result in one operation comes from its
+    pinned SHA, while `caller`/`none` retain direct registered-root reads.
   - `sync [--cortex <name>]` — acquire the same per-cortex write lock
     as `put`, snapshot dirty markers, require `qmd collection show`
     Path to equal `effectiveRoot` (fail-closed:
@@ -337,17 +339,18 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
   - `strict` — the five-key floor (`type`, `status`, `created`,
     `description`, `tags` all present and non-empty; RFC3339 `created`);
     opt-in for future cortices that want it.
-  - `okf` — same note floor as `daybook`, plus OKF reserved-file formats
-    for `index.md` and `log.md`. `daybook` is unchanged: yearly MOC
-    indexes with `type` remain notes. `okf` is what Root registers.
+  - `okf` — the `daybook` note floor plus Root's reserved catalog files.
+    Under this opt-in profile only, any `index.md` or `log.md` basename is
+    not a note. Nested indexes have no frontmatter; the cortex-root
+    `index.md` MAY carry only `okf_version`. Validation scans each trimmed
+    line independently; it does not interpret Markdown containers or fences.
+    An index requires a heading line and a `* [Title](url)` catalog line.
+    Logs have no frontmatter; every trimmed `##` heading separated by a space
+    or tab is ISO `YYYY-MM-DD`, newest-first, with at least one date heading.
+    All other Markdown files still require non-empty `type`.
+    Existing `daybook` and `strict` cortices are unchanged.
   `lint` reports failures and warnings tiered; consumers of `daybook`
-  cortices MUST NOT hard-fail on warnings. Under `okf` only, reserved
-  basenames `index.md` and `log.md` (any directory) are not notes:
-  nested `index.md` has no frontmatter; bundle-root `index.md` MAY carry
-  only `okf_version`; body needs at least one ATX heading and at least
-  one `* [Title](url)` catalog bullet. `log.md` has no frontmatter;
-  every `##` heading is ISO `YYYY-MM-DD`, newest-first, at least one
-  date heading. Every other `.md` file still requires non-empty `type`.
+  cortices MUST NOT hard-fail on warnings.
 
 ### v0 acceptance proofs
 

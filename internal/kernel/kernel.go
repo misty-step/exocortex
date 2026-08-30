@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -20,11 +19,7 @@ import (
 // Cortex is a registered knowledge corpus.
 type Cortex = cortexregistry.Cortex
 
-var (
-	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-	profiles  = map[string]bool{"daybook": true, "strict": true, "okf": true}
-	dupSuffix = ".tmp-exocortex"
-)
+var dupSuffix = ".tmp-exocortex"
 
 // ConfigDir returns ${XDG_CONFIG_HOME:-~/.config}/exocortex.
 func ConfigDir() (string, error) {
@@ -156,61 +151,6 @@ func Register(name, path, vcs, profile, journalPrefix string) (*Cortex, error) {
 			map[string]any{"detail": err.Error()})
 	}
 	return &candidate, nil
-}
-
-// SetProfile changes one global cortex's validation profile. from must match
-// the stored profile. Unspecified fields stay untouched.
-func SetProfile(name, to, from string) (*Cortex, error) {
-	if !nameRe.MatchString(name) {
-		return nil, conflict("registration_failed", "set-profile", name,
-			"fix the name (lowercase slug) and retry",
-			map[string]any{"detail": fmt.Sprintf("cortex name %q must match %s", name, nameRe)})
-	}
-	if from == "" {
-		return nil, conflict("invalid_input", "set-profile", name,
-			"pass --expects with the current profile and retry", nil)
-	}
-	if !profiles[to] {
-		return nil, conflict("registration_failed", "set-profile", name,
-			"pass daybook, strict, or okf",
-			map[string]any{"detail": fmt.Sprintf("profile %q must be daybook, strict, or okf", to)})
-	}
-	regLock, lerr := acquireLock("registry")
-	if lerr != nil {
-		return nil, conflict("registration_failed", "set-profile", name,
-			"fix lock-file access and retry", map[string]any{"detail": lerr.Error()})
-	}
-	defer regLock.release()
-	cs, err := loadGlobalRegistry()
-	if err != nil {
-		return nil, conflict("registration_failed", "set-profile", name,
-			"repair the global registry and retry", map[string]any{"detail": err.Error()})
-	}
-	idx := -1
-	for i, c := range cs {
-		if c.Name == name {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return nil, conflict("not_found", "set-profile", name,
-			"register the cortex globally first", nil)
-	}
-	if cs[idx].Profile != from {
-		return nil, conflict("profile_conflict", "set-profile", name,
-			"re-read status and retry with --expects matching the stored profile",
-			map[string]any{"expected": from, "actual": cs[idx].Profile})
-	}
-	if cs[idx].Profile == to {
-		return &cs[idx], nil
-	}
-	cs[idx].Profile = to
-	if err := saveRegistry(cs); err != nil {
-		return nil, conflict("registration_failed", "set-profile", name,
-			"fix registry write access and retry", map[string]any{"detail": err.Error()})
-	}
-	return &cs[idx], nil
 }
 
 // Resolve maps a user-supplied path onto a cortex and a cortex-relative
