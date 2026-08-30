@@ -315,7 +315,9 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 	if err != nil && *typeFilter != "" {
 		return nil, nil, err
 	}
-	return projectSearchHits(hits, cs, *typeFilter, *limit), nil, nil
+	projected, conf := projectSearchHits(hits, cs, *typeFilter, *limit)
+	return projected, conf, nil
+
 }
 
 func searchCollections(cortex, typeFilter string) []string {
@@ -339,10 +341,14 @@ func searchFetchLimit(limit int, typeFilter string) int {
 	return fetchLimit
 }
 
-func projectSearchHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, limit int) []map[string]any {
+func projectSearchHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, limit int) ([]map[string]any, *kernel.Conflict) {
+	fetched, conf := hydrateHits(hits, cs)
+	if conf != nil {
+		return nil, conf
+	}
 	out := make([]map[string]any, 0)
-	for _, h := range hits {
-		entry, keep := projectSearchHit(h, cs, typeFilter)
+	for i, h := range hits {
+		entry, keep := projectSearchHit(h, cs, typeFilter, fetched[i])
 		if !keep {
 			continue
 		}
@@ -351,23 +357,43 @@ func projectSearchHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, li
 			break
 		}
 	}
-	return out
+	return out, nil
 }
 
-func projectSearchHit(h qmd.Hit, cs []kernel.Cortex, typeFilter string) (map[string]any, bool) {
+// hydrateHits translates registered qmd URIs to one batched committed read.
+// Non-URI and unregistered hits remain search-only projections.
+func hydrateHits(hits []qmd.Hit, cs []kernel.Cortex) ([]*kernel.GetResult, *kernel.Conflict) {
+	results := make([]*kernel.GetResult, len(hits))
+	requests := make([]kernel.GetRequest, 0, len(hits))
+	indexes := make([]int, 0, len(hits))
+	for i, hit := range hits {
+		collection, rel, ok := qmd.SplitURI(hit.File)
+		if !ok || rel == "" || kernel.CortexNamed(cs, collection) == nil {
+			continue
+		}
+		requests = append(requests, kernel.GetRequest{CortexName: collection, Path: rel})
+		indexes = append(indexes, i)
+	}
+	outcomes := kernel.GetMany(cs, requests)
+	for i, outcome := range outcomes {
+		if outcome.Conflict != nil {
+			return nil, outcome.Conflict
+		}
+		results[indexes[i]] = outcome.Result
+	}
+	return results, nil
+}
+
+func projectSearchHit(h qmd.Hit, cs []kernel.Cortex, typeFilter string, res *kernel.GetResult) (map[string]any, bool) {
 	collection, rel, isURI := qmd.SplitURI(h.File)
 	var (
-		c   *kernel.Cortex
-		fm  map[string]any
-		res *kernel.GetResult
+		c  *kernel.Cortex
+		fm map[string]any
 	)
 	if isURI {
 		c = kernel.CortexNamed(cs, collection)
-		if c != nil && rel != "" {
-			if got, conf := kernel.Get(cs, collection, rel); conf == nil {
-				res = got
-				fm = got.Frontmatter
-			}
+		if res != nil {
+			fm = res.Frontmatter
 		}
 	}
 	if typeFilter != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, typeFilter, fm, res != nil) {
@@ -450,7 +476,10 @@ func cmdBrief(args []string) (any, *kernel.Conflict, error) {
 			Detail:    map[string]any{"detail": err.Error()},
 		}, nil
 	}
-	notes := collectBriefNotes(cs, hits, *limit)
+	notes, conf := collectBriefNotes(cs, hits, *limit)
+	if conf != nil {
+		return nil, conf, nil
+	}
 	return map[string]any{
 		"topic":           topic,
 		"canonical_notes": notes,
@@ -458,11 +487,15 @@ func cmdBrief(args []string) (any, *kernel.Conflict, error) {
 	}, nil, nil
 }
 
-func collectBriefNotes(cs []kernel.Cortex, hits []qmd.Hit, limit int) []map[string]any {
+func collectBriefNotes(cs []kernel.Cortex, hits []qmd.Hit, limit int) ([]map[string]any, *kernel.Conflict) {
+	fetched, conf := hydrateHits(hits, cs)
+	if conf != nil {
+		return nil, conf
+	}
 	var notes []map[string]any
 	seen := map[string]bool{}
-	for _, h := range hits {
-		note, ok := briefNoteFromHit(cs, h, seen)
+	for i, h := range hits {
+		note, ok := briefNoteFromHit(cs, h, fetched[i], seen)
 		if !ok {
 			continue
 		}
@@ -471,18 +504,17 @@ func collectBriefNotes(cs []kernel.Cortex, hits []qmd.Hit, limit int) []map[stri
 			break
 		}
 	}
-	return notes
+	return notes, nil
 }
 
-func briefNoteFromHit(cs []kernel.Cortex, h qmd.Hit, seen map[string]bool) (map[string]any, bool) {
+func briefNoteFromHit(cs []kernel.Cortex, h qmd.Hit, res *kernel.GetResult, seen map[string]bool) (map[string]any, bool) {
 	cName, rel, ok := qmd.SplitURI(h.File)
 	key := cName + "\x00" + rel
 	if !ok || seen[key] {
 		return nil, false
 	}
 	c := kernel.CortexNamed(cs, cName)
-	res, conf := kernel.Get(cs, cName, rel)
-	if conf != nil || res == nil {
+	if res == nil {
 		return nil, false
 	}
 	if !orient.BriefOK(kernel.JournalPrefix(c), rel, h.File, res.Frontmatter) {

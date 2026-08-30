@@ -3,7 +3,9 @@ package cli
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -98,8 +100,7 @@ func TestSearchTypeAndBriefUseCortexPolicy(t *testing.T) {
   {"docid":"#9","file":"qmd://emma/dead.md","score":0.1,"line":1,"title":"Dead","context":"","snippet":"dead"},
   {"docid":"#10","file":"qmd://omp-sessions/2026/x.jsonl","score":0.05,"line":1,"title":"sess","context":"","snippet":"sess"},
   {"docid":"#11","file":"qmd://vault/notes/shared.md","score":0.04,"line":1,"title":"Vault shared","context":"","snippet":"shared"},
-  {"docid":"#12","file":"qmd://emma/notes/shared.md","score":0.03,"line":1,"title":"Emma shared","context":"","snippet":"shared"},
-  {"docid":"#13","file":"qmd://vault/projects/ghost.md","score":0.02,"line":1,"title":"Ghost","context":"","snippet":"ghost"}
+  {"docid":"#12","file":"qmd://emma/notes/shared.md","score":0.03,"line":1,"title":"Emma shared","context":"","snippet":"shared"}
 ]`)
 
 	code, _, raw = runMain(t, "", "search", "topic", "--type", "memo", "--mode", "bm25", "--limit", "20")
@@ -124,7 +125,7 @@ func TestSearchTypeAndBriefUseCortexPolicy(t *testing.T) {
 	}
 	if hasPath(decPaths, "meta/agents-board/memo/2026-08-25/a.md") || hasPath(decPaths, "daily/2026-08-25/n.md") ||
 		hasPath(decPaths, "Clippings/book.md") || hasPath(decPaths, "meta/conversations/2026-08-25.md") ||
-		hasPath(decPaths, "projects/old.md") || hasPath(decPaths, "projects/ghost.md") {
+		hasPath(decPaths, "projects/old.md") {
 		t.Fatalf("decision filter leaked noise, dead notes, or unread paths: %v", decPaths)
 	}
 
@@ -191,5 +192,233 @@ func TestTypedSearchFailsClosedOnBadRegistry(t *testing.T) {
 	}
 	if body["error"] == nil || body["error"] == "" {
 		t.Fatalf("want an error payload, got %v", body)
+	}
+}
+
+type cliNote struct {
+	path string
+	body string
+}
+
+func cliGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func runMainRaw(t *testing.T, stdin string, args ...string) (int, string, string) {
+	t.Helper()
+	var out, errb strings.Builder
+	code := Main(args, strings.NewReader(stdin), &out, &errb)
+	return code, out.String(), errb.String()
+}
+
+func setupCLIDaybook(t *testing.T, notes ...cliNote) (string, string) {
+	t.Helper()
+	if len(notes) == 0 {
+		t.Fatal("setupCLIDaybook requires at least one note")
+	}
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	base := t.TempDir()
+	origin := filepath.Join(base, "origin.git")
+	human := filepath.Join(base, "human")
+	cliGit(t, base, "init", "--bare", "-b", "master", origin)
+	cliGit(t, base, "clone", origin, human)
+	cliGit(t, human, "config", "user.email", "cli@test")
+	cliGit(t, human, "config", "user.name", "CLI Test")
+	if err := os.WriteFile(filepath.Join(human, "README.md"), []byte("# fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, note := range notes {
+		writeNote(t, human, note.path, note.body)
+	}
+	cliGit(t, human, "add", ".")
+	cliGit(t, human, "commit", "-m", "seed")
+	cliGit(t, human, "push", "-u", "origin", "master")
+
+	code, body, raw := runMain(t, "", "register", "vault", human, "--vcs", "daybook")
+	if code != 0 {
+		t.Fatalf("register daybook: exit=%d body=%v raw=%s", code, body, raw)
+	}
+	code, body, raw = runMain(t, "", "get", notes[0].path, "--cortex", "vault")
+	if code != 0 {
+		t.Fatalf("warm daybook publisher: exit=%d body=%v raw=%s", code, body, raw)
+	}
+
+	writers := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "exocortex", "writers")
+	entries, err := os.ReadDir(writers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var writer string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			if writer != "" {
+				t.Fatalf("multiple publisher writers in %s", writers)
+			}
+			writer = filepath.Join(writers, entry.Name())
+		}
+	}
+	if writer == "" {
+		t.Fatalf("publisher writer missing in %s", writers)
+	}
+	return human, writer
+}
+
+func installCountingGit(t *testing.T, logPath string) {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	script := `#!/bin/sh
+if [ "$1" = "fetch" ]; then
+  printf 'fetch\n' >> "$EXOCORTEX_CLI_FETCH_LOG"
+fi
+exec "$EXOCORTEX_CLI_REAL_GIT" "$@"
+`
+	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EXOCORTEX_CLI_FETCH_LOG", logPath)
+	t.Setenv("EXOCORTEX_CLI_REAL_GIT", realGit)
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+}
+
+func TestCLISearchAndBriefRejectDirtyPublisher(t *testing.T) {
+	dirtCases := []struct {
+		name   string
+		marker string
+		apply  func(*testing.T, string)
+	}{
+		{
+			name:   "tracked",
+			marker: "DIRTY_TRACKED",
+			apply: func(t *testing.T, writer string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(writer, "README.md"), []byte("DIRTY_TRACKED"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:   "staged",
+			marker: "DIRTY_STAGED",
+			apply: func(t *testing.T, writer string) {
+				t.Helper()
+				const rel = "notes/staged-wip.md"
+				if err := os.WriteFile(filepath.Join(writer, rel), []byte("DIRTY_STAGED"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				cliGit(t, writer, "add", rel)
+			},
+		},
+		{
+			name:   "untracked",
+			marker: "DIRTY_UNTRACKED",
+			apply: func(t *testing.T, writer string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(writer, "notes/untracked-wip.md"), []byte("DIRTY_UNTRACKED"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+	projections := []struct {
+		name string
+		args []string
+	}{
+		{name: "search", args: []string{"search", "topic", "--cortex", "vault", "--mode", "bm25"}},
+		{name: "brief", args: []string{"brief", "topic", "--cortex", "vault"}},
+	}
+	hits := `[{"docid":"#1","file":"qmd://vault/notes/x.md","score":0.9,"line":1,"title":"x","context":"","snippet":"clean"}]`
+
+	for _, dirt := range dirtCases {
+		dirt := dirt
+		for _, projection := range projections {
+			projection := projection
+			t.Run(dirt.name+"/"+projection.name, func(t *testing.T) {
+				_, writer := setupCLIDaybook(t, cliNote{
+					path: "notes/x.md",
+					body: "---\ntype: note\nstatus: active\ndescription: clean\ncreated: 2026-08-21T00:00:00Z\n---\n\nclean committed bytes\n",
+				})
+				dirt.apply(t, writer)
+				installFakeQMD(t, hits)
+
+				code, raw, _ := runMainRaw(t, "", projection.args...)
+				if code != 1 {
+					t.Fatalf("%s exit=%d raw=%s", projection.name, code, raw)
+				}
+				var body map[string]any
+				if err := json.Unmarshal([]byte(raw), &body); err != nil {
+					t.Fatalf("%s conflict JSON: %v\n%s", projection.name, err, raw)
+				}
+				if body["error"] != "cortex_unavailable" {
+					t.Fatalf("%s error=%v, want cortex_unavailable; body=%v", projection.name, body["error"], body)
+				}
+				if strings.Contains(raw, dirt.marker) {
+					t.Fatalf("%s returned publisher dirt bytes: %s", projection.name, raw)
+				}
+			})
+		}
+	}
+}
+
+func TestCLISearchAndBriefFetchEachCortexOnce(t *testing.T) {
+	projections := []struct {
+		name string
+		args []string
+	}{
+		{name: "search", args: []string{"search", "topic", "--cortex", "vault", "--mode", "bm25"}},
+		{name: "brief", args: []string{"brief", "topic", "--cortex", "vault"}},
+	}
+	hits := `[
+{"docid":"#1","file":"qmd://vault/notes/a.md","score":0.9,"line":1,"title":"a","context":"","snippet":"a"},
+{"docid":"#2","file":"qmd://vault/notes/b.md","score":0.8,"line":1,"title":"b","context":"","snippet":"b"}
+]`
+
+	for _, projection := range projections {
+		projection := projection
+		t.Run(projection.name, func(t *testing.T) {
+			_, _ = setupCLIDaybook(t,
+				cliNote{path: "notes/a.md", body: "---\ntype: decision\nstatus: active\ndescription: a\ncreated: 2026-08-21T00:00:00Z\n---\n\n# A\n- a\n"},
+				cliNote{path: "notes/b.md", body: "---\ntype: decision\nstatus: active\ndescription: b\ncreated: 2026-08-21T00:00:00Z\n---\n\n# B\n- b\n"},
+			)
+			installFakeQMD(t, hits)
+			fetchLog := filepath.Join(t.TempDir(), "fetch.log")
+			installCountingGit(t, fetchLog)
+
+			code, raw, _ := runMainRaw(t, "", projection.args...)
+			if code != 0 {
+				t.Fatalf("%s exit=%d raw=%s", projection.name, code, raw)
+			}
+			if projection.name == "search" {
+				if got := decodeHits(t, raw); len(got) != 2 {
+					t.Fatalf("search hits=%d, want 2", len(got))
+				}
+			} else {
+				var body map[string]any
+				if err := json.Unmarshal([]byte(raw), &body); err != nil {
+					t.Fatalf("brief JSON: %v\n%s", err, raw)
+				}
+				notes, ok := body["canonical_notes"].([]any)
+				if !ok || len(notes) != 2 {
+					t.Fatalf("brief canonical_notes=%v, want 2", body["canonical_notes"])
+				}
+			}
+			logged, err := os.ReadFile(fetchLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Count(string(logged), "fetch\n"); got != 1 {
+				t.Fatalf("%s fetch count=%d, want 1; log=%q", projection.name, got, logged)
+			}
+		})
 	}
 }

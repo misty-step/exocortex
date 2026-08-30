@@ -3,7 +3,8 @@
 # Raise only with a recorded reason after delete-or-split.
 # PR #30: typed publication outcomes and cross-host recovery proofs; duplicate
 # candidate-path coverage was folded before raising this package ceiling.
-kernel	internal/kernel	54500
+# PR #32: locked publisher refresh, batched read snapshots, and race proofs.
+kernel	internal/kernel	57200
 cli	internal/cli	16000
 fm	internal/fm	8000
 mcp	internal/mcp	5000

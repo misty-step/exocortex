@@ -166,7 +166,8 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 			return nil, nil, err
 		}
 	}
-	return toolResult(projectMCPHits(hits, cs, a.Type, limit), nil)
+	projected, conf := projectMCPHits(hits, cs, a.Type, limit)
+	return toolResult(projected, conf)
 }
 
 func mcpFetchLimit(limit int, typeFilter string) int {
@@ -180,10 +181,29 @@ func mcpFetchLimit(limit int, typeFilter string) int {
 	return fetchLimit
 }
 
-func projectMCPHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, limit int) []map[string]any {
+func projectMCPHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, limit int) ([]map[string]any, *kernel.Conflict) {
+	fetched := make([]*kernel.GetResult, len(hits))
+	if typeFilter != "" {
+		requests := make([]kernel.GetRequest, 0, len(hits))
+		indexes := make([]int, 0, len(hits))
+		for i, h := range hits {
+			collection, path, ok := qmd.SplitURI(h.File)
+			if !ok || path == "" || kernel.CortexNamed(cs, collection) == nil {
+				continue
+			}
+			requests = append(requests, kernel.GetRequest{CortexName: collection, Path: path})
+			indexes = append(indexes, i)
+		}
+		for i, outcome := range kernel.GetMany(cs, requests) {
+			if outcome.Conflict != nil {
+				return nil, outcome.Conflict
+			}
+			fetched[indexes[i]] = outcome.Result
+		}
+	}
 	out := make([]map[string]any, 0, len(hits))
-	for _, h := range hits {
-		entry, keep := projectMCPHit(h, cs, typeFilter)
+	for i, h := range hits {
+		entry, keep := projectMCPHit(h, cs, typeFilter, fetched[i])
 		if !keep {
 			continue
 		}
@@ -192,10 +212,10 @@ func projectMCPHits(hits []qmd.Hit, cs []kernel.Cortex, typeFilter string, limit
 			break
 		}
 	}
-	return out
+	return out, nil
 }
 
-func projectMCPHit(h qmd.Hit, cs []kernel.Cortex, typeFilter string) (map[string]any, bool) {
+func projectMCPHit(h qmd.Hit, cs []kernel.Cortex, typeFilter string, res *kernel.GetResult) (map[string]any, bool) {
 	entry := map[string]any{
 		"docid":   h.DocID,
 		"score":   h.Score,
@@ -206,24 +226,20 @@ func projectMCPHit(h qmd.Hit, cs []kernel.Cortex, typeFilter string) (map[string
 		"file":    h.File,
 	}
 	var (
-		c       *kernel.Cortex
-		rel     string
-		fm      map[string]any
-		fetched bool
+		c   *kernel.Cortex
+		rel string
+		fm  map[string]any
 	)
 	if collection, path, ok := qmd.SplitURI(h.File); ok {
 		entry["cortex"] = collection
 		entry["path"] = path
 		rel = path
 		c = kernel.CortexNamed(cs, collection)
-		if typeFilter != "" && c != nil && path != "" {
-			if res, conf := kernel.Get(cs, collection, path); conf == nil && res != nil {
-				fm = res.Frontmatter
-				fetched = true
-			}
+		if res != nil {
+			fm = res.Frontmatter
 		}
 	}
-	if typeFilter != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, typeFilter, fm, fetched) {
+	if typeFilter != "" && !orient.MatchType(kernel.JournalPrefix(c), rel, h.File, typeFilter, fm, res != nil) {
 		return nil, false
 	}
 	return entry, true

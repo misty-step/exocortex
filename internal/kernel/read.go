@@ -13,7 +13,6 @@ import (
 	"github.com/misty-step/exocortex/internal/fm"
 )
 
-// GetResult is the pinned `get` output.
 type GetResult struct {
 	Cortex      string         `json:"cortex"`
 	Path        string         `json:"path"`
@@ -22,53 +21,156 @@ type GetResult struct {
 	Content     string         `json:"content"`
 }
 
-func Get(cs []Cortex, nameFlag, p string) (*GetResult, *Conflict) {
-	c, rel, err := Resolve(cs, nameFlag, p)
-	if err != nil {
-		return nil, conflict("resolve_failed", "get", p, "use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
-	}
-	root, rerr := effectiveRoot(c)
-	if rerr != nil {
-		return nil, conflict("cortex_unavailable", "get", p, "publisher repository is unavailable; check remote access", map[string]any{"detail": rerr.Error()})
-	}
-	if c.VCS == "daybook" {
-		raw, gerr := git(root, "show", "HEAD:"+filepath.ToSlash(rel))
-		if gerr != nil {
-			return nil, conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
+type GetRequest struct {
+	CortexName string
+	Path       string
+}
+
+type GetOutcome struct {
+	Result   *GetResult
+	Conflict *Conflict
+}
+
+type readSnapshot struct {
+	repo string
+	sha  string
+}
+
+func (s readSnapshot) read(path string) ([]byte, error) {
+	if s.sha != "" {
+		raw, err := git(s.repo, "show", s.sha+":"+path)
+		if err != nil {
+			return nil, err
 		}
-		return getResult(c, rel, []byte(raw)), nil
+		return []byte(raw), nil
 	}
-	abs := filepath.Join(root, rel)
-	raw, serr := os.ReadFile(abs)
-	if errors.Is(serr, fs.ErrNotExist) {
-		return nil, conflict("not_found", "get", rel, "check the path; search the cortex to locate the note", nil)
+	return os.ReadFile(filepath.Join(s.repo, filepath.FromSlash(path)))
+}
+
+func (s readSnapshot) log(path string, limit int) ([]LogEntry, error) {
+	args := []string{"log", fmt.Sprintf("-n%d", limit), "--format=%H%x1f%an%x1f%aI%x1f%s"}
+	if s.sha != "" {
+		args = append(args, s.sha)
 	}
-	if serr != nil {
-		return nil, conflict("read_failed", "get", rel, "fix filesystem access and retry", map[string]any{"detail": serr.Error()})
+	args = append(args, "--", filepath.FromSlash(path))
+	out, err := git(s.repo, args...)
+	if err != nil {
+		return nil, err
 	}
-	return getResult(c, rel, raw), nil
+	var entries []LogEntry
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		parts := strings.SplitN(line, "\x1f", 4)
+		if len(parts) == 4 {
+			entries = append(entries, LogEntry{SHA: parts[0], Author: parts[1], Date: parts[2], Subject: parts[3]})
+		}
+	}
+	return entries, nil
+}
+
+func (s readSnapshot) markdownPaths() ([]string, error) {
+	if s.sha != "" {
+		out, err := git(s.repo, "ls-tree", "-r", "-z", "--name-only", s.sha)
+		if err != nil {
+			return nil, err
+		}
+		out = strings.TrimSuffix(out, "\x00")
+		if out == "" {
+			return nil, nil
+		}
+		var paths []string
+		for _, path := range strings.Split(out, "\x00") {
+			if path != "" && strings.HasSuffix(path, ".md") {
+				paths = append(paths, filepath.ToSlash(path))
+			}
+		}
+		return paths, nil
+	}
+
+	var paths []string
+	err := filepath.WalkDir(s.repo, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), ".md") {
+			rel, err := filepath.Rel(s.repo, path)
+			if err != nil {
+				return err
+			}
+			paths = append(paths, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	return paths, err
+}
+
+func Get(cs []Cortex, nameFlag, p string) (*GetResult, *Conflict) {
+	outcome := GetMany(cs, []GetRequest{{CortexName: nameFlag, Path: p}})[0]
+	return outcome.Result, outcome.Conflict
+}
+
+func GetMany(cs []Cortex, requests []GetRequest) []GetOutcome {
+	outcomes := make([]GetOutcome, len(requests))
+	rels := make([]string, len(requests))
+	groups := make(map[string][]int)
+	var order []*Cortex
+	for i, request := range requests {
+		c, rel, err := Resolve(cs, request.CortexName, request.Path)
+		if err != nil {
+			outcomes[i].Conflict = conflict("resolve_failed", "get", request.Path,
+				"use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
+			continue
+		}
+		rels[i] = filepath.ToSlash(rel)
+		if groups[c.Name] == nil {
+			order = append(order, c)
+		}
+		groups[c.Name] = append(groups[c.Name], i)
+	}
+	for _, c := range order {
+		indexes := groups[c.Name]
+		conf := withReadSnapshot(c, "get", rels[indexes[0]], func(snapshot readSnapshot) *Conflict {
+			for _, i := range indexes {
+				raw, err := snapshot.read(rels[i])
+				if err != nil {
+					outcomes[i].Conflict = snapshotReadConflict(c, "get", rels[i], err)
+					continue
+				}
+				outcomes[i].Result = getResult(c, rels[i], raw)
+			}
+			return nil
+		})
+		if conf != nil {
+			for _, i := range indexes {
+				outcomes[i].Conflict = conflictForRequest(conf, "get", rels[i])
+			}
+		}
+	}
+	return outcomes
 }
 
 func getResult(c *Cortex, rel string, raw []byte) *GetResult {
-	doc := fm.ParseDocument(raw)
 	return &GetResult{
 		Cortex:      c.Name,
 		Path:        filepath.ToSlash(rel),
 		Revision:    Revision(raw),
-		Frontmatter: doc.Map,
+		Frontmatter: fm.ParseDocument(raw).Map,
 		Content:     string(raw),
 	}
 }
 
-// LogEntry is one line of git lineage for a note.
 type LogEntry struct {
 	SHA     string `json:"sha"`
 	Author  string `json:"author"`
-	Date    string `json:"date"` // RFC3339 in the commit's timezone offset
+	Date    string `json:"date"`
 	Subject string `json:"subject"`
 }
 
-// Log returns the git lineage of one note.
 func Log(cs []Cortex, nameFlag, p string, limit int) ([]LogEntry, *Conflict) {
 	if limit <= 0 {
 		limit = 50
@@ -77,32 +179,24 @@ func Log(cs []Cortex, nameFlag, p string, limit int) ([]LogEntry, *Conflict) {
 	if err != nil {
 		return nil, conflict("resolve_failed", "log", p, "use a path inside a registered cortex or pass --cortex", map[string]any{"detail": err.Error()})
 	}
-	root, rerr := effectiveRoot(c)
-	if rerr != nil {
-		return nil, conflict("cortex_unavailable", "log", p, "publisher repository is unavailable; check remote access", map[string]any{"detail": rerr.Error()})
-	}
-	out, gerr := git(root, "log", fmt.Sprintf("-n%d", limit),
-		"--format=%H%x1f%an%x1f%aI%x1f%s", "--", filepath.FromSlash(rel))
-	if gerr != nil {
-		return nil, conflict("log_unavailable", "log", rel,
-			"lineage requires a git-backed cortex; check that the cortex path is a repository",
-			map[string]any{"detail": gerr.(*GitError).Stderr})
-	}
+	rel = filepath.ToSlash(rel)
 	var entries []LogEntry
-	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-		if line == "" {
-			continue
+	conf := withReadSnapshot(c, "log", rel, func(snapshot readSnapshot) *Conflict {
+		var readErr error
+		entries, readErr = snapshot.log(rel, limit)
+		if readErr == nil {
+			return nil
 		}
-		parts := strings.SplitN(line, "\x1f", 4)
-		if len(parts) != 4 {
-			continue
+		if c.VCS == "daybook" {
+			return snapshotUnavailable("log", rel, readErr)
 		}
-		entries = append(entries, LogEntry{SHA: parts[0], Author: parts[1], Date: parts[2], Subject: parts[3]})
-	}
-	return entries, nil
+		return conflict("log_unavailable", "log", rel,
+			"lineage requires a git-backed cortex; check that the cortex path is a repository",
+			map[string]any{"detail": gitDetail(readErr)})
+	})
+	return entries, conf
 }
 
-// LintResult reports tiered findings for one note or a whole cortex.
 type LintResult struct {
 	Cortex   string       `json:"cortex"`
 	Path     string       `json:"path,omitempty"`
@@ -111,8 +205,6 @@ type LintResult struct {
 	Warnings int          `json:"warnings"`
 }
 
-// Lint runs the cortex's validation profile over one note or every .md
-// file in the cortex. Findings are tiered; only errors block.
 func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 	var c *Cortex
 	var rel string
@@ -129,48 +221,14 @@ func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 			return nil, conflict("resolve_failed", "lint", p,
 				"use a path inside a registered cortex or pass --cortex", map[string]any{"detail": rerr.Error()})
 		}
-		c, rel = rc, rrel
+		c, rel = rc, filepath.ToSlash(rrel)
 	}
-	res := &LintResult{Cortex: c.Name, Path: filepath.ToSlash(rel)}
-	add := func(path string, findings []fm.Finding, verr error) {
-		if verr != nil {
-			if f, ok := fm.ContractFinding(verr); ok {
-				res.Findings = append(res.Findings, f)
-			} else {
-				res.Findings = append(res.Findings, fm.Finding{Level: "error", Rule: "read_failed", Message: verr.Error()})
-			}
-		}
-		res.Findings = append(res.Findings, findings...)
-	}
-	root, rerr := effectiveRoot(c)
-	if rerr != nil {
-		return nil, conflict("cortex_unavailable", "lint", p, "publisher repository is unavailable; check remote access", map[string]any{"detail": rerr.Error()})
-	}
-	if rel != "" {
-		findings, verr := lintOne(c.Profile, filepath.Join(root, rel))
-		add(rel, findings, verr)
-	} else {
-		werr := filepath.WalkDir(root, func(path string, d fs.DirEntry, werr error) error {
-			if werr != nil {
-				return werr
-			}
-			if d.IsDir() {
-				if d.Name() == ".git" {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if !strings.HasSuffix(d.Name(), ".md") {
-				return nil
-			}
-			relPath, _ := filepath.Rel(root, path)
-			findings, verr := lintOne(c.Profile, path)
-			add(filepath.ToSlash(relPath), findings, verr)
-			return nil
-		})
-		if werr != nil {
-			return nil, conflict("walk_failed", "lint", "", "fix filesystem access and retry", map[string]any{"detail": werr.Error()})
-		}
+	res := &LintResult{Cortex: c.Name, Path: rel}
+	conf := withReadSnapshot(c, "lint", rel, func(snapshot readSnapshot) *Conflict {
+		return lintSnapshot(c, rel, snapshot, res)
+	})
+	if conf != nil {
+		return nil, conf
 	}
 	for _, f := range res.Findings {
 		if f.Level == "error" {
@@ -182,16 +240,136 @@ func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 	return res, nil
 }
 
-func lintOne(profile, abs string) ([]fm.Finding, error) {
-	raw, err := os.ReadFile(abs)
-	if err != nil {
-		return nil, err
+func lintSnapshot(c *Cortex, rel string, snapshot readSnapshot, res *LintResult) *Conflict {
+	add := func(path string, findings []fm.Finding, verr error) {
+		if verr != nil {
+			if f, ok := fm.ContractFinding(verr); ok {
+				res.Findings = append(res.Findings, f)
+			} else {
+				res.Findings = append(res.Findings, fm.Finding{Level: "error", Rule: "read_failed", Message: verr.Error()})
+			}
+		}
+		res.Findings = append(res.Findings, findings...)
 	}
-	return fm.Validate(profile, fm.ParseDocument(raw))
+	read := func(path string) *Conflict {
+		raw, err := snapshot.read(path)
+		if err != nil {
+			if c.VCS == "daybook" {
+				return snapshotUnavailable("lint", path, err)
+			}
+			add(path, nil, err)
+			return nil
+		}
+		findings, err := fm.Validate(c.Profile, fm.ParseDocument(raw))
+		add(path, findings, err)
+		return nil
+	}
+	if rel != "" {
+		return read(rel)
+	}
+	paths, err := snapshot.markdownPaths()
+	if err != nil {
+		if c.VCS == "daybook" {
+			return snapshotUnavailable("lint", rel, err)
+		}
+		return conflict("walk_failed", "lint", rel, "fix filesystem access and retry",
+			map[string]any{"detail": err.Error()})
+	}
+	for _, path := range paths {
+		if conf := read(path); conf != nil {
+			return conf
+		}
+	}
+	return nil
 }
 
-// Revision is the lowercase hex sha256 of a note's exact file bytes —
-// the pinned revision identity reported by get and required by --expects.
+func withReadSnapshot(c *Cortex, operation, path string, fn func(readSnapshot) *Conflict) *Conflict {
+	if c.VCS != "daybook" {
+		root, err := effectiveRoot(c)
+		if err != nil {
+			return snapshotUnavailable(operation, path, err)
+		}
+		return fn(readSnapshot{repo: root})
+	}
+
+	lock, lockConf := lockNamed(c.Name, operation, path)
+	if lockConf != nil {
+		return snapshotUnavailable(operation, path, errors.New(lockConf.Error()))
+	}
+	fail := func(err error) *Conflict {
+		lock.release()
+		return snapshotUnavailable(operation, path, err)
+	}
+	existingWriter := writerDir(c) != ""
+	root, err := effectiveRoot(c)
+	if err != nil {
+		return fail(err)
+	}
+	if existingWriter {
+		if err := ffToUpstream(root); err != nil {
+			return fail(err)
+		}
+	}
+	if err := requireCleanPublisher(root); err != nil {
+		return fail(err)
+	}
+	head, err := git(root, "rev-parse", "HEAD")
+	if err != nil {
+		return fail(err)
+	}
+	if head = strings.TrimSpace(head); head == "" {
+		return fail(errors.New("publisher repository has no HEAD commit"))
+	}
+	snapshot := readSnapshot{repo: root, sha: head}
+	lock.release()
+	return fn(snapshot)
+}
+
+func snapshotUnavailable(operation, path string, err error) *Conflict {
+	return conflict("cortex_unavailable", operation, path,
+		"publisher committed snapshot is unavailable; check repository access and retry",
+		map[string]any{"detail": err.Error()})
+}
+
+func conflictForRequest(source *Conflict, operation, path string) *Conflict {
+	detail := make(map[string]any, len(source.Detail))
+	for key, value := range source.Detail {
+		detail[key] = value
+	}
+	return conflict(source.Code, operation, path, source.Hint, detail)
+}
+
+func snapshotReadConflict(c *Cortex, operation, path string, err error) *Conflict {
+	if c.VCS == "daybook" {
+		return snapshotUnavailable(operation, path, err)
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return conflict("not_found", operation, path,
+			"check the path; search the cortex to locate the note", nil)
+	}
+	return conflict("read_failed", operation, path, "fix filesystem access and retry",
+		map[string]any{"detail": err.Error()})
+}
+
+func gitDetail(err error) string {
+	var gerr *GitError
+	if errors.As(err, &gerr) && strings.TrimSpace(gerr.Stderr) != "" {
+		return strings.TrimSpace(gerr.Stderr)
+	}
+	return err.Error()
+}
+
+func requireCleanPublisher(w string) error {
+	out, err := git(w, "status", "--porcelain=v1", "--untracked-files=all")
+	if err != nil {
+		return fmt.Errorf("publisher status failed: %w", err)
+	}
+	if strings.TrimSpace(out) != "" {
+		return fmt.Errorf("publisher clone is dirty; inspect %s before retrying", w)
+	}
+	return nil
+}
+
 func Revision(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])

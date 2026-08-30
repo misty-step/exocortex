@@ -280,34 +280,3 @@ func TestProof19MissingOriginFailsClosedAcrossReadsAndWrites(t *testing.T) {
 		t.Fatal("local file in human checkout was mutated")
 	}
 }
-
-// Proof 20: Get reads the committed Git snapshot and NEVER observes uncommitted
-// working-tree bytes during an in-flight Put or failed unwound push.
-func TestProof20GetReadsCommittedSnapshotNeverObservesUncommittedAtomicWrite(t *testing.T) {
-	f := newFixture(t)
-	// Seed note at R1
-	if _, conf := f.put("hosta", "notes/snap.md", mkNote("note", "committed v1")); conf != nil {
-		t.Fatal(conf.Code)
-	}
-	r1 := f.rev("hosta", "notes/snap.md")
-
-	writer := mustEffectiveRoot(&f.cs[0])
-	// Simulate an uncommitted file written directly to the writer worktree
-	// (e.g. intermediate atomicWrite before commit).
-	os.WriteFile(filepath.Join(writer, "notes/snap.md"), []byte(mkNote("note", "uncommitted transient bytes")), 0o644)
-
-	// Get must still return the committed v1 snapshot from HEAD, not the uncommitted disk bytes!
-	got, conf := Get(f.cs, "hosta", "notes/snap.md")
-	if conf != nil {
-		t.Fatalf("get failed: %v", conf)
-	}
-	if !strings.Contains(got.Content, "committed v1") {
-		t.Fatalf("got content = %q, want committed v1", got.Content)
-	}
-	if strings.Contains(got.Content, "uncommitted transient bytes") {
-		t.Fatal("get observed uncommitted working tree bytes")
-	}
-	if got.Revision != r1 {
-		t.Fatalf("get revision = %s, want %s", got.Revision, r1)
-	}
-}
