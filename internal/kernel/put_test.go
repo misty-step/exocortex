@@ -235,13 +235,14 @@ func TestProof4ConcurrentUpdatesAndForeignStaged(t *testing.T) {
 		t.Fatalf("want 1 winner + 1 revision_conflict, got %+v", results)
 	}
 
+	// Compute the CAS revision before introducing foreign publisher dirt.
+	newRev := f.rev("hosta", "notes/cas.md")
 	// Foreign staged path in publisher tree aborts before any write and stays intact.
 	rootA := mustEffectiveRoot(&f.cs[0])
 	foreign := "notes/foreign.md"
 	foreignBody := mkNote("note", "another worker's staged work")
 	os.WriteFile(filepath.Join(rootA, foreign), []byte(foreignBody), 0o644)
 	g(t, rootA, "add", foreign)
-	newRev := f.rev("hosta", "notes/cas.md")
 	_, conf := Put(nil, f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/cas.md",
 		Payload: []byte(mkNote("note", "should not land")), Expects: newRev,

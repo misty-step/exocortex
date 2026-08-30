@@ -105,13 +105,15 @@ Single Go binary (CR-01; decided at scaffold 2026-08-21 over Rust), two faces:
     that clone. The writer tree is the authoritative indexed root; the
     QMD collection named for the cortex must point at that tree (or, for
     `caller`/`none`, at the registered path). `sync` owns index and
-    embed freshness. `get`/`log`/`lint` take the same per-cortex lock as
-    `put`, provision the writer if needed, require it clean, fast-forward
-    to `@{u}` when upstream exists, then read (`git show HEAD:<path>` for
-    daybook get). `ensureWriter` does not refresh existing clones and
-    does not lock. A failed refresh is `cortex_unavailable`. Human
-    commits on origin become visible; uncommitted human checkout bytes
-    stay invisible.
+    embed freshness. `get`/`log`/`lint` use one private read-snapshot
+    owner: it acquires the same per-cortex lock as `put`, provisions and
+    refreshes the publisher once, rejects tracked, staged, or untracked
+    publisher dirt after refresh, pins immutable `HEAD` to a commit SHA,
+    releases the lock, and then reads only that committed snapshot
+    (`git show <sha>:<path>`, `git log <sha>`, and `git ls-tree <sha>`).
+    Snapshot acquisition or committed-read failure is
+    `cortex_unavailable`; every result in one operation comes from its
+    pinned SHA, while `caller`/`none` retain direct registered-root reads.
   - `sync [--cortex <name>]` — acquire the same per-cortex write lock
     as `put`, snapshot dirty markers, require `qmd collection show`
     Path to equal `effectiveRoot` (fail-closed:

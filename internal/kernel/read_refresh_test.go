@@ -7,90 +7,119 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/misty-step/exocortex/internal/qmd"
 )
 
-func TestHumanPushVisibleToGetAndLint(t *testing.T) {
+func TestReadOperationsRejectDirtyPublisher(t *testing.T) {
+	cases := []struct {
+		name, path, contents string
+		staged               bool
+	}{
+		{"tracked", "README.md", "DIRTY_TRACKED", false},
+		{"staged", "notes/staged-wip.md", "DIRTY_STAGED", true},
+		{"untracked", "notes/untracked-wip.md", "DIRTY_UNTRACKED", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			if _, conf := f.put("hosta", "notes/clean.md", mkNote("note", "clean committed bytes")); conf != nil {
+				t.Fatal(conf.Code)
+			}
+			writer := mustEffectiveRoot(&f.cs[0])
+			if err := os.WriteFile(filepath.Join(writer, tc.path), []byte(tc.contents), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tc.staged {
+				g(t, writer, "add", tc.path)
+			}
+			for _, op := range []string{"get", "log", "lint"} {
+				var returned bool
+				var conf *Conflict
+				switch op {
+				case "get":
+					result, c := Get(f.cs, "hosta", "notes/clean.md")
+					returned, conf = result != nil, c
+				case "log":
+					entries, c := Log(f.cs, "hosta", "notes/clean.md", 10)
+					returned, conf = len(entries) > 0, c
+				default:
+					result, c := Lint(f.cs, "hosta", "notes/clean.md")
+					returned, conf = result != nil, c
+				}
+				if conf == nil || conf.Code != "cortex_unavailable" {
+					t.Fatalf("%s conflict=%#v, want cortex_unavailable", op, conf)
+				}
+				if returned {
+					t.Fatalf("%s returned bytes from a dirty publisher", op)
+				}
+			}
+		})
+	}
+}
+
+func TestNextReadSnapshotSeesPushedOriginCommit(t *testing.T) {
 	f := newFixture(t)
-	if _, conf := f.put("hosta", "notes/x.md", mkNote("Concept", "from-agent")); conf != nil {
+	if _, conf := f.put("hosta", "notes/x.md", mkNote("note", "from-agent")); conf != nil {
 		t.Fatal(conf.Code)
 	}
-
+	if _, conf := Get(f.cs, "hosta", "notes/x.md"); conf != nil {
+		t.Fatalf("initial get: %s", conf.Code)
+	}
 	g(t, f.b, "pull")
-	human := mkNote("Concept", "from-human")
-	if err := os.WriteFile(filepath.Join(f.b, "notes/x.md"), []byte(human), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	g(t, f.b, "add", "notes/x.md")
-	g(t, f.b, "commit", "-m", "human correction")
-	g(t, f.b, "push")
 
-	if err := os.MkdirAll(filepath.Join(f.a, "notes"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(f.a, "notes/x.md"), []byte("UNCOMMITTED DIRT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, conf := Get(f.cs, "hosta", "notes/x.md")
-	if conf != nil {
-		t.Fatal(conf.Code)
-	}
-	if !strings.Contains(got.Content, "from-human") {
-		t.Fatalf("Get missed origin: %s", got.Content)
-	}
-	if strings.Contains(got.Content, "UNCOMMITTED DIRT") {
-		t.Fatal("Get saw human working-tree dirt")
-	}
+	for i, tc := range []struct {
+		payload, subject, content string
+		errors                    int
+	}{
+		{mkNote("note", "from-human"), "human correction", "from-human", 0},
+		{"not a note\n", "human break frontmatter", "", 1},
+	} {
+		if err := os.WriteFile(filepath.Join(f.b, "notes/x.md"), []byte(tc.payload), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		g(t, f.b, "add", "notes/x.md")
+		g(t, f.b, "commit", "-m", tc.subject)
+		g(t, f.b, "push")
 
-	lint, conf := Lint(f.cs, "hosta", "notes/x.md")
-	if conf != nil {
-		t.Fatal(conf.Code)
-	}
-	if lint.Errors != 0 {
-		t.Fatalf("lint errors on valid human note: %+v", lint.Findings)
-	}
-
-	if err := os.WriteFile(filepath.Join(f.b, "notes/x.md"), []byte("not a note\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	g(t, f.b, "add", "notes/x.md")
-	g(t, f.b, "commit", "-m", "human break frontmatter")
-	g(t, f.b, "push")
-	lint, conf = Lint(f.cs, "hosta", "notes/x.md")
-	if conf != nil {
-		t.Fatal(conf.Code)
-	}
-	if lint.Errors == 0 {
-		t.Fatal("lint must see human-pushed invalid note")
+		if i == 0 {
+			got, conf := Get(f.cs, "hosta", "notes/x.md")
+			if conf != nil || got.Revision != Revision([]byte(tc.payload)) || !strings.Contains(got.Content, tc.content) {
+				t.Fatalf("get after origin push=%+v, conflict=%#v", got, conf)
+			}
+			entries, conf := Log(f.cs, "hosta", "notes/x.md", 10)
+			if conf != nil || len(entries) == 0 || entries[0].Subject != tc.subject {
+				t.Fatalf("log after origin push=%+v, conflict=%#v", entries, conf)
+			}
+		}
+		lint, conf := Lint(f.cs, "hosta", "notes/x.md")
+		if conf != nil || lint == nil || lint.Errors != tc.errors {
+			t.Fatalf("lint[%d]=%+v, conflict=%#v", i, lint, conf)
+		}
 	}
 }
 
-func TestLintRejectsDirtyPublisherTree(t *testing.T) {
+func TestGetManyDoesNotMixRevisionsAfterOriginAdvance(t *testing.T) {
 	f := newFixture(t)
-	if _, conf := f.put("hosta", "notes/x.md", mkNote("Concept", "clean")); conf != nil {
-		t.Fatal(conf.Code)
+	notes := []struct {
+		path, body string
+	}{
+		{"notes/a.md", "a before advance"},
+		{"notes/b.md", "b before advance"},
 	}
-	writer := writerDir(&f.cs[0])
-	dirty := filepath.Join(writer, "notes", "uncommitted.md")
-	if err := os.WriteFile(dirty, []byte(mkNote("Concept", "dirty")), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, conf := Lint(f.cs, "hosta", "")
-	if conf == nil || conf.Code != "cortex_unavailable" {
-		t.Fatalf("dirty publisher lint conflict=%#v", conf)
-	}
-	if _, err := os.Stat(dirty); err != nil {
-		t.Fatalf("dirty publisher bytes were changed: %v", err)
-	}
-}
-
-func TestGetHitsRefreshesEachCortexOnce(t *testing.T) {
-	f := newFixture(t)
-	for _, path := range []string{"notes/a.md", "notes/b.md"} {
-		if _, conf := f.put("hosta", path, mkNote("Concept", path)); conf != nil {
+	storedRevisions := make([]string, len(notes))
+	for i, note := range notes {
+		result, conf := f.put("hosta", note.path, mkNote("note", note.body))
+		if conf != nil {
 			t.Fatal(conf.Code)
+		}
+		if result == nil {
+			t.Fatal("initial put returned no result")
+		}
+		storedRevisions[i] = result.Revision
+	}
+	g(t, f.b, "pull")
+	for _, note := range notes {
+		if err := os.WriteFile(filepath.Join(f.b, note.path), []byte(mkNote("note", note.body+" after advance")), 0o644); err != nil {
+			t.Fatal(err)
 		}
 	}
 
@@ -99,94 +128,105 @@ func TestGetHitsRefreshesEachCortexOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	binDir := t.TempDir()
-	logPath := filepath.Join(t.TempDir(), "fetch.log")
-	wrapper := "#!/bin/sh\nif [ \"$1\" = fetch ]; then echo fetch >> \"$EXOCORTEX_FETCH_LOG\"; fi\nexec " + realGit + " \"$@\"\n"
+	marker := filepath.Join(t.TempDir(), "origin-advanced")
+	wrapper := `#!/bin/sh
+set -e
+if [ "$1" = "show" ] && [ ! -e "$EXOCORTEX_ADVANCE_MARK" ]; then
+  touch "$EXOCORTEX_ADVANCE_MARK"
+  "$EXOCORTEX_REAL_GIT" -C "$EXOCORTEX_PEER" add -- notes/a.md notes/b.md >/dev/null
+  "$EXOCORTEX_REAL_GIT" -C "$EXOCORTEX_PEER" commit -m "origin advance" >/dev/null
+  "$EXOCORTEX_REAL_GIT" -C "$EXOCORTEX_PEER" push >/dev/null
+fi
+exec "$EXOCORTEX_REAL_GIT" "$@"
+`
 	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(wrapper), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("EXOCORTEX_FETCH_LOG", logPath)
+	t.Setenv("EXOCORTEX_ADVANCE_MARK", marker)
+	t.Setenv("EXOCORTEX_REAL_GIT", realGit)
+	t.Setenv("EXOCORTEX_PEER", f.b)
 	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
 
-	results := GetHits(f.cs, []qmd.Hit{
-		{File: "qmd://hosta/notes/a.md"},
-		{File: "qmd://hosta/notes/b.md"},
+	outcomes := GetMany(f.cs, []GetRequest{
+		{CortexName: "hosta", Path: "notes/a.md"},
+		{CortexName: "hosta", Path: "notes/b.md"},
 	})
-	if len(results) != 2 || results[0] == nil || results[1] == nil {
-		t.Fatalf("batched results=%#v", results)
+	if len(outcomes) != len(notes) {
+		t.Fatalf("outcomes=%d, want %d", len(outcomes), len(notes))
 	}
-	raw, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("origin did not advance after snapshot pin: %v", err)
 	}
-	if got := strings.Count(string(raw), "fetch\n"); got != 1 {
-		t.Fatalf("fetch count=%d want 1; log=%q", got, raw)
+	for i, outcome := range outcomes {
+		if outcome.Conflict != nil || outcome.Result == nil {
+			t.Fatalf("outcome[%d]=%+v", i, outcome)
+		}
+		note := notes[i]
+		if outcome.Result.Revision != storedRevisions[i] ||
+			!strings.Contains(outcome.Result.Content, note.body) {
+			t.Fatalf("outcome[%d]=%+v, want %q", i, outcome.Result, note.body)
+		}
 	}
 }
 
-func TestGetWaitsForPutLockThenSeesCommit(t *testing.T) {
+func TestGetWaitsForActivePutLockThenSeesCommit(t *testing.T) {
 	f := newFixture(t)
-	if _, conf := f.put("hosta", "notes/x.md", mkNote("Concept", "one")); conf != nil {
+	one := mkNote("note", "one")
+	if _, conf := f.put("hosta", "notes/x.md", one); conf != nil {
 		t.Fatal(conf.Code)
 	}
-	rev := f.rev("hosta", "notes/x.md")
+	revision := f.rev("hosta", "notes/x.md")
+	two := mkNote("note", "two")
 
-	started := make(chan struct{})
-	release := make(chan struct{})
+	started, release := make(chan struct{}), make(chan struct{})
 	beforePushHook = func() {
 		beforePushHook = nil
 		close(started)
 		<-release
 	}
-	defer func() { beforePushHook = nil }()
+	t.Cleanup(func() { beforePushHook = nil })
 
-	var putConf *Conflict
-	donePut := make(chan struct{})
+	putDone := make(chan *Conflict, 1)
 	go func() {
-		defer close(donePut)
-		_, putConf = Put(nil, f.cs, PutInput{
-			CortexName: "hosta",
-			Path:       "notes/x.md",
-			Payload:    []byte(mkNote("Concept", "two")),
-			Expects:    rev,
-			Agent:      "test-agent",
-			Via:        "cli",
-			OwnPayload: true,
+		_, conf := Put(nil, f.cs, PutInput{
+			CortexName: "hosta", Path: "notes/x.md", Payload: []byte(two),
+			Expects: revision, Agent: "test-agent", Via: "cli", OwnPayload: true,
 		})
+		putDone <- conf
 	}()
 	<-started
 
-	gotCh := make(chan string, 1)
-	errCh := make(chan string, 1)
+	type readDone struct {
+		result *GetResult
+		conf   *Conflict
+	}
+	getStarted, getDone := make(chan struct{}), make(chan readDone, 1)
 	go func() {
-		got, conf := Get(f.cs, "hosta", "notes/x.md")
-		if conf != nil {
-			errCh <- conf.Code
-			return
-		}
-		gotCh <- got.Content
+		close(getStarted)
+		result, conf := Get(f.cs, "hosta", "notes/x.md")
+		getDone <- readDone{result, conf}
 	}()
-
+	<-getStarted
 	select {
-	case s := <-gotCh:
-		t.Fatalf("Get returned while Put held the lock: %s", s)
-	case s := <-errCh:
-		t.Fatalf("Get failed while Put held the lock: %s", s)
+	case got := <-getDone:
+		t.Fatalf("get returned while put held lock: %+v", got)
 	case <-time.After(300 * time.Millisecond):
 	}
 
 	close(release)
-	<-donePut
-	if putConf != nil {
-		t.Fatal(putConf.Code)
+	if conf := <-putDone; conf != nil {
+		t.Fatalf("put: %s", conf.Code)
 	}
+	wantRevision := f.rev("hosta", "notes/x.md")
 	select {
-	case s := <-errCh:
-		t.Fatal(s)
-	case content := <-gotCh:
-		if !strings.Contains(content, "two") {
-			t.Fatalf("Get after Put: %s", content)
+	case got := <-getDone:
+		if got.conf != nil {
+			t.Fatalf("get after put: %s", got.conf.Code)
+		}
+		if got.result == nil || got.result.Revision != wantRevision || !strings.Contains(got.result.Content, "two") {
+			t.Fatalf("get after put=%+v", got.result)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("Get did not return after Put released the lock")
+		t.Fatal("get did not return after put released the lock")
 	}
 }

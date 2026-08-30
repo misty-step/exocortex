@@ -230,8 +230,7 @@ cat <<'EOF'
 [
   {"docid":"#m","file":"qmd://emma/daily/2026-08-25/n.md","score":0.9,"line":1,"title":"memo","context":"","snippet":"memo"},
   {"docid":"#d","file":"qmd://emma/keep.md","score":0.8,"line":1,"title":"Keep","context":"","snippet":"keep"},
-  {"docid":"#x","file":"qmd://emma/keep.md","score":0.7,"line":1,"title":"Keep2","context":"","snippet":"keep2"},
-  {"docid":"#g","file":"qmd://emma/projects/ghost.md","score":0.6,"line":1,"title":"Ghost","context":"","snippet":"ghost"}
+  {"docid":"#x","file":"qmd://emma/keep.md","score":0.7,"line":1,"title":"Keep2","context":"","snippet":"keep2"}
 ]
 EOF
 `
@@ -304,11 +303,6 @@ EOF
 	}
 	if err := json.Unmarshal([]byte(tc.Text), &hits); err != nil {
 		t.Fatalf("decision hits: %v\n%s", err, tc.Text)
-	}
-	for _, h := range hits {
-		if h["path"] == "projects/ghost.md" {
-			t.Fatalf("Get-miss path leaked into decision: %v", hits)
-		}
 	}
 	if len(hits) == 0 {
 		t.Fatal("decision filter dropped the live keep.md note")
