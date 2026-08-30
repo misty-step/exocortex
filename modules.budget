@@ -5,7 +5,8 @@
 # candidate-path coverage was folded before raising this package ceiling.
 # PR #32: locked publisher refresh, batched read snapshots, and race proofs.
 kernel	internal/kernel	57200
-cli	internal/cli	16000
+# FlagSet-driven splitArgs: VisitAll replaces per-command value-flag maps.
+cli	internal/cli	16100
 fm	internal/fm	8000
 mcp	internal/mcp	5000
 orient	internal/orient	4500

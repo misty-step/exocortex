@@ -142,10 +142,16 @@ naming the error, operation, path, and recovery hint.
 }
 
 // splitArgs separates flag tokens from positional arguments regardless
-// of order (stdlib flag stops at the first positional). valueFlags names
-// the flags that consume the following token; unknown dash-tokens are
-// left for flag.Parse to reject.
-func splitArgs(args []string, valueFlags map[string]bool) (flags, positional []string) {
+// of order. Value-taking flags come from fs.VisitAll (non-bool Values).
+// Unknown dash-tokens are left for flag.Parse to reject.
+func splitArgs(args []string, fs *flag.FlagSet) (flags, positional []string) {
+	valueFlags := map[string]bool{}
+	fs.VisitAll(func(f *flag.Flag) {
+		if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && bf.IsBoolFlag() {
+			return
+		}
+		valueFlags[f.Name] = true
+	})
 	takesValue := func(tok string) bool {
 		name := strings.TrimLeft(tok, "-")
 		if name == "" {
@@ -199,7 +205,7 @@ func cmdRegister(args []string) (any, *kernel.Conflict, error) {
 	vcs := fs.String("vcs", "", "vcs policy: daybook | caller | none (default: auto-detect)")
 	profile := fs.String("profile", "", "validation profile: daybook | strict | okf (default daybook)")
 	jprefix := fs.String("journal-prefix", "", "where note files land inside the cortex (default journal)")
-	flags, pos := splitArgs(args, map[string]bool{"vcs": true, "profile": true, "journal-prefix": true})
+	flags, pos := splitArgs(args, fs)
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("register", err.Error(), "run `exocortex help` for register usage"), nil
 	}
@@ -225,9 +231,7 @@ func cmdPut(args []string, stdin io.Reader) (any, *kernel.Conflict, error) {
 	cortex := commonFlags(fs)
 	from := fs.String("from", "", "payload file, or - for stdin")
 	expects := fs.String("expects", "", "stored revision (sha256 hex) required for updates")
-	flags, pos := splitArgs(args, map[string]bool{
-		"from": true, "expects": true, "cortex": true, "agent": true, "json": false,
-	})
+	flags, pos := splitArgs(args, fs)
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("put", err.Error(), "run `exocortex help` for put usage"), nil
 	}
@@ -271,7 +275,7 @@ func cmdGet(args []string) (any, *kernel.Conflict, error) {
 	fs := flag.NewFlagSet("get", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
-	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
+	flags, pos := splitArgs(args, fs)
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("get", err.Error(), "run `exocortex help` for get usage"), nil
 	}
@@ -293,7 +297,7 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 	limit := fs.Int("limit", 20, "max hits (default 20, max 100)")
 	mode := fs.String("mode", qmd.DefaultMode, "retrieval mode: hybrid (default) | bm25 | vector")
 	typeFilter := fs.String("type", "", "filter by content kind: decision | memo | session | note | scratch")
-	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "limit": true, "mode": true, "type": true, "agent": true})
+	flags, pos := splitArgs(args, fs)
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("search", err.Error(), "run `exocortex help` for search usage"), nil
 	}
@@ -450,7 +454,7 @@ func cmdBrief(args []string) (any, *kernel.Conflict, error) {
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
 	limit := fs.Int("limit", 3, "max canonical notes to summarize")
-	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "limit": true, "agent": true})
+	flags, pos := splitArgs(args, fs)
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("brief", err.Error(), "run `exocortex help` for brief usage"), nil
 	}
@@ -608,7 +612,7 @@ func cmdLog(args []string) (any, *kernel.Conflict, error) {
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
 	limit := fs.Int("limit", 50, "max entries")
-	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "limit": true, "agent": true})
+	flags, pos := splitArgs(args, fs)
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("log", err.Error(), "run `exocortex help` for log usage"), nil
 	}
@@ -639,7 +643,7 @@ func cmdLint(args []string) (any, *kernel.Conflict, error) {
 	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
-	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
+	flags, pos := splitArgs(args, fs)
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("lint", err.Error(), "run `exocortex help` for lint usage"), nil
 	}
@@ -662,7 +666,7 @@ func cmdNote(args []string, stdin io.Reader) (any, *kernel.Conflict, error) {
 	fs := flag.NewFlagSet("note", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
-	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
+	flags, pos := splitArgs(args, fs)
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("note", err.Error(), "run `exocortex help` for note usage"), nil
 	}
@@ -687,7 +691,7 @@ func cmdSync(args []string) (any, *kernel.Conflict, error) {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
-	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
+	flags, pos := splitArgs(args, fs)
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("sync", err.Error(), "run `exocortex help` for sync usage"), nil
 	}
@@ -713,7 +717,7 @@ func cmdStatus(args []string) (any, *kernel.Conflict, error) {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	cortex := commonFlags(fs)
-	flags, pos := splitArgs(args, map[string]bool{"cortex": true, "agent": true})
+	flags, pos := splitArgs(args, fs)
 	if err := fs.Parse(flags); err != nil {
 		return nil, inputErr("status", err.Error(), "run `exocortex help` for status usage"), nil
 	}

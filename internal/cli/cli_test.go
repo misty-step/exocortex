@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -318,4 +319,28 @@ exit 0
 	if code == 0 || body["error"] != "search_unavailable" {
 		t.Fatalf("unknown mode: exit=%d body=%v", code, body)
 	}
+}
+
+func TestSplitArgsUsesFlagSet(t *testing.T) {
+	fs := flag.NewFlagSet("probe", flag.ContinueOnError)
+	fs.String("from", "", "")
+	fs.String("expects", "", "")
+	fs.Bool("json", true, "")
+	fs.Int("limit", 0, "")
+	check := func(args, wantFlags, wantPos string) {
+		t.Helper()
+		flags, pos := splitArgs(strings.Fields(args), fs)
+		gotFlags, gotPos := strings.Join(flags, " "), strings.Join(pos, " ")
+		if gotFlags != wantFlags || gotPos != wantPos {
+			t.Fatalf("%q → flags=%q pos=%q", args, gotFlags, gotPos)
+		}
+	}
+	check("path.md --from -", "--from -", "path.md")
+	check("--from - path.md", "--from -", "path.md")
+	check("path.md --json extra", "--json", "path.md extra")
+	check("--from=- path.md", "--from=-", "path.md")
+	check("topic --limit 3 --json", "--limit 3 --json", "topic")
+	check("--bogus taken path.md", "--bogus", "taken path.md")
+	check("--from - -- -sneaky.md", "--from -", "-sneaky.md")
+	check("path.md --expects abc", "--expects abc", "path.md")
 }
