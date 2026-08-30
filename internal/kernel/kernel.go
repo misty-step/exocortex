@@ -110,16 +110,16 @@ func saveRegistry(cs []Cortex) error {
 	}
 	name := tmp.Name()
 	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		os.Remove(name)
+		_ = tmp.Close()
+		_ = os.Remove(name)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(name)
+		_ = os.Remove(name)
 		return err
 	}
 	if err := os.Chmod(name, 0o644); err != nil {
-		os.Remove(name)
+		_ = os.Remove(name)
 		return err
 	}
 	return os.Rename(name, p)

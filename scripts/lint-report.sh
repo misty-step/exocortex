@@ -1,6 +1,6 @@
 #!/bin/sh
-# Non-blocking visibility report. Cyclop remains the failing fuse in check.sh.
-# Prints band counts plus every issue. Exit 0 even when the report is loud.
+# Non-blocking visibility report. Fuse lives in .golangci.yml via check.sh.
+# Prints band counts plus every remaining report-only issue. Exit 0 even when loud.
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -19,10 +19,9 @@ json="$repo_root/.lint-report.json"
 text="$repo_root/.lint-report.txt"
 rm -f "$json" "$text"
 
-# Settings live in .golangci.yml. Enable the report set here so a bare
-# `golangci-lint run` stays cyclop-only.
-golangci-lint run --issues-exit-code 0 --max-issues-per-linter 0 --max-same-issues 0 --uniq-by-line=false \
-	--enable-only=gocognit,nestif,funlen,maintidx,staticcheck,errcheck,dupl \
+# Band visibility uses .golangci-report.yml so fuse thresholds do not hide 1–15.
+golangci-lint run --config "$repo_root/.golangci-report.yml" --issues-exit-code 0 \
+	--max-issues-per-linter 0 --max-same-issues 0 --uniq-by-line=false \
 	--output.json.path "$json" --output.text.path "$text" ./... >/dev/null
 
 
@@ -99,13 +98,8 @@ for i in issues:
     print(f"{i['FromLinter']:12} {pos.get('Filename')}:{pos.get('Line')} {i.get('Text')}")
 
 print("\n-- suggested ratchet tickets --")
-print("1. Hard-gate staticcheck (currently report-only).")
-print("2. Hard-gate errcheck on production (currently report-only).")
-print("3. Split Lint: one-path vs walk (cognitive 28, nestif 7).")
-print("4. Replace takeawaysFromDecisionSection flag machine with an explicit scanner state.")
-print("5. After 3-4, fail gocognit at 20, then 16.")
-print("6. After 3, fail nestif at 5.")
-print("7. Keep cyclop at 15 until dispatch/Register are not the reason to cut.")
+print("Fuse: cyclop<=15, staticcheck, production errcheck, gocognit>=16, nestif>=5.")
+print("Report-only: funlen, maintidx, dupl. Keep cyclop at 15 until dispatch/Register are not why you would cut.")
 PY
 
 rm -f "$json" "$text"

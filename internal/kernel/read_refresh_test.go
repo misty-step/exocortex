@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -247,7 +248,7 @@ func TestGetWaitsForActivePutLockThenSeesCommit(t *testing.T) {
 
 	putDone := make(chan *Conflict, 1)
 	go func() {
-		_, conf := Put(nil, f.cs, PutInput{
+		_, conf := Put(context.TODO(), f.cs, PutInput{
 			CortexName: "hosta", Path: "notes/x.md", Payload: []byte(two),
 			Expects: revision, Agent: "test-agent", Via: "cli", OwnPayload: true,
 		})

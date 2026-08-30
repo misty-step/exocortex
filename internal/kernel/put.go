@@ -459,7 +459,7 @@ func acquireLock(name string) (*cortexLock, error) {
 		return nil, err
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	return &cortexLock{f: f}, nil
@@ -468,8 +468,8 @@ func acquireLock(name string) (*cortexLock, error) {
 type cortexLock struct{ f *os.File }
 
 func (l *cortexLock) release() {
-	syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
-	l.f.Close()
+	_ = syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
+	_ = l.f.Close()
 }
 
 func atomicWrite(abs string, data []byte) error {
@@ -484,15 +484,15 @@ func atomicWrite(abs string, data []byte) error {
 	tmpName := tmp.Name()
 	defer func() {
 		if tmpName != "" {
-			os.Remove(tmpName)
+			_ = os.Remove(tmpName)
 		}
 	}()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -601,7 +601,9 @@ func ensureWriter(name, shared string) (string, error) {
 		return w, nil
 	}
 
-	os.MkdirAll(filepath.Dir(w), 0o755)
+	if err := os.MkdirAll(filepath.Dir(w), 0o755); err != nil {
+		return "", err
+	}
 	var cloneArgs []string
 	if branch != "" && branch != "HEAD" {
 		cloneArgs = []string{"clone", "-b", branch, url, w}

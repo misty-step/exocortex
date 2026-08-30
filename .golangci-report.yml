@@ -1,0 +1,28 @@
+version: "2"
+
+# Non-blocking visibility. Fuse thresholds live in .golangci.yml.
+linters:
+  default: none
+  enable:
+    - gocognit
+    - nestif
+    - funlen
+    - maintidx
+    - dupl
+  settings:
+    gocognit:
+      min-complexity: 1
+    nestif:
+      min-complexity: 1
+    funlen:
+      lines: 40
+      statements: 25
+    maintidx:
+      under: 40
+    dupl:
+      threshold: 150
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false

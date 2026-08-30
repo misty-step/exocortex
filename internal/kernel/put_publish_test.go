@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,7 +49,7 @@ func TestDifferentPathCreatesBothLand(t *testing.T) {
 			t.Errorf("peer create failed: %v", conf.Code)
 		}
 	}
-	res, conf := Put(nil, f.cs, PutInput{
+	res, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hostb", Path: "notes/mine.md",
 		Payload: []byte(mkNote("note", "unrelated create")),
 		Agent:   "agent-b", Via: "cli", OwnPayload: true,
@@ -84,7 +85,7 @@ func TestReplayExhaustionIsKnownRejection(t *testing.T) {
 		return gitErr(" ! [rejected] master -> master (non-fast-forward)")
 	}
 	pushOverride = rejectWithMovement
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hostb", Path: "notes/mine.md",
 		Payload: []byte(mkNote("note", "bounded candidate")),
 		Agent:   "agent-b", Via: "cli", OwnPayload: true,
@@ -119,7 +120,7 @@ func TestReplayFailurePreservesStdinPayload(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chmod(notes, 0o755) })
 	}
 	payload := []byte(mkNote("note", "stdin payload must survive replay write_failed"))
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hostb", Path: "notes/mine.md",
 		Payload: payload, Agent: "agent-b", Via: "mcp", OwnPayload: false,
 	})
@@ -148,7 +149,7 @@ func TestDifferentPathUpdatesBothLand(t *testing.T) {
 	peerRev := f.rev("hosta", "notes/peer.md")
 	mineRev := f.rev("hostb", "notes/mine.md")
 	beforePushHook = func() {
-		if _, conf := Put(nil, f.cs, PutInput{
+		if _, conf := Put(context.TODO(), f.cs, PutInput{
 			CortexName: "hosta", Path: "notes/peer.md",
 			Payload: []byte(mkNote("note", "peer v2")), Expects: peerRev,
 			Agent: "agent-a", Via: "cli", OwnPayload: true,
@@ -156,7 +157,7 @@ func TestDifferentPathUpdatesBothLand(t *testing.T) {
 			t.Errorf("peer update failed: %v", conf.Code)
 		}
 	}
-	res, conf := Put(nil, f.cs, PutInput{
+	res, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hostb", Path: "notes/mine.md",
 		Payload: []byte(mkNote("note", "mine v2")), Expects: mineRev,
 		Agent: "agent-b", Via: "cli", OwnPayload: true,
@@ -182,7 +183,7 @@ func TestPublishRejectedHook(t *testing.T) {
 	if err := writeRejectHook(f.origin); err != nil {
 		t.Fatal(err)
 	}
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/hooked.md",
 		Payload: []byte(mkNote("note", "must not pretend this exists")),
 		Agent:   "agent-a", Via: "cli", OwnPayload: false,
@@ -227,7 +228,7 @@ func TestPublishUnknownRecoversWhenLanded(t *testing.T) {
 		}
 		return gitErr("fatal: the remote end hung up unexpectedly")
 	}
-	res, conf := Put(nil, f.cs, PutInput{
+	res, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/lost-ack.md",
 		Payload: []byte(mkNote("note", "landed but ack lost")),
 		Agent:   "agent-a", Via: "cli", OwnPayload: true,
@@ -269,7 +270,7 @@ func TestLostAckDoesNotSucceedWhenWriterMissesTip(t *testing.T) {
 		g(t, f.b, "push")
 		return gitErr("fatal: the remote end hung up unexpectedly")
 	}
-	res, conf := Put(nil, f.cs, PutInput{
+	res, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/lost-ack.md",
 		Payload: []byte(mkNote("note", "landed but writer blocked")),
 		Agent:   "agent-a", Via: "cli", OwnPayload: true,
@@ -321,7 +322,7 @@ func TestMovedDoesNotClaimLandedWhenWriterMissesTip(t *testing.T) {
 		g(t, f.b, "commit", "-m", "peer advances foreign")
 		g(t, f.b, "push")
 	}
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/mine.md",
 		Payload: []byte(mkNote("note", "unrelated create")),
 		Agent:   "agent-a", Via: "cli", OwnPayload: true,
@@ -358,14 +359,14 @@ func TestMovedPathChangeDoesNotHashStaleLocalWhenConvergeFails(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(writer, "notes/foreign.md"), []byte(mkNote("note", "local dirty foreign")), 0o644); err != nil {
 			t.Errorf("dirty foreign: %v", err)
 		}
-		if _, conf := Put(nil, f.cs, PutInput{
+		if _, conf := Put(context.TODO(), f.cs, PutInput{
 			CortexName: "hostb", Path: "notes/shared.md",
 			Payload: []byte(mkNote("note", "peer wins shared")), Expects: r1,
 			Agent: "agent-b", Via: "cli", OwnPayload: true,
 		}); conf != nil {
 			t.Errorf("peer shared put: %v", conf.Code)
 		}
-		if _, conf := Put(nil, f.cs, PutInput{
+		if _, conf := Put(context.TODO(), f.cs, PutInput{
 			CortexName: "hostb", Path: "notes/foreign.md",
 			Payload: []byte(mkNote("note", "peer foreign v2")), Expects: f.rev("hostb", "notes/foreign.md"),
 			Agent: "agent-b", Via: "cli", OwnPayload: true,
@@ -373,7 +374,7 @@ func TestMovedPathChangeDoesNotHashStaleLocalWhenConvergeFails(t *testing.T) {
 			t.Errorf("peer foreign put: %v", conf.Code)
 		}
 	}
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/shared.md",
 		Payload: []byte(mkNote("note", "loser shared")), Expects: r1,
 		Agent: "agent-a", Via: "cli", OwnPayload: true,
@@ -393,7 +394,7 @@ func TestPublishUnknownWhenNotLanded(t *testing.T) {
 	pushOverride = func() error {
 		return gitErr("fatal: unable to access 'https://example.invalid/': Could not resolve host")
 	}
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/ghost.md",
 		Payload: []byte(mkNote("note", "never reached the remote")),
 		Agent:   "agent-a", Via: "mcp", OwnPayload: false,
@@ -423,7 +424,7 @@ func TestNoteDoesNotMintSecondPathOnPublishUnknown(t *testing.T) {
 		}
 		return gitErr("fatal: the remote end hung up unexpectedly")
 	}
-	_, conf := Note(nil, f.cs, NoteInput{CortexName: "hosta", Text: "do not duplicate me", Agent: "agent-a", Via: "cli"})
+	_, conf := Note(context.TODO(), f.cs, NoteInput{CortexName: "hosta", Text: "do not duplicate me", Agent: "agent-a", Via: "cli"})
 	wantCode(t, conf, "publish_unknown")
 	if pushes != 1 {
 		t.Fatalf("note minted another path: push attempts=%d", pushes)
@@ -445,7 +446,7 @@ func TestUnknownFetchFailureDoesNotRebaseOnNextPut(t *testing.T) {
 		}
 		return gitErr("fatal: unable to access 'https://example.invalid/': Could not resolve host")
 	}
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/ghost.md",
 		Payload: []byte(mkNote("note", "unpublished candidate")),
 		Agent:   "agent-a", Via: "cli", OwnPayload: true,
@@ -487,7 +488,7 @@ func TestUnknownFetchFailureAheadDoesNotPublishOnNextPut(t *testing.T) {
 		}
 		return gitErr("fatal: unable to access 'https://example.invalid/': Could not resolve host")
 	}
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/ghost.md",
 		Payload: []byte(mkNote("note", "unpublished candidate")),
 		Agent:   "agent-a", Via: "cli", OwnPayload: true,

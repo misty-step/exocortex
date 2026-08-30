@@ -121,7 +121,7 @@ func inputErr(cmd, detail, hint string) *kernel.Conflict {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `exocortex — fleet memory kernel over registered cortices
+	_, _ = fmt.Fprint(w, `exocortex — fleet memory kernel over registered cortices
 
 Usage:
   exocortex register <name> <path> [--vcs daybook|caller|none] [--profile daybook|strict|okf]
@@ -550,31 +550,41 @@ func extractTakeaways(content string) []string {
 
 func takeawaysFromDecisionSection(lines []string) []string {
 	var takeaways []string
-	inDecisionSection := false
+	state := scanSkip
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "---") {
 			continue
 		}
 		lower := strings.ToLower(trimmed)
-		if isDecisionHeading(lower) {
-			inDecisionSection = true
+		switch {
+		case isDecisionHeading(lower):
+			state = scanDecision
+			continue
+		case state == scanDecision && strings.HasPrefix(trimmed, "## "):
+			state = scanSkip
+		}
+		if state != scanDecision {
 			continue
 		}
-		if inDecisionSection && strings.HasPrefix(trimmed, "## ") {
-			inDecisionSection = false
+		item, ok := bulletItem(trimmed)
+		if !ok {
+			continue
 		}
-		if inDecisionSection {
-			if item, ok := bulletItem(trimmed); ok {
-				takeaways = append(takeaways, item)
-				if len(takeaways) >= 4 {
-					break
-				}
-			}
+		takeaways = append(takeaways, item)
+		if len(takeaways) >= 4 {
+			return takeaways
 		}
 	}
 	return takeaways
 }
+
+type takeawayScan int
+
+const (
+	scanSkip takeawayScan = iota
+	scanDecision
+)
 
 func isDecisionHeading(lower string) bool {
 	return strings.HasPrefix(lower, "## decision") || strings.HasPrefix(lower, "## verdict") ||

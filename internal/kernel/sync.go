@@ -135,20 +135,7 @@ func Sync(ctx context.Context, cs []Cortex, nameFlag string) ([]SyncResult, *Con
 	for _, c := range targets {
 		res, conf := syncOne(ctx, c)
 		if conf != nil {
-			detail := ""
-			if conf.Detail != nil {
-				if d, ok := conf.Detail["detail"].(string); ok {
-					detail = d
-				}
-			}
-			sr := SyncResult{Cortex: c.Name, Error: conf.Code, Detail: detail}
-			if res != nil {
-				sr.Updated = res.Updated
-				sr.IndexedCommit = res.IndexedCommit
-				sr.Embedded = res.Embedded
-				sr.DirtyCleared = res.DirtyCleared
-			}
-			results = append(results, sr)
+			results = append(results, failedSyncResult(c.Name, res, conf))
 			if first == nil {
 				first = conf
 			}
@@ -157,6 +144,23 @@ func Sync(ctx context.Context, cs []Cortex, nameFlag string) ([]SyncResult, *Con
 		results = append(results, *res)
 	}
 	return results, first
+}
+
+func failedSyncResult(name string, res *SyncResult, conf *Conflict) SyncResult {
+	sr := SyncResult{Cortex: name, Error: conf.Code}
+	if conf.Detail != nil {
+		if d, ok := conf.Detail["detail"].(string); ok {
+			sr.Detail = d
+		}
+	}
+	if res == nil {
+		return sr
+	}
+	sr.Updated = res.Updated
+	sr.IndexedCommit = res.IndexedCommit
+	sr.Embedded = res.Embedded
+	sr.DirtyCleared = res.DirtyCleared
+	return sr
 }
 
 func syncOne(ctx context.Context, c Cortex) (*SyncResult, *Conflict) {
@@ -216,27 +220,35 @@ func snapshotDirtyMarkers(name, dDir, errorPath string) (files []string, newest 
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
+		commit, conf := readDirtyMarker(name, dDir, entry.Name(), newest)
+		if conf != nil {
+			return nil, "", false, conf
+		}
 		files = append(files, entry.Name())
-		b, err := os.ReadFile(filepath.Join(dDir, entry.Name()))
-		if err != nil {
-			writeSyncError(name, newest, "marker", err.Error())
-			return nil, "", false, conflict("state_failed", "sync", name,
-				"failed to read dirty marker file; markers retained",
-				map[string]any{"file": entry.Name(), "detail": err.Error()})
-		}
-		var m SyncMarker
-		if err := json.Unmarshal(b, &m); err != nil || m.Commit == "" {
-			writeSyncError(name, newest, "marker", "malformed dirty marker file")
-			return nil, "", false, conflict("state_failed", "sync", name,
-				"malformed dirty marker file; markers retained",
-				map[string]any{"file": entry.Name()})
-		}
-		newest = m.Commit
+		newest = commit
 	}
 	if len(files) == 0 {
 		return nil, "", true, nil
 	}
 	return files, newest, false, nil
+}
+
+func readDirtyMarker(name, dDir, file, newest string) (string, *Conflict) {
+	b, err := os.ReadFile(filepath.Join(dDir, file))
+	if err != nil {
+		writeSyncError(name, newest, "marker", err.Error())
+		return "", conflict("state_failed", "sync", name,
+			"failed to read dirty marker file; markers retained",
+			map[string]any{"file": file, "detail": err.Error()})
+	}
+	var m SyncMarker
+	if err := json.Unmarshal(b, &m); err != nil || m.Commit == "" {
+		writeSyncError(name, newest, "marker", "malformed dirty marker file")
+		return "", conflict("state_failed", "sync", name,
+			"malformed dirty marker file; markers retained",
+			map[string]any{"file": file})
+	}
+	return m.Commit, nil
 }
 
 func verifyIndexedRoot(ctx context.Context, c Cortex, out *SyncResult, recordError func(string, string)) *Conflict {
