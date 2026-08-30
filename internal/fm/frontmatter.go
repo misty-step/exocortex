@@ -365,14 +365,16 @@ func mappingValueWithMerges(mapping *yaml.Node, key string) (*yaml.Node, bool) {
 	}
 	var merges []*yaml.Node
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		name := unwrapNode(mapping.Content[i])
+		rawName := mapping.Content[i]
+		name := unwrapNode(rawName)
 		if name == nil || name.Kind != yaml.ScalarNode {
 			continue
 		}
 		if name.Value == key {
 			return mapping.Content[i+1], true
 		}
-		if name.Value == "<<" && name.ShortTag() == "!!merge" {
+		if rawName != nil && rawName.Kind == yaml.ScalarNode &&
+			rawName.Value == "<<" && rawName.ShortTag() == "!!merge" {
 			merges = append(merges, mapping.Content[i+1])
 		}
 	}

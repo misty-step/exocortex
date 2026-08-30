@@ -285,6 +285,21 @@ body
 	if lerr != nil || !hasRule(lfs, "generated_by_format") {
 		t.Fatalf("long-form merge tag must act as a merge: findings=%+v err=%v", lfs, lerr)
 	}
+	aliasKey := `---
+type: Metric
+defaults: &defaults
+  generated:
+    by: "bad actor"
+    at: 2026-06-20T22:53:05Z
+merge_name: &merge_name "<<"
+*merge_name: *defaults
+---
+body
+`
+	afs, aerr := validate("daybook", aliasKey)
+	if aerr != nil || hasRule(afs, "generated_by_format") {
+		t.Fatalf("aliased << key must not act as a merge: findings=%+v err=%v", afs, aerr)
+	}
 }
 
 const richNote = `---
