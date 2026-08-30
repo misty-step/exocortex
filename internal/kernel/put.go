@@ -69,14 +69,14 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) 
 	if conf = evaluatePutCAS(op, rel, stored, in); conf != nil {
 		return nil, conf
 	}
-	payload, conf := validatePutNote(c, op, rel, stored, in, res)
+	raw, reserved, conf := validatePut(c, op, rel, stored, in, res)
 	if conf != nil {
 		return nil, conf
 	}
 	if res.Noop {
 		return res, nil
 	}
-	if conf = commitPutNote(c, in, payload, abs, rel, dir, base, op, res); conf != nil {
+	if conf = writePut(c, in, raw, reserved, abs, rel, dir, base, op, res); conf != nil {
 		return nil, conf
 	}
 	recordDirty(res, c.Name)
@@ -177,27 +177,21 @@ func evaluatePutCAS(op, rel string, stored []byte, in PutInput) *Conflict {
 	return nil
 }
 
-func validatePutNote(c *Cortex, op, rel string, stored []byte, in PutInput, res *PutResult) (fm.Document, *Conflict) {
+func validatePut(c *Cortex, op, rel string, stored []byte, in PutInput, res *PutResult) ([]byte, bool, *Conflict) {
 	payload := fm.ParseDocument(in.Payload)
-	findings, verr := fm.Validate(c.Profile, payload)
+	reserved, findings, verr := fm.ValidatePath(c.Profile, rel, payload)
 	if verr != nil {
 		f, _ := fm.ContractFinding(verr)
-		return fm.Document{}, conflict("invalid_note", op, rel,
-			"fix the payload frontmatter; the cortex profile is "+c.Profile,
+		return nil, false, conflict("invalid_note", op, rel, "fix the payload for profile "+c.Profile,
 			map[string]any{"rule": f.Rule, "message": f.Message})
 	}
-	for _, f := range findings {
-		if f.Level == "warning" {
-			res.Warnings = append(res.Warnings, f)
-		}
-	}
+	res.Warnings = append(res.Warnings, findings...)
 	if op == "update" {
 		storedDoc := fm.ParseDocument(stored)
 		if storedCreated, ok := storedDoc.Scalar("created"); ok && strings.TrimSpace(storedCreated) != "" {
 			submitted, pok := payload.Scalar("created")
 			if !pok || submitted != storedCreated {
-				return fm.Document{}, conflict("created_immutable", op, rel,
-					"created never changes; resubmit with created: "+storedCreated,
+				return nil, false, conflict("created_immutable", op, rel, "created never changes; resubmit with created: "+storedCreated,
 					map[string]any{"stored": storedCreated, "submitted": submitted})
 			}
 		}
@@ -207,13 +201,14 @@ func validatePutNote(c *Cortex, op, rel string, stored []byte, in PutInput, res 
 		res.Noop = true
 		res.Revision = Revision(stored)
 	}
-	return payload, nil
+	return payload.Note.Raw, reserved, nil
 }
 
-func commitPutNote(c *Cortex, in PutInput, payload fm.Document, abs, rel, dir, base, op string, res *PutResult) *Conflict {
-	final := fm.SpliceProvenance(payload.Note.Raw, fm.Provenance{
-		Agent: agentID(in.Agent), At: time.Now(), Via: viaID(in.Via),
-	})
+func writePut(c *Cortex, in PutInput, raw []byte, reserved bool, abs, rel, dir, base, op string, res *PutResult) *Conflict {
+	final := raw
+	if !reserved {
+		final = fm.SpliceProvenance(final, fm.Provenance{Agent: agentID(in.Agent), At: time.Now(), Via: viaID(in.Via)})
+	}
 	if werr := atomicWrite(abs, final); werr != nil {
 		return conflict("write_failed", op, rel, "fix filesystem access and retry", map[string]any{"detail": werr.Error()})
 	}

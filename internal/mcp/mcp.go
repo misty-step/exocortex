@@ -99,7 +99,7 @@ type registerArgs struct {
 	Name          string `json:"name" jsonschema:"cortex name (lowercase slug)"`
 	Path          string `json:"path" jsonschema:"absolute path of the corpus root"`
 	VCS           string `json:"vcs,omitempty" jsonschema:"daybook | caller | none (default: auto-detect)"`
-	Profile       string `json:"profile,omitempty" jsonschema:"daybook | strict (default daybook)"`
+	Profile       string `json:"profile,omitempty" jsonschema:"daybook | strict | okf (default daybook)"`
 	JournalPrefix string `json:"journalPrefix,omitempty" jsonschema:"where note files land (default journal)"`
 }
 

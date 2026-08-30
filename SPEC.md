@@ -339,6 +339,16 @@ policy selects steps 2, 3, and 8 above: `daybook` (git, full tail),
   - `strict` — the five-key floor (`type`, `status`, `created`,
     `description`, `tags` all present and non-empty; RFC3339 `created`);
     opt-in for future cortices that want it.
+  - `okf` — the `daybook` note floor plus Root's reserved catalog files.
+    Under this opt-in profile only, any `index.md` or `log.md` basename is
+    not a note. Nested indexes have no frontmatter; the cortex-root
+    `index.md` MAY carry only `okf_version`. Validation scans each trimmed
+    line independently; it does not interpret Markdown containers or fences.
+    An index requires a heading line and a `* [Title](url)` catalog line.
+    Logs have no frontmatter; every trimmed `##` heading separated by a space
+    or tab is ISO `YYYY-MM-DD`, newest-first, with at least one date heading.
+    All other Markdown files still require non-empty `type`.
+    Existing `daybook` and `strict` cortices are unchanged.
   `lint` reports failures and warnings tiered; consumers of `daybook`
   cortices MUST NOT hard-fail on warnings.
 

@@ -260,7 +260,7 @@ func lintSnapshot(c *Cortex, rel string, snapshot readSnapshot, res *LintResult)
 			add(path, nil, err)
 			return nil
 		}
-		findings, err := fm.Validate(c.Profile, fm.ParseDocument(raw))
+		_, findings, err := fm.ValidatePath(c.Profile, path, fm.ParseDocument(raw))
 		add(path, findings, err)
 		return nil
 	}

@@ -165,9 +165,9 @@ func normalizePolicy(c Cortex) (Cortex, error) {
 		c.Profile = "daybook"
 	}
 	switch c.Profile {
-	case "daybook", "strict":
+	case "daybook", "strict", "okf":
 	default:
-		return Cortex{}, fmt.Errorf("profile %q must be daybook or strict", c.Profile)
+		return Cortex{}, fmt.Errorf("profile %q must be daybook, strict, or okf", c.Profile)
 	}
 	return c, nil
 }
