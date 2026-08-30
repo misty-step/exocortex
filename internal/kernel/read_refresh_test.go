@@ -123,6 +123,8 @@ func TestGetManyDoesNotMixRevisionsAfterOriginAdvance(t *testing.T) {
 		}
 	}
 
+	writer := mustEffectiveRoot(&f.cs[0])
+	originBefore := g(t, f.origin, "rev-parse", "master")
 	realGit, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatal(err)
@@ -136,6 +138,8 @@ if [ "$1" = "show" ] && [ ! -e "$EXOCORTEX_ADVANCE_MARK" ]; then
   "$EXOCORTEX_REAL_GIT" -C "$EXOCORTEX_PEER" add -- notes/a.md notes/b.md >/dev/null
   "$EXOCORTEX_REAL_GIT" -C "$EXOCORTEX_PEER" commit -m "origin advance" >/dev/null
   "$EXOCORTEX_REAL_GIT" -C "$EXOCORTEX_PEER" push >/dev/null
+  "$EXOCORTEX_REAL_GIT" -C "$EXOCORTEX_WRITER" fetch origin >/dev/null
+  "$EXOCORTEX_REAL_GIT" -C "$EXOCORTEX_WRITER" merge --ff-only "@{u}" >/dev/null
 fi
 exec "$EXOCORTEX_REAL_GIT" "$@"
 `
@@ -145,6 +149,7 @@ exec "$EXOCORTEX_REAL_GIT" "$@"
 	t.Setenv("EXOCORTEX_ADVANCE_MARK", marker)
 	t.Setenv("EXOCORTEX_REAL_GIT", realGit)
 	t.Setenv("EXOCORTEX_PEER", f.b)
+	t.Setenv("EXOCORTEX_WRITER", writer)
 	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
 
 	outcomes := GetMany(f.cs, []GetRequest{
@@ -157,6 +162,14 @@ exec "$EXOCORTEX_REAL_GIT" "$@"
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("origin did not advance after snapshot pin: %v", err)
 	}
+	originAfter := g(t, f.origin, "rev-parse", "master")
+	if originAfter == originBefore {
+		t.Fatal("origin did not advance during the pinned read")
+	}
+	publisherAfter := g(t, writer, "rev-parse", "HEAD")
+	if publisherAfter != originAfter {
+		t.Fatalf("publisher HEAD=%s, origin=%s; wrapper did not fast-forward publisher", publisherAfter, originAfter)
+	}
 	for i, outcome := range outcomes {
 		if outcome.Conflict != nil || outcome.Result == nil {
 			t.Fatalf("outcome[%d]=%+v", i, outcome)
@@ -166,6 +179,44 @@ exec "$EXOCORTEX_REAL_GIT" "$@"
 			!strings.Contains(outcome.Result.Content, note.body) {
 			t.Fatalf("outcome[%d]=%+v, want %q", i, outcome.Result, note.body)
 		}
+		if strings.Contains(outcome.Result.Content, "after advance") {
+			t.Fatalf("outcome[%d] mixed a post-pin revision: %q", i, outcome.Result.Content)
+		}
+	}
+}
+
+func TestLintWholeCortexHandlesNonASCIICommittedPath(t *testing.T) {
+	f := newFixture(t)
+	if _, conf := Get(f.cs, "hosta", "README.md"); conf != nil {
+		t.Fatalf("warm publisher: %s", conf.Code)
+	}
+
+	const rel = "notes/café.md"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(f.b, rel)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.b, rel), []byte("not a note\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g(t, f.b, "add", rel)
+	g(t, f.b, "commit", "-m", "add non-ASCII markdown path")
+	g(t, f.b, "push")
+
+	result, conf := Lint(f.cs, "hosta", "")
+	if conf != nil {
+		t.Fatalf("whole-cortex lint: %s", conf.Code)
+	}
+	if result == nil {
+		t.Fatal("whole-cortex lint returned no result")
+	}
+	missingFrontmatter := 0
+	for _, finding := range result.Findings {
+		if finding.Rule == "fm_missing" {
+			missingFrontmatter++
+		}
+	}
+	if missingFrontmatter != 2 {
+		t.Fatalf("whole-cortex lint findings=%+v, want missing frontmatter for README.md and %s", result.Findings, rel)
 	}
 }
 

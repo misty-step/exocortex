@@ -69,15 +69,21 @@ func (s readSnapshot) log(path string, limit int) ([]LogEntry, error) {
 
 func (s readSnapshot) markdownPaths() ([]string, error) {
 	if s.sha != "" {
-		out, err := git(s.repo, "ls-tree", "-r", "--name-only", s.sha, "--", "*.md")
+		out, err := git(s.repo, "ls-tree", "-r", "-z", "--name-only", s.sha)
 		if err != nil {
 			return nil, err
 		}
-		out = strings.TrimSuffix(out, "\n")
+		out = strings.TrimSuffix(out, "\x00")
 		if out == "" {
 			return nil, nil
 		}
-		return strings.Split(out, "\n"), nil
+		var paths []string
+		for _, path := range strings.Split(out, "\x00") {
+			if path != "" && strings.HasSuffix(path, ".md") {
+				paths = append(paths, filepath.ToSlash(path))
+			}
+		}
+		return paths, nil
 	}
 
 	var paths []string
