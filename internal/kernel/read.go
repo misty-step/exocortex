@@ -305,7 +305,7 @@ func withReadSnapshot(c *Cortex, operation, path string, fn func(readSnapshot) *
 	if err != nil {
 		return fail(err)
 	}
-	if existingWriter && hasUpstream(root) {
+	if existingWriter {
 		if err := ffToUpstream(root); err != nil {
 			return fail(err)
 		}

@@ -97,6 +97,14 @@ func TestNextReadSnapshotSeesPushedOriginCommit(t *testing.T) {
 	}
 }
 
+func TestReadFailsWithoutUpstream(t *testing.T) {
+	f := newFixture(t)
+	g(t, mustEffectiveRoot(&f.cs[0]), "branch", "--unset-upstream")
+	if got, conf := Get(f.cs, "hosta", "README.md"); got != nil || conf == nil || conf.Code != "cortex_unavailable" {
+		t.Fatalf("got=%+v conflict=%#v", got, conf)
+	}
+}
+
 func TestGetManyDoesNotMixRevisionsAfterOriginAdvance(t *testing.T) {
 	f := newFixture(t)
 	notes := []struct {
