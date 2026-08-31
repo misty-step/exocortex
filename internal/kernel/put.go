@@ -46,6 +46,11 @@ type PutResult struct {
 // refresh and its push, so the push is genuinely rejected.
 var beforePushHook func()
 
+// releaseHook, when non-nil, is joined into cortexLock.release then
+// disarmed. Production leaves it nil; tests inject unlock failure
+// after the critical section has already committed its result.
+var releaseHook func() error
+
 // Put runs the pinned pipeline: lock → refresh → pre-flight → CAS →
 // validate → no-op short-circuit → stamp → atomic write → VCS tail,
 // all inside one per-cortex critical section.
@@ -59,7 +64,13 @@ func Put(ctx context.Context, cs []Cortex, in PutInput) (res *PutResult, conf *C
 		return nil, bound
 	}
 	defer func() {
-		conf = attachUnlock(conf, lock.release(), op, rel)
+		rerr := lock.release()
+		conf = attachUnlock(conf, rerr, op, rel)
+		if rerr != nil && conf == nil && res != nil {
+			res.Warnings = append(res.Warnings, fm.Finding{
+				Level: "warning", Rule: "unlock_failed", Message: rerr.Error(),
+			})
+		}
 	}()
 
 	res = &PutResult{Operation: op, Cortex: c.Name, Path: rel}
@@ -470,16 +481,17 @@ func acquireLock(name string) (*cortexLock, error) {
 type cortexLock struct{ f *os.File }
 
 func (l *cortexLock) release() error {
-	return errors.Join(syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN), l.f.Close())
+	err := errors.Join(syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN), l.f.Close())
+	if releaseHook != nil {
+		err = errors.Join(err, releaseHook())
+		releaseHook = nil
+	}
+	return err
 }
 
 func attachUnlock(conf *Conflict, rerr error, operation, path string) *Conflict {
-	if rerr == nil {
+	if rerr == nil || conf == nil {
 		return conf
-	}
-	if conf == nil {
-		return conflict("lock_failed", operation, path, "fix lock-file access and retry",
-			map[string]any{"detail": rerr.Error()})
 	}
 	if conf.Detail == nil {
 		conf.Detail = map[string]any{}
@@ -489,11 +501,8 @@ func attachUnlock(conf *Conflict, rerr error, operation, path string) *Conflict 
 }
 
 func attachUnlockErr(err, rerr error, operation, path string) error {
-	if rerr == nil {
-		return err
-	}
 	if err == nil {
-		return attachUnlock(nil, rerr, operation, path)
+		return nil
 	}
 	if conf, ok := err.(*Conflict); ok {
 		return attachUnlock(conf, rerr, operation, path)
