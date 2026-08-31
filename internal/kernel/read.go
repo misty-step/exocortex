@@ -344,7 +344,8 @@ func withReadSnapshot(c *Cortex, operation, path string, fn func(readSnapshot) *
 	}
 	snapshot := readSnapshot{repo: root, sha: head}
 	rerr := lock.release()
-	return attachUnlock(fn(snapshot), rerr, operation, path)
+	conf := fn(snapshot)
+	return attachUnlock(conf, rerr, operation, path)
 }
 
 func snapshotUnavailable(operation, path string, err error) *Conflict {
