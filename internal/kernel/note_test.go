@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,11 +43,11 @@ func TestNoteCreatesImmutableJournalFiles(t *testing.T) {
 	}
 	cs := []Cortex{*c}
 
-	r1, conf := Note(nil, cs, NoteInput{Text: "first thought", Agent: "agent-a", Via: "cli"})
+	r1, conf := Note(context.TODO(), cs, NoteInput{Text: "first thought", Agent: "agent-a", Via: "cli"})
 	if conf != nil {
 		t.Fatal(conf.Code)
 	}
-	r2, conf := Note(nil, cs, NoteInput{Text: "second thought", Agent: "agent-a", Via: "cli"})
+	r2, conf := Note(context.TODO(), cs, NoteInput{Text: "second thought", Agent: "agent-a", Via: "cli"})
 	if conf != nil {
 		t.Fatal(conf.Code)
 	}
@@ -72,7 +73,7 @@ func TestNoteCreatesImmutableJournalFiles(t *testing.T) {
 		t.Fatalf("memo lint must be silent: %+v", lintRes.Findings)
 	}
 
-	if _, conf := Note(nil, cs, NoteInput{Text: "   ", Agent: "x"}); conf == nil || conf.Code != "empty_note" {
+	if _, conf := Note(context.TODO(), cs, NoteInput{Text: "   ", Agent: "x"}); conf == nil || conf.Code != "empty_note" {
 		t.Fatal("empty note must conflict")
 	}
 }
@@ -85,7 +86,7 @@ func TestNoteUsesEffectiveJournalPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	cs := []Cortex{*c}
-	res, conf := Note(nil, cs, NoteInput{CortexName: "board", Text: "custom prefix", Agent: "pref", Via: "cli"})
+	res, conf := Note(context.TODO(), cs, NoteInput{CortexName: "board", Text: "custom prefix", Agent: "pref", Via: "cli"})
 	if conf != nil {
 		t.Fatal(conf.Code)
 	}
@@ -122,7 +123,7 @@ func TestNoteAmbiguousMultiCortexFailsBeforePut(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, conf := Note(nil, cs, NoteInput{Text: "should not land", Agent: "x", Via: "cli"})
+	res, conf := Note(context.TODO(), cs, NoteInput{Text: "should not land", Agent: "x", Via: "cli"})
 	if res != nil {
 		t.Fatalf("ambiguous note returned %s", res.Path)
 	}
@@ -174,7 +175,7 @@ func TestProof14ConcurrentJournalPushesBothLand(t *testing.T) {
 	}
 	doneA := make(chan string, 1)
 	go func() {
-		res, conf := Note(nil, f.cs, NoteInput{CortexName: "hosta", Text: "A races B into the journal", Agent: "agent-a", Via: "mcp"})
+		res, conf := Note(context.TODO(), f.cs, NoteInput{CortexName: "hosta", Text: "A races B into the journal", Agent: "agent-a", Via: "mcp"})
 		if conf != nil {
 			doneA <- "conflict:" + conf.Code
 			return
@@ -217,7 +218,7 @@ func TestNotePreservesPayloadOnNonRetryable(t *testing.T) {
 	g(t, writer, "commit", "-m", "seed foreign tracked file")
 	os.WriteFile(foreign, []byte("---\ntype: x\n---\nwip mid-edit\n"), 0o644)
 
-	_, conf := Note(nil, f.cs, NoteInput{CortexName: "hosta", Text: "precious thought", Agent: "a", Via: "cli"})
+	_, conf := Note(context.TODO(), f.cs, NoteInput{CortexName: "hosta", Text: "precious thought", Agent: "a", Via: "cli"})
 	if conf == nil || conf.Code != "foreign_unstaged_state" {
 		t.Fatalf("want foreign_unstaged_state, got %#v", conf)
 	}

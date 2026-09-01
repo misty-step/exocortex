@@ -69,23 +69,30 @@ func (s readSnapshot) log(path string, limit int) ([]LogEntry, error) {
 
 func (s readSnapshot) markdownPaths() ([]string, error) {
 	if s.sha != "" {
-		out, err := git(s.repo, "ls-tree", "-r", "-z", "--name-only", s.sha)
-		if err != nil {
-			return nil, err
-		}
-		out = strings.TrimSuffix(out, "\x00")
-		if out == "" {
-			return nil, nil
-		}
-		var paths []string
-		for _, path := range strings.Split(out, "\x00") {
-			if path != "" && strings.HasSuffix(path, ".md") {
-				paths = append(paths, filepath.ToSlash(path))
-			}
-		}
-		return paths, nil
+		return s.committedMarkdown()
 	}
+	return s.walkMarkdown()
+}
 
+func (s readSnapshot) committedMarkdown() ([]string, error) {
+	out, err := git(s.repo, "ls-tree", "-r", "-z", "--name-only", s.sha)
+	if err != nil {
+		return nil, err
+	}
+	out = strings.TrimSuffix(out, "\x00")
+	if out == "" {
+		return nil, nil
+	}
+	var paths []string
+	for _, path := range strings.Split(out, "\x00") {
+		if path != "" && strings.HasSuffix(path, ".md") {
+			paths = append(paths, filepath.ToSlash(path))
+		}
+	}
+	return paths, nil
+}
+
+func (s readSnapshot) walkMarkdown() ([]string, error) {
 	var paths []string
 	err := filepath.WalkDir(s.repo, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -97,13 +104,14 @@ func (s readSnapshot) markdownPaths() ([]string, error) {
 			}
 			return nil
 		}
-		if strings.HasSuffix(d.Name(), ".md") {
-			rel, err := filepath.Rel(s.repo, path)
-			if err != nil {
-				return err
-			}
-			paths = append(paths, filepath.ToSlash(rel))
+		if !strings.HasSuffix(d.Name(), ".md") {
+			return nil
 		}
+		rel, err := filepath.Rel(s.repo, path)
+		if err != nil {
+			return err
+		}
+		paths = append(paths, filepath.ToSlash(rel))
 		return nil
 	})
 	return paths, err
@@ -117,6 +125,14 @@ func Get(cs []Cortex, nameFlag, p string) (*GetResult, *Conflict) {
 func GetMany(cs []Cortex, requests []GetRequest) []GetOutcome {
 	outcomes := make([]GetOutcome, len(requests))
 	rels := make([]string, len(requests))
+	groups, order := groupGetRequests(cs, requests, outcomes, rels)
+	for _, c := range order {
+		fillGetGroup(c, groups[c.Name], rels, outcomes)
+	}
+	return outcomes
+}
+
+func groupGetRequests(cs []Cortex, requests []GetRequest, outcomes []GetOutcome, rels []string) (map[string][]int, []*Cortex) {
 	groups := make(map[string][]int)
 	var order []*Cortex
 	for i, request := range requests {
@@ -132,26 +148,27 @@ func GetMany(cs []Cortex, requests []GetRequest) []GetOutcome {
 		}
 		groups[c.Name] = append(groups[c.Name], i)
 	}
-	for _, c := range order {
-		indexes := groups[c.Name]
-		conf := withReadSnapshot(c, "get", rels[indexes[0]], func(snapshot readSnapshot) *Conflict {
-			for _, i := range indexes {
-				raw, err := snapshot.read(rels[i])
-				if err != nil {
-					outcomes[i].Conflict = snapshotReadConflict(c, "get", rels[i], err)
-					continue
-				}
-				outcomes[i].Result = getResult(c, rels[i], raw)
+	return groups, order
+}
+
+func fillGetGroup(c *Cortex, indexes []int, rels []string, outcomes []GetOutcome) {
+	conf := withReadSnapshot(c, "get", rels[indexes[0]], func(snapshot readSnapshot) *Conflict {
+		for _, i := range indexes {
+			raw, err := snapshot.read(rels[i])
+			if err != nil {
+				outcomes[i].Conflict = snapshotReadConflict(c, "get", rels[i], err)
+				continue
 			}
-			return nil
-		})
-		if conf != nil {
-			for _, i := range indexes {
-				outcomes[i].Conflict = conflictForRequest(conf, "get", rels[i])
-			}
+			outcomes[i].Result = getResult(c, rels[i], raw)
 		}
+		return nil
+	})
+	if conf == nil {
+		return
 	}
-	return outcomes
+	for _, i := range indexes {
+		outcomes[i].Conflict = conflictForRequest(conf, "get", rels[i])
+	}
 }
 
 func getResult(c *Cortex, rel string, raw []byte) *GetResult {
@@ -241,42 +258,48 @@ func Lint(cs []Cortex, nameFlag, p string) (*LintResult, *Conflict) {
 }
 
 func lintSnapshot(c *Cortex, rel string, snapshot readSnapshot, res *LintResult) *Conflict {
-	add := func(path string, findings []fm.Finding, verr error) {
-		if verr != nil {
-			if f, ok := fm.ContractFinding(verr); ok {
-				res.Findings = append(res.Findings, f)
-			} else {
-				res.Findings = append(res.Findings, fm.Finding{Level: "error", Rule: "read_failed", Message: verr.Error()})
-			}
-		}
-		res.Findings = append(res.Findings, findings...)
+	if rel != "" {
+		return lintFile(c, rel, snapshot, res)
 	}
-	read := func(path string) *Conflict {
-		raw, err := snapshot.read(path)
-		if err != nil {
-			if c.VCS == "daybook" {
-				return snapshotUnavailable("lint", path, err)
-			}
-			add(path, nil, err)
-			return nil
+	return lintWalk(c, snapshot, res)
+}
+
+func addLintFinding(res *LintResult, findings []fm.Finding, verr error) {
+	if verr != nil {
+		if f, ok := fm.ContractFinding(verr); ok {
+			res.Findings = append(res.Findings, f)
+		} else {
+			res.Findings = append(res.Findings, fm.Finding{Level: "error", Rule: "read_failed", Message: verr.Error()})
 		}
-		_, findings, err := fm.ValidatePath(c.Profile, path, fm.ParseDocument(raw))
-		add(path, findings, err)
+	}
+	res.Findings = append(res.Findings, findings...)
+}
+
+func lintFile(c *Cortex, path string, snapshot readSnapshot, res *LintResult) *Conflict {
+	raw, err := snapshot.read(path)
+	if err != nil {
+		if c.VCS == "daybook" {
+			return snapshotUnavailable("lint", path, err)
+		}
+		addLintFinding(res, nil, err)
 		return nil
 	}
-	if rel != "" {
-		return read(rel)
-	}
+	_, findings, err := fm.ValidatePath(c.Profile, path, fm.ParseDocument(raw))
+	addLintFinding(res, findings, err)
+	return nil
+}
+
+func lintWalk(c *Cortex, snapshot readSnapshot, res *LintResult) *Conflict {
 	paths, err := snapshot.markdownPaths()
 	if err != nil {
 		if c.VCS == "daybook" {
-			return snapshotUnavailable("lint", rel, err)
+			return snapshotUnavailable("lint", "", err)
 		}
-		return conflict("walk_failed", "lint", rel, "fix filesystem access and retry",
+		return conflict("walk_failed", "lint", "", "fix filesystem access and retry",
 			map[string]any{"detail": err.Error()})
 	}
 	for _, path := range paths {
-		if conf := read(path); conf != nil {
+		if conf := lintFile(c, path, snapshot, res); conf != nil {
 			return conf
 		}
 	}
@@ -297,8 +320,7 @@ func withReadSnapshot(c *Cortex, operation, path string, fn func(readSnapshot) *
 		return snapshotUnavailable(operation, path, errors.New(lockConf.Error()))
 	}
 	fail := func(err error) *Conflict {
-		lock.release()
-		return snapshotUnavailable(operation, path, err)
+		return attachUnlock(snapshotUnavailable(operation, path, err), lock.release(), operation, path)
 	}
 	existingWriter := writerDir(c) != ""
 	root, err := effectiveRoot(c)
@@ -321,8 +343,9 @@ func withReadSnapshot(c *Cortex, operation, path string, fn func(readSnapshot) *
 		return fail(errors.New("publisher repository has no HEAD commit"))
 	}
 	snapshot := readSnapshot{repo: root, sha: head}
-	lock.release()
-	return fn(snapshot)
+	rerr := lock.release()
+	conf := fn(snapshot)
+	return attachUnlock(conf, rerr, operation, path)
 }
 
 func snapshotUnavailable(operation, path string, err error) *Conflict {

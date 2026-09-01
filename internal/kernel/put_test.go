@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -77,7 +78,7 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) put(cortex, path, payload string) (*PutResult, *Conflict) {
 	f.t.Helper()
-	return Put(nil, f.cs, PutInput{
+	return Put(context.TODO(), f.cs, PutInput{
 		CortexName: cortex,
 		Path:       path,
 		Payload:    []byte(payload),
@@ -172,7 +173,7 @@ func TestProof3ExpectsMismatch(t *testing.T) {
 	}
 	realRev := f.rev("hosta", "notes/x.md")
 	bogus := strings.Repeat("ab", 32)
-	res, conf := Put(nil, f.cs, PutInput{
+	res, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/x.md",
 		Payload: []byte(mkNote("note", "v2")), Expects: bogus,
 		Agent: "t", Via: "cli", OwnPayload: true,
@@ -204,7 +205,7 @@ func TestProof4ConcurrentUpdatesAndForeignStaged(t *testing.T) {
 		wg.Add(1)
 		go func(i int, body string) {
 			defer wg.Done()
-			res, conf := Put(nil, f.cs, PutInput{
+			res, conf := Put(context.TODO(), f.cs, PutInput{
 				CortexName: "hosta", Path: "notes/cas.md",
 				Payload: []byte(mkNote("note", body)), Expects: r1,
 				Agent: "t", Via: "cli", OwnPayload: true,
@@ -243,7 +244,7 @@ func TestProof4ConcurrentUpdatesAndForeignStaged(t *testing.T) {
 	foreignBody := mkNote("note", "another worker's staged work")
 	os.WriteFile(filepath.Join(rootA, foreign), []byte(foreignBody), 0o644)
 	g(t, rootA, "add", foreign)
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/cas.md",
 		Payload: []byte(mkNote("note", "should not land")), Expects: newRev,
 		Agent: "t", Via: "cli", OwnPayload: true,
@@ -270,7 +271,7 @@ func TestProof5DirtyDestination(t *testing.T) {
 	// Unstaged edit to destination in publisher tree.
 	localEdit := "---\ntype: note\n---\n\nhuman mid-edit\n"
 	os.WriteFile(filepath.Join(rootA, "notes/dirty.md"), []byte(localEdit), 0o644)
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/dirty.md",
 		Payload: []byte(mkNote("note", "clobber")), Expects: rev,
 		Agent: "t", Via: "cli", OwnPayload: true,
@@ -285,7 +286,7 @@ func TestProof5DirtyDestination(t *testing.T) {
 
 	// Staged-only change to destination in publisher tree.
 	g(t, rootA, "add", "notes/dirty.md")
-	_, conf = Put(nil, f.cs, PutInput{
+	_, conf = Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/dirty.md",
 		Payload: []byte(mkNote("note", "clobber")), Expects: rev,
 		Agent: "t", Via: "cli", OwnPayload: true,
@@ -320,7 +321,7 @@ func TestProof6SingleCommitPushedThenNoop(t *testing.T) {
 
 	// Byte-identical retry with current revision: successful no-op.
 	rev := f.rev("hosta", "misty-step/pinned.md")
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "misty-step/pinned.md",
 		Payload: []byte(payload), Expects: rev,
 		Agent: "test-agent", Via: "cli", OwnPayload: true,
@@ -335,7 +336,7 @@ func TestProof6SingleCommitPushedThenNoop(t *testing.T) {
 	// Second no-op form: get-content retry — the payload carries the
 	// stored provenance stamp back verbatim (pinned byte-equality).
 	disk, _ := os.ReadFile(filepath.Join(rootA, "misty-step/pinned.md"))
-	res2, conf := Put(nil, f.cs, PutInput{
+	res2, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "misty-step/pinned.md",
 		Payload: disk, Expects: rev,
 		Agent: "test-agent", Via: "cli", OwnPayload: true,
@@ -369,7 +370,7 @@ func TestProof8ProfileConformance(t *testing.T) {
 	// created survives an update untouched when resubmitted verbatim.
 	rev := f.rev("hosta", "notes/minimal.md")
 	updated := "---\ntype: fleeting\ncreated: 2019-03-04T05:06:07Z\n---\n\nchanged body\n"
-	res, conf := Put(nil, f.cs, PutInput{
+	res, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/minimal.md",
 		Payload: []byte(updated), Expects: rev,
 		Agent: "u", Via: "cli", OwnPayload: true,
@@ -390,7 +391,7 @@ func TestProof8ProfileConformance(t *testing.T) {
 	rev = f.rev("hosta", "notes/minimal.md")
 	before, _ := os.ReadFile(filepath.Join(rootA, "notes/minimal.md"))
 	tampered := "---\ntype: fleeting\ncreated: 2026-01-01T00:00:00Z\n---\n\nchanged body\n"
-	_, conf = Put(nil, f.cs, PutInput{
+	_, conf = Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/minimal.md",
 		Payload: []byte(tampered), Expects: rev,
 		Agent: "u", Via: "cli", OwnPayload: true,
@@ -407,7 +408,7 @@ func TestProof8ProfileConformance(t *testing.T) {
 
 	// Dropping created also aborts.
 	dropped := "---\ntype: fleeting\n---\n\nno created at all\n"
-	_, conf = Put(nil, f.cs, PutInput{
+	_, conf = Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/minimal.md",
 		Payload: []byte(dropped), Expects: rev,
 		Agent: "u", Via: "cli", OwnPayload: true,
@@ -422,7 +423,7 @@ func TestProof8ProfileConformance(t *testing.T) {
 	}
 	revUQ := f.rev("hosta", "notes/unquoted.md")
 	unqChanged := "---\ntype: fleeting\ncreated: 2030-06-06T06:06:06Z\n---\n\nsneaky\n"
-	_, conf = Put(nil, f.cs, PutInput{
+	_, conf = Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/unquoted.md",
 		Payload: []byte(unqChanged), Expects: revUQ,
 		Agent: "u", Via: "cli", OwnPayload: true,
@@ -436,7 +437,7 @@ func TestProof8ProfileConformance(t *testing.T) {
 	}
 	revGF := f.rev("hosta", "notes/gapfill.md")
 	gapFilled := "---\ntype: fleeting\ncreated: 2024-02-02T02:02:02Z\n---\n\nnow dated\n"
-	resGF, conf := Put(nil, f.cs, PutInput{
+	resGF, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/gapfill.md",
 		Payload: []byte(gapFilled), Expects: revGF,
 		Agent: "u", Via: "cli", OwnPayload: true,
@@ -469,7 +470,7 @@ func TestProof12CreateFastPathWaitsForLock(t *testing.T) {
 
 	doneA := make(chan string, 1)
 	go func() {
-		_, conf := Put(nil, f.cs, PutInput{
+		_, conf := Put(context.TODO(), f.cs, PutInput{
 			CortexName: "hosta", Path: "notes/pause.md",
 			Payload: []byte(aPayload),
 			Agent:   "agent-a", Via: "cli", OwnPayload: true,
@@ -486,7 +487,7 @@ func TestProof12CreateFastPathWaitsForLock(t *testing.T) {
 	// the lock — the pre-fix stat would answer `exists` instantly.
 	doneB := make(chan string, 1)
 	go func() {
-		_, conf := Put(nil, f.cs, PutInput{
+		_, conf := Put(context.TODO(), f.cs, PutInput{
 			CortexName: "hosta", Path: "notes/pause.md",
 			Payload: []byte(mkNote("note", "B must wait")),
 			Agent:   "agent-b", Via: "cli", OwnPayload: true,
@@ -589,7 +590,7 @@ func TestProof9CrossHostUpdateRace(t *testing.T) {
 	aPayload := mkNote("note", "A wins with this content")
 	bPayload := mkNote("note", "B loses this content")
 	beforePushHook = func() {
-		if _, conf := Put(nil, f.cs, PutInput{
+		if _, conf := Put(context.TODO(), f.cs, PutInput{
 			CortexName: "hosta", Path: "notes/shared.md",
 			Payload: []byte(aPayload), Expects: r1,
 			Agent: "agent-a", Via: "cli", OwnPayload: true,
@@ -597,7 +598,7 @@ func TestProof9CrossHostUpdateRace(t *testing.T) {
 			t.Errorf("peer put failed inside hook: %v", conf.Code)
 		}
 	}
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hostb", Path: "notes/shared.md",
 		Payload: []byte(bPayload), Expects: r1,
 		Agent: "agent-b", Via: "cli", OwnPayload: true,
@@ -642,7 +643,7 @@ func TestProof10UnwindSparesForeignUnstaged(t *testing.T) {
 	// Remote advances (winner lands).
 	r1 := f.rev("hostb", "notes/tail.md")
 	aPayload := mkNote("note", "remote winner")
-	if _, conf := Put(nil, f.cs, PutInput{
+	if _, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/tail.md",
 		Payload: []byte(aPayload), Expects: r1,
 		Agent: "a", Via: "cli", OwnPayload: true,
@@ -709,7 +710,7 @@ func TestProof11CrossHostCreateRace(t *testing.T) {
 			t.Errorf("peer put failed inside hook: %v", conf.Code)
 		}
 	}
-	_, conf := Put(nil, f.cs, PutInput{
+	_, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hostb", Path: "notes/new-hotness.md",
 		Payload: []byte(bPayload),
 		Agent:   "agent-b", Via: "mcp", OwnPayload: false, // stdin/MCP-style payload

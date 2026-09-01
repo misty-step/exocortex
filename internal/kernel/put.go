@@ -46,22 +46,36 @@ type PutResult struct {
 // refresh and its push, so the push is genuinely rejected.
 var beforePushHook func()
 
+// releaseHook, when non-nil, is joined into cortexLock.release then
+// disarmed. Production leaves it nil; tests inject unlock failure
+// after the critical section has already committed its result.
+var releaseHook func() error
+
 // Put runs the pinned pipeline: lock → refresh → pre-flight → CAS →
 // validate → no-op short-circuit → stamp → atomic write → VCS tail,
 // all inside one per-cortex critical section.
-func Put(ctx context.Context, cs []Cortex, in PutInput) (*PutResult, *Conflict) {
-	c, rel, op, abs, conf := bindPutTarget(cs, in)
-	if conf != nil {
-		return nil, conf
+func Put(ctx context.Context, cs []Cortex, in PutInput) (res *PutResult, conf *Conflict) {
+	c, rel, op, abs, bound := bindPutTarget(cs, in)
+	if bound != nil {
+		return nil, bound
 	}
-	lock, conf := lockNamed(c.Name, op, rel)
-	if conf != nil {
-		return nil, conf
+	lock, bound := lockNamed(c.Name, op, rel)
+	if bound != nil {
+		return nil, bound
 	}
-	defer lock.release()
+	defer func() {
+		rerr := lock.release()
+		conf = attachUnlock(conf, rerr, op, rel)
+		if rerr != nil && conf == nil && res != nil {
+			res.Warnings = append(res.Warnings, fm.Finding{
+				Level: "warning", Rule: "unlock_failed", Message: rerr.Error(),
+			})
+		}
+	}()
 
-	res := &PutResult{Operation: op, Cortex: c.Name, Path: rel}
-	dir, abs, base, conf := preparePutRoot(c, rel, op, abs)
+	res = &PutResult{Operation: op, Cortex: c.Name, Path: rel}
+	var dir, base string
+	dir, abs, base, conf = preparePutRoot(c, rel, op, abs)
 	if conf != nil {
 		return nil, conf
 	}
@@ -459,49 +473,71 @@ func acquireLock(name string) (*cortexLock, error) {
 		return nil, err
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
-		return nil, err
+		return nil, errors.Join(err, f.Close())
 	}
 	return &cortexLock{f: f}, nil
 }
 
 type cortexLock struct{ f *os.File }
 
-func (l *cortexLock) release() {
-	syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
-	l.f.Close()
+func (l *cortexLock) release() error {
+	err := errors.Join(syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN), l.f.Close())
+	if releaseHook != nil {
+		err = errors.Join(err, releaseHook())
+		releaseHook = nil
+	}
+	return err
 }
 
-func atomicWrite(abs string, data []byte) error {
+func attachUnlock(conf *Conflict, rerr error, operation, path string) *Conflict {
+	if rerr == nil || conf == nil {
+		return conf
+	}
+	if conf.Detail == nil {
+		conf.Detail = map[string]any{}
+	}
+	conf.Detail["unlock"] = rerr.Error()
+	return conf
+}
+
+func attachUnlockErr(err, rerr error, operation, path string) error {
+	if err == nil {
+		return nil
+	}
+	if conf, ok := err.(*Conflict); ok {
+		return attachUnlock(conf, rerr, operation, path)
+	}
+	return errors.Join(err, rerr)
+}
+
+func atomicWrite(abs string, data []byte) (err error) {
 	dir := filepath.Dir(abs)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err = os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".exocortex-put-*")
-	if err != nil {
-		return err
+	tmp, cerr := os.CreateTemp(dir, ".exocortex-put-*")
+	if cerr != nil {
+		return cerr
 	}
 	tmpName := tmp.Name()
 	defer func() {
 		if tmpName != "" {
-			os.Remove(tmpName)
+			err = errors.Join(err, os.Remove(tmpName))
 		}
 	}()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+	if _, err = tmp.Write(data); err != nil {
+		return errors.Join(err, tmp.Close())
+	}
+	if err = tmp.Chmod(0o644); err != nil {
+		return errors.Join(err, tmp.Close())
+	}
+	if err = tmp.Close(); err != nil {
 		return err
 	}
-	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
+	if err = os.Rename(tmpName, abs); err != nil {
 		return err
 	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, abs); err != nil {
-		return err
-	}
-	tmpName = "" // renamed away; nothing to clean
+	tmpName = ""
 	return nil
 }
 
@@ -601,7 +637,9 @@ func ensureWriter(name, shared string) (string, error) {
 		return w, nil
 	}
 
-	os.MkdirAll(filepath.Dir(w), 0o755)
+	if err := os.MkdirAll(filepath.Dir(w), 0o755); err != nil {
+		return "", err
+	}
 	var cloneArgs []string
 	if branch != "" && branch != "HEAD" {
 		cloneArgs = []string{"clone", "-b", branch, url, w}

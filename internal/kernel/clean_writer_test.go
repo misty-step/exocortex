@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,7 +48,7 @@ func TestProof15SolePublisherIsolatesFromHumanCheckout(t *testing.T) {
 	g(t, f.a, "add", "notes/staged-peer.md")
 
 	// Put succeeds independently through the publisher clone.
-	res, conf := Put(nil, f.cs, PutInput{
+	res, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/real.md",
 		Payload: []byte(mkNote("note", "v1 via sole publisher")),
 		Agent:   "a", Via: "cli", OwnPayload: true,
@@ -125,7 +126,7 @@ func TestPublisherPinsNonDefaultTrackedBranch(t *testing.T) {
 	g(t, f.a, "checkout", "-b", "feature-vault")
 	g(t, f.a, "push", "-u", "origin", "feature-vault")
 
-	res, conf := Put(nil, f.cs, PutInput{
+	res, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta", Path: "notes/branch-test.md",
 		Payload: []byte(mkNote("note", "landed on feature-vault")),
 		Agent:   "a", Via: "cli", OwnPayload: true,
@@ -265,7 +266,7 @@ func TestProof19MissingOriginFailsClosedAcrossReadsAndWrites(t *testing.T) {
 	}
 
 	// Writes must fail closed.
-	_, pconf := Put(nil, []Cortex{*c}, PutInput{
+	_, pconf := Put(context.TODO(), []Cortex{*c}, PutInput{
 		CortexName: "no-origin", Path: "notes/secret.md",
 		Payload: []byte(mkNote("note", "must not write")),
 		Agent:   "a", Via: "cli", OwnPayload: true,

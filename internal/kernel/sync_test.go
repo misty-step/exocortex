@@ -347,7 +347,7 @@ func TestNoopPutDoesNotMarkDirty(t *testing.T) {
 		t.Fatal("expected clean after sync")
 	}
 
-	again, conf := Put(nil, f.cs, PutInput{
+	again, conf := Put(context.TODO(), f.cs, PutInput{
 		CortexName: "hosta",
 		Path:       "notes/noop.md",
 		Payload:    []byte(payload),
