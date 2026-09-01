@@ -40,7 +40,7 @@ func (s readSnapshot) read(path string) ([]byte, error) {
 	if s.sha != "" {
 		raw, err := git(s.repo, "show", s.sha+":"+path)
 		if err != nil {
-			if tree, treeErr := git(s.repo, "ls-tree", "-z", s.sha, "--", path); treeErr == nil && tree == "" {
+			if tree, treeErr := git(s.repo, "ls-tree", "-z", s.sha, "--", ":(literal)"+path); treeErr == nil && tree == "" {
 				return nil, fs.ErrNotExist
 			}
 			return nil, err
