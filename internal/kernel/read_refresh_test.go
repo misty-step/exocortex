@@ -2,6 +2,8 @@ package kernel
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,6 +105,17 @@ func TestReadFailsWithoutUpstream(t *testing.T) {
 	g(t, mustEffectiveRoot(&f.cs[0]), "branch", "--unset-upstream")
 	if got, conf := Get(f.cs, "hosta", "README.md"); got != nil || conf == nil || conf.Code != "cortex_unavailable" {
 		t.Fatalf("got=%+v conflict=%#v", got, conf)
+	}
+}
+
+func TestGetClassifiesMissingCommittedPath(t *testing.T) {
+	f := newFixture(t)
+	got, conf := Get(f.cs, "hosta", "notes/missing.md")
+	if got != nil || conf == nil || conf.Code != "not_found" || conf.Path != "notes/missing.md" {
+		t.Fatalf("got=%+v conflict=%#v", got, conf)
+	}
+	if _, err := (readSnapshot{repo: mustEffectiveRoot(&f.cs[0]), sha: "missing-commit"}).read("README.md"); errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("invalid snapshot classified as missing path: %v", err)
 	}
 }
 
