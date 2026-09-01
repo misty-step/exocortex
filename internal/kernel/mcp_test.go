@@ -13,6 +13,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// binPath is the built exocortex binary used for the MCP stdio
+// round-trip; TestMain builds it once for the package.
 var binPath string
 
 func TestMain(m *testing.M) {
@@ -33,6 +35,8 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// Proof 7: MCP face round-trip — get → put(expectedRevision) → get
+// bumps the revision and preserves the payload apart from the stamp.
 func TestProof7MCPRoundTrip(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -106,6 +110,7 @@ func TestProof7MCPRoundTrip(t *testing.T) {
 		t.Fatalf("provenance stamp missing:\n%s", disk)
 	}
 
+	// Stale expectedRevision surfaces the pinned conflict as an error result.
 	body, isErr = call("exocortex_put", map[string]any{
 		"path": "notes/mcp.md", "content": updated,
 		"expectedRevision": rev1, "cortex": "hosta",
