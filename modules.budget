@@ -9,7 +9,10 @@
 # errors join the primary failure instead of blank assignment.
 # Unlock-after-success: do not convert a landed write or captured snapshot
 # into lock_failed; tests inject release failure.
-kernel	internal/kernel	58400
+# PRs #43-45: distinguish a missing committed path from an unavailable
+# snapshot across kernel and MCP while retaining the sole-publisher and
+# fail-closed proof documentation; measured 58,683 after delete-or-split.
+kernel	internal/kernel	58700
 # FlagSet-driven splitArgs: VisitAll replaces per-command value-flag maps.
 cli	internal/cli	16200
 # PR #40: OKF v0.2 vocabulary split out of fm into internal/okf

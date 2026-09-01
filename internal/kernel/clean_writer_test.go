@@ -24,6 +24,11 @@ func (f *fixture) noOriginClone(t *testing.T, name string) string {
 	return dir
 }
 
+// Proof 15 (sole publisher): the kernel-owned writer clone is the sole
+// publisher for daybook cortices. Writes land, commit, and push from
+// the writer clone without touching the registered human checkout,
+// even when the human checkout carries uncommitted edits, staged work,
+// or a dirty heartbeat. Reads immediately resolve from the publisher clone.
 func TestProof15SolePublisherIsolatesFromHumanCheckout(t *testing.T) {
 	f := newFixture(t)
 
@@ -83,6 +88,8 @@ func TestProof15SolePublisherIsolatesFromHumanCheckout(t *testing.T) {
 	}
 }
 
+// A LEFTOVER-DIRTY PUBLISHER clone must abort the write at the publisher-
+// root scan — the publisher repository must always be clean.
 func TestDirtyPublisherAborts(t *testing.T) {
 	f := newFixture(t)
 
@@ -111,6 +118,8 @@ func TestDirtyPublisherAborts(t *testing.T) {
 	}
 }
 
+// Proof 16: publisher pins the registered checkout's actual tracked branch
+// (e.g. feature-vault), not the remote's default branch (master).
 func TestPublisherPinsNonDefaultTrackedBranch(t *testing.T) {
 	f := newFixture(t)
 	// Create and checkout non-default branch on hosta
@@ -140,6 +149,8 @@ func TestPublisherPinsNonDefaultTrackedBranch(t *testing.T) {
 	}
 }
 
+// Proof 17: Get on a freshly registered cortex provisions the publisher clone
+// and reads clean committed state, never uncommitted human dirt on c.Path.
 func TestProof17FreshRegistrationReadsCommittedStateNotHumanDirt(t *testing.T) {
 	testConfigEnv(t)
 	base := t.TempDir()
@@ -188,6 +199,8 @@ func TestProof17FreshRegistrationReadsCommittedStateNotHumanDirt(t *testing.T) {
 	}
 }
 
+// Proof 18: provisioning failure fails closed — Get/Log/Lint return cortex_unavailable,
+// never silently falling back to uncommitted bytes on c.Path.
 func TestProof18ProvisioningFailureFailsClosed(t *testing.T) {
 	testConfigEnv(t)
 	base := t.TempDir()
@@ -220,6 +233,9 @@ func TestProof18ProvisioningFailureFailsClosed(t *testing.T) {
 	}
 }
 
+// Proof 19: completely missing origin remote on a daybook cortex fails closed
+// across reads and writes — Put returns writer_unavailable; Get/Log/Lint return
+// cortex_unavailable; zero fallback to c.Path.
 func TestProof19MissingOriginFailsClosedAcrossReadsAndWrites(t *testing.T) {
 	testConfigEnv(t)
 	base := t.TempDir()
