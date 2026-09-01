@@ -40,6 +40,9 @@ func (s readSnapshot) read(path string) ([]byte, error) {
 	if s.sha != "" {
 		raw, err := git(s.repo, "show", s.sha+":"+path)
 		if err != nil {
+			if tree, treeErr := git(s.repo, "ls-tree", "-z", s.sha, "--", path); treeErr == nil && tree == "" {
+				return nil, fs.ErrNotExist
+			}
 			return nil, err
 		}
 		return []byte(raw), nil
@@ -363,12 +366,12 @@ func conflictForRequest(source *Conflict, operation, path string) *Conflict {
 }
 
 func snapshotReadConflict(c *Cortex, operation, path string, err error) *Conflict {
-	if c.VCS == "daybook" {
-		return snapshotUnavailable(operation, path, err)
-	}
 	if errors.Is(err, fs.ErrNotExist) {
 		return conflict("not_found", operation, path,
 			"check the path; search the cortex to locate the note", nil)
+	}
+	if c.VCS == "daybook" {
+		return snapshotUnavailable(operation, path, err)
 	}
 	return conflict("read_failed", operation, path, "fix filesystem access and retry",
 		map[string]any{"detail": err.Error()})

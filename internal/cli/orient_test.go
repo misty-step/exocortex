@@ -267,6 +267,10 @@ func setupCLIDaybook(t *testing.T, notes ...cliNote) (string, string) {
 	if writer == "" {
 		t.Fatalf("publisher writer missing in %s", writers)
 	}
+	code, body, _ = runMain(t, "", "get", "notes/missing.md", "--cortex", "vault")
+	if code != 1 || body["error"] != "not_found" {
+		t.Fatalf("missing get: exit=%d body=%v", code, body)
+	}
 	return human, writer
 }
 
