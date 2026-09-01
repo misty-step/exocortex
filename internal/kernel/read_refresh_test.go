@@ -114,6 +114,10 @@ func TestGetClassifiesMissingCommittedPath(t *testing.T) {
 	if got != nil || conf == nil || conf.Code != "not_found" || conf.Path != "notes/missing.md" {
 		t.Fatalf("got=%+v conflict=%#v", got, conf)
 	}
+	got, conf = Get(f.cs, "hosta", ":(literal)README.md")
+	if got != nil || conf == nil || conf.Code != "not_found" {
+		t.Fatalf("pathspec magic result=%+v conflict=%#v", got, conf)
+	}
 	if _, err := (readSnapshot{repo: mustEffectiveRoot(&f.cs[0]), sha: "missing-commit"}).read("README.md"); errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("invalid snapshot classified as missing path: %v", err)
 	}
