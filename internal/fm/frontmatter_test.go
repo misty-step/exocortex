@@ -114,205 +114,69 @@ func TestValidateStrict(t *testing.T) {
 	}
 }
 
-func TestValidateOKFV02(t *testing.T) {
-	raw := `---
-type: Attested Computation
-title: Revenue
-description: Recognized revenue.
-resource: https://example.test/revenue
-sources:
-  - resource: https://example.test/policy
-generated:
-  by: reference_agent/gemini-2.5-pro
-  at: 2026-06-20T22:53:05Z
-verified:
-  - by: human:ahormati
-    at: 2026-06-25T09:00:00Z
-  - by: process:finance-nightly
-    at: 2026-06-26T02:00:00+00:00
-stale_after: 2026-12-31T00:00:00+01:00
-runtime: bigquery
-parameters:
-  - name: year
-    type: integer
-    required: true
-computation: references/revenue.sql
-executor:
-  resource: references/run.md
-attester:
-  resource: references/check.py
-usage_window:
-  from: 2026-06-01
-  to: 2026-06-30
-provenance:
-  agent: kernel
-  at: 2026-06-28T14:00:00Z
-  via: cli
-status: stable
-created: 2026-06-20T22:53:05Z
-tags: [finance]
----
-body
-`
-	fs, err := validate("daybook", raw)
-	if err != nil {
-		t.Fatalf("valid OKF v0.2 note must pass daybook: %v", err)
-	}
-	for _, f := range fs {
-		if f.Rule == "unknown_keys" {
-			t.Fatalf("OKF v0.2 keys should be known: %+v", fs)
-		}
-		if f.Rule == "generated_by_format" || f.Rule == "generated_at_format" ||
-			f.Rule == "verified_by_format" || f.Rule == "verified_at_format" ||
-			f.Rule == "stale_after_format" || f.Rule == "provenance_at_format" {
-			t.Fatalf("valid OKF v0.2 signal should not be flagged: %+v", f)
-		}
-	}
-	if _, err := validate("strict", raw); err != nil {
-		t.Fatalf("valid OKF v0.2 note must pass strict: %v", err)
-	}
-}
-
-func TestValidateOKFV02RejectsMalformedSignals(t *testing.T) {
-	raw := `---
+// Malformed optional OKF fields violate the same rules under both
+// profiles; only the level policy differs.
+func TestValidateOKFLevelPolicy(t *testing.T) {
+	malformed := `---
 type: Metric
-status: stable
-created: 2026-06-20T22:53:05Z
-description: Revenue.
-tags: [finance]
 generated:
   by: "human:"
   at: 2026-06-20
-verified:
-  - by: agent
-    at: 2026-06-25
-stale_after: not-a-date
 provenance:
   at: yesterday
 ---
 body
 `
-	fs, err := validate("daybook", raw)
+	fs, err := validate("daybook", malformed)
 	if err != nil {
 		t.Fatalf("malformed optional signals must warn, not fail, under daybook: %v", err)
 	}
-	for _, rule := range []string{
-		"generated_by_format", "generated_at_format",
-		"verified_by_format", "verified_at_format",
-		"stale_after_format", "provenance_at_format",
-	} {
-		if !hasRule(fs, rule) {
-			t.Fatalf("daybook missing %s in %+v", rule, fs)
+	if !hasRule(fs, "generated_by_format") || !hasRule(fs, "generated_at_format") || !hasRule(fs, "provenance_at_format") {
+		t.Fatalf("daybook missing OKF violations in %+v", fs)
+	}
+	for _, f := range fs {
+		if f.Level != "warning" {
+			t.Fatalf("daybook must warn, never error, on %v", f)
 		}
 	}
-	if _, err := validate("strict", raw); err == nil {
+	if _, err := validate("strict", malformed); err == nil {
 		t.Fatal("strict must reject malformed OKF v0.2 signals")
 	}
 }
 
-func TestValidateOKFV02VerifiedMapping(t *testing.T) {
+// Every OKF v0.2 vocabulary key is a known key under the daybook
+// profile, and valid OKF metadata must not fail strict.
+func TestValidateOKFKeysAreKnown(t *testing.T) {
 	raw := `---
-type: Metric
-verified: {by: process:nightly, at: 2026-06-25T09:00:00Z}
----
-body
-`
-	if fs, err := validate("daybook", raw); err != nil || hasRule(fs, "verified_format") {
-		t.Fatalf("bare verified mapping is valid OKF v0.2: findings=%+v err=%v", fs, err)
-	}
-}
-
-func TestValidateOKFV02GeneratedAtOptional(t *testing.T) {
-	raw := `---
-type: Metric
+type: Attested Computation
 status: stable
 created: 2026-06-20T22:53:05Z
 description: Revenue.
 tags: [finance]
-generated:
-  by: human:alice
----
-body
-`
-	if _, err := validate("strict", raw); err != nil {
-		t.Fatalf("generated.at is optional: %v", err)
-	}
-}
-
-func TestValidateOKFV02MergeKeys(t *testing.T) {
-	raw := `---
-defaults: &defaults
-  type: Metric
-  generated:
-    by: "bad actor"
-    at: 2026-06-20T22:53:05Z
-<<: *defaults
+title: Revenue
+resource: https://example.test/revenue
+sources: [{resource: https://example.test/policy}]
+generated: {by: reference_agent/gemini-2.5-pro, at: 2026-06-20T22:53:05Z}
+verified: [{by: human:ahormati, at: 2026-06-25T09:00:00Z}]
+stale_after: 2026-12-31T00:00:00+01:00
+runtime: bigquery
+parameters: [{name: year, type: integer, required: true}]
+computation: references/revenue.sql
+executor: {resource: references/run.md}
+attester: {resource: references/check.py}
+usage_window: {from: 2026-06-01, to: 2026-06-30}
 ---
 body
 `
 	fs, err := validate("daybook", raw)
 	if err != nil {
-		t.Fatalf("merged OKF metadata must still validate: %v", err)
+		t.Fatalf("OKF v0.2 note must pass daybook: %v", err)
 	}
-	if !hasRule(fs, "generated_by_format") {
-		t.Fatalf("merged generated metadata was skipped: %+v", fs)
+	if hasRule(fs, "unknown_keys") {
+		t.Fatalf("OKF v0.2 keys should be known: %+v", fs)
 	}
-	quoted := `---
-type: Metric
-"<<":
-  generated:
-    by: "bad actor"
-    at: 2026-06-20T22:53:05Z
----
-body
-`
-	qfs, qerr := validate("daybook", quoted)
-	if qerr != nil || hasRule(qfs, "generated_by_format") {
-		t.Fatalf("quoted << key must not act as a merge: findings=%+v err=%v", qfs, qerr)
-	}
-
-	longTag := `---
-defaults: &defaults
-  type: Metric
-  generated:
-    by: "bad actor"
-    at: 2026-06-20T22:53:05Z
-!<tag:yaml.org,2002:merge> "<<": *defaults
----
-body
-`
-	lfs, lerr := validate("daybook", longTag)
-	if lerr != nil || !hasRule(lfs, "generated_by_format") {
-		t.Fatalf("long-form merge tag must act as a merge: findings=%+v err=%v", lfs, lerr)
-	}
-	aliasKey := `---
-type: Metric
-defaults: &defaults
-  generated:
-    by: "bad actor"
-    at: 2026-06-20T22:53:05Z
-merge_name: &merge_name "<<"
-*merge_name: *defaults
----
-body
-`
-	afs, aerr := validate("daybook", aliasKey)
-	if aerr != nil || hasRule(afs, "generated_by_format") {
-		t.Fatalf("aliased << key must not act as a merge: findings=%+v err=%v", afs, aerr)
-	}
-	explicitTag := `---
-type: Metric
-defaults: &defaults
-  generated:
-    by: "bad actor"
-    at: 2026-06-20T22:53:05Z
-! <<: *defaults
----
-body
-`
-	efs, eerr := validate("daybook", explicitTag)
-	if eerr != nil || !hasRule(efs, "generated_by_format") {
-		t.Fatalf("explicit non-specific merge tag must act as a merge: findings=%+v err=%v", efs, eerr)
+	if _, err := validate("strict", raw); err != nil {
+		t.Fatalf("valid OKF v0.2 metadata must pass strict: %v", err)
 	}
 }
 

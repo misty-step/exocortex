@@ -12,7 +12,11 @@
 kernel	internal/kernel	58400
 # FlagSet-driven splitArgs: VisitAll replaces per-command value-flag maps.
 cli	internal/cli	16200
-fm	internal/fm	8100
+# PR #40: OKF v0.2 vocabulary split out of fm so the fm ratchet holds;
+# timestamp messages aligned to OKF SPEC §5 (RFC3339 with an explicit
+# UTC offset — any offset, not just zero).
+fm	internal/fm	9000
+okf	internal/okf	4000
 mcp	internal/mcp	5000
 orient	internal/orient	4500
 qmd	internal/qmd	9000
