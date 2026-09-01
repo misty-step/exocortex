@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/misty-step/exocortex/internal/kernel"
@@ -57,5 +58,36 @@ func TestTypedSearchFailsClosedWhenCortexUnavailable(t *testing.T) {
 	}
 	if body["error"] != "cortex_unavailable" {
 		t.Fatalf("body=%v", body)
+	}
+}
+
+func TestSearchReportsInvalidQMDOutput(t *testing.T) {
+	binDir := t.TempDir()
+	qmd := "#!/bin/sh\necho '[{\"score\": 0. 89}]'\n"
+	if err := os.WriteFile(filepath.Join(binDir, "qmd"), []byte(qmd), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
+
+	res, _, err := search(context.Background(), nil, searchArgs{Query: "September", Mode: "bm25"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError {
+		t.Fatalf("invalid output must be a tool error: %#v", res)
+	}
+	tc, ok := res.Content[0].(*sdk.TextContent)
+	if !ok {
+		t.Fatalf("content %T", res.Content[0])
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(tc.Text), &body); err != nil {
+		t.Fatal(err)
+	}
+	hint, _ := body["hint"].(string)
+	if body["error"] != "search_unavailable" ||
+		!strings.Contains(hint, "raw qmd --format json") ||
+		strings.Contains(hint, "indexed qmd collection") {
+		t.Fatalf("misclassified decode body: %v", body)
 	}
 }

@@ -13,8 +13,8 @@
 # The sole-publisher and fail-closed proof comments remain because they state
 # non-obvious invariants. Restored tree measured 58,683; ceiling is 58,700.
 kernel	internal/kernel	58700
-# FlagSet-driven splitArgs: VisitAll replaces per-command value-flag maps.
-cli	internal/cli	16200
+# Typed QMD output failures need a CLI boundary proof; measured 16,310.
+cli	internal/cli	16400
 # PR #40: OKF v0.2 vocabulary split out of fm into internal/okf
 # (11,593 -> 9,057 here, 3,692 there); timestamp messages aligned to
 # OKF SPEC §5 (RFC3339 with an explicit UTC offset — any offset, not
@@ -23,7 +23,8 @@ cli	internal/cli	16200
 # promotion, mutation-checked) and known-keys coverage; measured 9,057.
 fm	internal/fm	9200
 okf	internal/okf	4000
-mcp	internal/mcp	5000
+# Typed QMD output failures need an MCP boundary proof; measured 5,123.
+mcp	internal/mcp	5200
 orient	internal/orient	4500
 qmd	internal/qmd	9000
 cmd	cmd/exocortex	500

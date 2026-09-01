@@ -157,7 +157,7 @@ func search(ctx context.Context, req *mcp.CallToolRequest, a searchArgs) (*mcp.C
 			Code:      "search_unavailable",
 			Operation: "search",
 			Path:      a.Query,
-			Hint:      "check that qmd is installed and the cortex has an indexed qmd collection of the same name",
+			Hint:      qmd.FailureHint(err),
 			Detail:    map[string]any{"detail": err.Error()},
 		})
 	}

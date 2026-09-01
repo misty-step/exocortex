@@ -314,7 +314,7 @@ func cmdSearch(args []string) (any, *kernel.Conflict, error) {
 			Code:      "search_unavailable",
 			Operation: "search",
 			Path:      pos[0],
-			Hint:      "check that qmd is installed and the cortex has an indexed qmd collection of the same name",
+			Hint:      qmd.FailureHint(err),
 			Detail:    map[string]any{"detail": err.Error()},
 		}, nil
 	}
