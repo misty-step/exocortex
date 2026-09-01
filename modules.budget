@@ -13,11 +13,11 @@ kernel	internal/kernel	58400
 # FlagSet-driven splitArgs: VisitAll replaces per-command value-flag maps.
 cli	internal/cli	16200
 # PR #40: OKF v0.2 vocabulary split out of fm into internal/okf
-# (11,593 -> 8,952 here, 3,692 there); timestamp messages aligned to
+# (11,593 -> 9,057 here, 3,692 there); timestamp messages aligned to
 # OKF SPEC §5 (RFC3339 with an explicit UTC offset — any offset, not
-# just zero). The 8100 -> 9000 rise covers the residual fm-owned
-# profile wiring: level-policy and known-keys coverage the split
-# leaves in fm; the strict-promotion coverage completes it at 9,113.
+# just zero). The 8100 -> 9200 rise covers the residual fm-owned
+# profile wiring after the split: level-policy (incl. strict OKF
+# promotion, mutation-checked) and known-keys coverage; measured 9,057.
 fm	internal/fm	9200
 okf	internal/okf	4000
 mcp	internal/mcp	5000
