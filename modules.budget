@@ -17,8 +17,8 @@ cli	internal/cli	16200
 # OKF SPEC §5 (RFC3339 with an explicit UTC offset — any offset, not
 # just zero). The 8100 -> 9000 rise covers the residual fm-owned
 # profile wiring: level-policy and known-keys coverage the split
-# leaves in fm.
-fm	internal/fm	9000
+# leaves in fm; the strict-promotion coverage completes it at 9,113.
+fm	internal/fm	9200
 okf	internal/okf	4000
 mcp	internal/mcp	5000
 orient	internal/orient	4500

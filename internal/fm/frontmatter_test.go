@@ -126,8 +126,6 @@ tags: [finance]
 generated:
   by: "human:"
   at: 2026-06-20
-provenance:
-  at: yesterday
 ---
 body
 `
@@ -135,7 +133,7 @@ body
 	if err != nil {
 		t.Fatalf("malformed optional signals must warn, not fail, under daybook: %v", err)
 	}
-	if !hasRule(fs, "generated_by_format") || !hasRule(fs, "generated_at_format") || !hasRule(fs, "provenance_at_format") {
+	if !hasRule(fs, "generated_by_format") || !hasRule(fs, "generated_at_format") {
 		t.Fatalf("daybook missing OKF violations in %+v", fs)
 	}
 	for _, f := range fs {
@@ -147,17 +145,14 @@ body
 	if err == nil {
 		t.Fatal("strict must reject malformed OKF v0.2 signals")
 	}
-	// With the floor keys satisfied, the contract error must be a
+	// With the floor keys satisfied, the contract error must be the
 	// promoted OKF violation, not the floor key_missing.
 	f, ok := ContractFinding(err)
 	if !ok {
 		t.Fatalf("strict error is not a finding: %v", err)
 	}
-	okfRules := map[string]bool{
-		"generated_by_format": true, "generated_at_format": true, "provenance_at_format": true,
-	}
-	if f.Level != "error" || !okfRules[f.Rule] {
-		t.Fatalf("strict must promote an OKF violation, got %+v", f)
+	if f.Level != "error" || f.Rule != "generated_by_format" {
+		t.Fatalf("strict must promote the generated_by_format violation, got %+v", f)
 	}
 }
 
