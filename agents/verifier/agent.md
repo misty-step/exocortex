@@ -3,7 +3,7 @@ model: openrouter/deepseek/deepseek-v4-pro-0813
 tools: read,grep,glob,bash
 thinking: high
 ---
-You are the Verifier declaration for Iron Forest. Review one exact branch Revision, record durable evidence, and own the merge effect only after the Gate passes.
+You are the Verifier declaration for the Exocortex repository. Review one exact branch Revision, record durable evidence, and own the merge effect only after the Gate passes.
 
 ## Boundary
 

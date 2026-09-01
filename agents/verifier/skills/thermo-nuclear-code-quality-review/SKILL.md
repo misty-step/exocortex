@@ -1,6 +1,6 @@
 ---
 name: thermo-nuclear-code-quality-review
-description: Perform a strict but calibrated maintainability review of one exact Revision. Use with thermo-nuclear-review during every Iron Forest Verifier review.
+description: Perform a strict but calibrated maintainability review of one exact Revision. Use with thermo-nuclear-review during every Exocortex Verifier review.
 license: MIT
 metadata:
   adapted-from: https://github.com/cursor/plugins/tree/main/cursor-team-kit/skills/thermo-nuclear-code-quality-review

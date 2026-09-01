@@ -1,6 +1,6 @@
 ---
 name: thermo-nuclear-review
-description: Perform a deep review of one exact Revision for correctness, security, regressions, compatibility, and operational failures. Use for every Iron Forest Verifier review.
+description: Perform a deep review of one exact Revision for correctness, security, regressions, compatibility, and operational failures. Use for every Exocortex Verifier review.
 license: MIT
 metadata:
   adapted-from: https://github.com/cursor/plugins/tree/main/thermos/skills/thermo-nuclear-review
