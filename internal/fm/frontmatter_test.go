@@ -114,6 +114,84 @@ func TestValidateStrict(t *testing.T) {
 	}
 }
 
+// Malformed optional OKF fields violate the same rules under both
+// profiles; only the level policy differs.
+func TestValidateOKFLevelPolicy(t *testing.T) {
+	malformed := `---
+type: Metric
+status: stable
+created: 2026-06-25T09:00:00Z
+description: Revenue.
+tags: [finance]
+generated:
+  by: "human:"
+  at: 2026-06-20
+---
+body
+`
+	fs, err := validate("daybook", malformed)
+	if err != nil {
+		t.Fatalf("malformed optional signals must warn, not fail, under daybook: %v", err)
+	}
+	if !hasRule(fs, "generated_by_format") || !hasRule(fs, "generated_at_format") {
+		t.Fatalf("daybook missing OKF violations in %+v", fs)
+	}
+	for _, f := range fs {
+		if f.Level != "warning" {
+			t.Fatalf("daybook must warn, never error, on %v", f)
+		}
+	}
+	_, err = validate("strict", malformed)
+	if err == nil {
+		t.Fatal("strict must reject malformed OKF v0.2 signals")
+	}
+	// With the floor keys satisfied, the contract error must be the
+	// promoted OKF violation, not the floor key_missing.
+	f, ok := ContractFinding(err)
+	if !ok {
+		t.Fatalf("strict error is not a finding: %v", err)
+	}
+	if f.Level != "error" || f.Rule != "generated_by_format" {
+		t.Fatalf("strict must promote the generated_by_format violation, got %+v", f)
+	}
+}
+
+// Every OKF v0.2 vocabulary key is a known key under the daybook
+// profile, and valid OKF metadata must not fail strict.
+func TestValidateOKFKeysAreKnown(t *testing.T) {
+	raw := `---
+type: Attested Computation
+status: stable
+created: 2026-06-20T22:53:05Z
+description: Revenue.
+tags: [finance]
+title: Revenue
+resource: https://example.test/revenue
+sources: [{resource: https://example.test/policy}]
+generated: {by: reference_agent/gemini-2.5-pro, at: 2026-06-20T22:53:05Z}
+verified: [{by: human:ahormati, at: 2026-06-25T09:00:00Z}]
+stale_after: 2026-12-31T00:00:00+01:00
+runtime: bigquery
+parameters: [{name: year, type: integer, required: true}]
+computation: references/revenue.sql
+executor: {resource: references/run.md}
+attester: {resource: references/check.py}
+usage_window: {from: 2026-06-01, to: 2026-06-30}
+---
+body
+`
+	fs, err := validate("daybook", raw)
+	if err != nil {
+		t.Fatalf("OKF v0.2 note must pass daybook: %v", err)
+	}
+	if hasRule(fs, "unknown_keys") {
+		t.Fatalf("OKF v0.2 keys should be known: %+v", fs)
+	}
+	if _, err := validate("strict", raw); err != nil {
+		t.Fatalf("valid OKF v0.2 metadata must pass strict: %v", err)
+	}
+}
+
 const richNote = `---
 type: decision
 status: active # keep this comment

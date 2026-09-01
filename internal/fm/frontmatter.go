@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/misty-step/exocortex/internal/okf"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -107,6 +108,50 @@ func warnf(rule, format string, a ...any) Finding {
 var knownKeys = map[string]bool{
 	"type": true, "status": true, "created": true,
 	"description": true, "tags": true, "provenance": true,
+	// OKF v0.2's optional provenance, lifecycle, and computation
+	// families are part of the frontmatter vocabulary even when a
+	// particular concept does not use them.
+	"title": true, "resource": true, "sources": true,
+	"generated": true, "verified": true, "stale_after": true,
+	"runtime": true, "parameters": true, "computation": true,
+	"executor": true, "attester": true, "usage_window": true,
+}
+
+func validateStrict(d Document) ([]Finding, error) {
+	if err := requireFrontmatter(d); err != nil {
+		return nil, err
+	}
+	var fs []Finding
+	for _, k := range []string{"type", "status", "created", "description", "tags"} {
+		if empty(d.Map[k]) {
+			fs = append(fs, errf("key_missing", "strict profile requires non-empty %q", k))
+		}
+	}
+	if c, ok := d.Scalar("created"); ok && strings.TrimSpace(c) != "" {
+		if _, perr := time.Parse(time.RFC3339, c); perr != nil {
+			fs = append(fs, errf("created_format", "created %q is not RFC3339", c))
+		}
+	}
+	fs = append(fs, validateOKF(d, true)...)
+	for _, f := range fs {
+		if f.Level == "error" {
+			return fs, contract(f)
+		}
+	}
+	return fs, nil
+}
+
+// contract wraps a finding as a validation error.
+type contractError struct{ f Finding }
+
+func contract(f Finding) error { return contractError{f} }
+
+func (e contractError) Error() string { return e.f.Rule + ": " + e.f.Message }
+
+// ContractFinding exposes the finding behind a validation error.
+func ContractFinding(err error) (Finding, bool) {
+	ce, ok := err.(contractError)
+	return ce.f, ok
 }
 
 // Validate applies a named profile to an already-parsed document.
@@ -143,42 +188,6 @@ func validateDaybook(d Document) ([]Finding, error) {
 	return daybookWarnings(d), nil
 }
 
-func validateStrict(d Document) ([]Finding, error) {
-	if err := requireFrontmatter(d); err != nil {
-		return nil, err
-	}
-	var fs []Finding
-	for _, k := range []string{"type", "status", "created", "description", "tags"} {
-		if empty(d.Map[k]) {
-			fs = append(fs, errf("key_missing", "strict profile requires non-empty %q", k))
-		}
-	}
-	if c, ok := d.Scalar("created"); ok && strings.TrimSpace(c) != "" {
-		if _, perr := time.Parse(time.RFC3339, c); perr != nil {
-			fs = append(fs, errf("created_format", "created %q is not RFC3339", c))
-		}
-	}
-	for _, f := range fs {
-		if f.Level == "error" {
-			return fs, contract(f)
-		}
-	}
-	return fs, nil
-}
-
-// contract wraps a finding as a validation error.
-type contractError struct{ f Finding }
-
-func contract(f Finding) error { return contractError{f} }
-
-func (e contractError) Error() string { return e.f.Rule + ": " + e.f.Message }
-
-// ContractFinding exposes the finding behind a validation error.
-func ContractFinding(err error) (Finding, bool) {
-	ce, ok := err.(contractError)
-	return ce.f, ok
-}
-
 func daybookWarnings(d Document) []Finding {
 	// Journal micro-notes (type: memo) are quiet under the daybook
 	// profile: they are not wiki notes, and constant key warnings would
@@ -197,6 +206,7 @@ func daybookWarnings(d Document) []Finding {
 			fs = append(fs, warnf("created_format", "created %q is not RFC3339", c))
 		}
 	}
+	fs = append(fs, validateOKF(d, false)...)
 	var unknown []string
 	for k := range d.Map {
 		if !knownKeys[k] {
@@ -206,6 +216,21 @@ func daybookWarnings(d Document) []Finding {
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
 		fs = append(fs, warnf("unknown_keys", "unknown frontmatter keys: %s", strings.Join(unknown, ", ")))
+	}
+	return fs
+}
+
+// validateOKF applies the structural checks shared by the OKF v0.2
+// provenance and lifecycle fields. Daybook reports malformed optional
+// fields as warnings; strict promotes the same findings to errors.
+func validateOKF(d Document, strict bool) []Finding {
+	var fs []Finding
+	for _, v := range okf.Validate(&d.root) {
+		if strict {
+			fs = append(fs, errf(v.Rule, "%s", v.Message))
+		} else {
+			fs = append(fs, warnf(v.Rule, "%s", v.Message))
+		}
 	}
 	return fs
 }
