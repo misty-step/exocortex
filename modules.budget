@@ -9,9 +9,9 @@
 # errors join the primary failure instead of blank assignment.
 # Unlock-after-success: do not convert a landed write or captured snapshot
 # into lock_failed; tests inject release failure.
-# PRs #43-45: distinguish a missing committed path from an unavailable
-# snapshot across kernel and MCP while retaining the sole-publisher and
-# fail-closed proof documentation; measured 58,683 after delete-or-split.
+# PRs #43-45: missing committed paths require kernel and MCP coverage.
+# The sole-publisher and fail-closed proof comments remain because they state
+# non-obvious invariants. Restored tree measured 58,683; ceiling is 58,700.
 kernel	internal/kernel	58700
 # FlagSet-driven splitArgs: VisitAll replaces per-command value-flag maps.
 cli	internal/cli	16200
