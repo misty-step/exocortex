@@ -119,6 +119,10 @@ func TestValidateStrict(t *testing.T) {
 func TestValidateOKFLevelPolicy(t *testing.T) {
 	malformed := `---
 type: Metric
+status: stable
+created: 2026-06-25T09:00:00Z
+description: Revenue.
+tags: [finance]
 generated:
   by: "human:"
   at: 2026-06-20
@@ -139,8 +143,21 @@ body
 			t.Fatalf("daybook must warn, never error, on %v", f)
 		}
 	}
-	if _, err := validate("strict", malformed); err == nil {
+	_, err = validate("strict", malformed)
+	if err == nil {
 		t.Fatal("strict must reject malformed OKF v0.2 signals")
+	}
+	// With the floor keys satisfied, the contract error must be a
+	// promoted OKF violation, not the floor key_missing.
+	f, ok := ContractFinding(err)
+	if !ok {
+		t.Fatalf("strict error is not a finding: %v", err)
+	}
+	okfRules := map[string]bool{
+		"generated_by_format": true, "generated_at_format": true, "provenance_at_format": true,
+	}
+	if f.Level != "error" || !okfRules[f.Rule] {
+		t.Fatalf("strict must promote an OKF violation, got %+v", f)
 	}
 }
 
