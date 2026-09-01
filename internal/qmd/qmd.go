@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,6 +29,18 @@ type Hit struct {
 // DefaultMode is the omitted-mode contract: hybrid retrieval with a
 // single BM25 fallback owned by Search.
 const DefaultMode = "hybrid"
+
+// ErrInvalidOutput marks a successful QMD process whose stdout violates the
+// JSON result contract.
+var ErrInvalidOutput = errors.New("qmd returned invalid search output")
+
+// FailureHint distinguishes dependency failures from invalid producer output.
+func FailureHint(err error) string {
+	if errors.Is(err, ErrInvalidOutput) {
+		return "capture the raw qmd --format json output and verify the installed qmd version"
+	}
+	return "check that qmd is installed and the cortex has an indexed qmd collection of the same name"
+}
 
 // subcommand maps retrieval modes onto qmd subcommands.
 var subcommand = map[string]string{
@@ -165,11 +178,11 @@ func parseJSONHits(cmdName string, data []byte) ([]Hit, error) {
 		if len(preview) > 256 {
 			preview = preview[:256] + "..."
 		}
-		return nil, fmt.Errorf("qmd %s returned non-JSON output: %s", cmdName, preview)
+		return nil, fmt.Errorf("%w: qmd %s returned non-JSON output: %s", ErrInvalidOutput, cmdName, preview)
 	}
 	var hits []Hit
 	if err := json.Unmarshal(data[start:], &hits); err != nil {
-		return nil, fmt.Errorf("qmd returned unparseable JSON: %w", err)
+		return nil, fmt.Errorf("%w: qmd %s returned unparseable JSON: %v", ErrInvalidOutput, cmdName, err)
 	}
 	if hits == nil {
 		hits = []Hit{}

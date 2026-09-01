@@ -2,6 +2,7 @@ package qmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -285,6 +286,27 @@ exit 0
 	}
 	if !strings.Contains(err.Error(), "unparseable JSON") {
 		t.Fatalf("expected unparseable JSON error, got: %v", err)
+	}
+}
+
+func TestParseJSONHitsScoreShapesAndMalformedOutput(t *testing.T) {
+	hits, err := parseJSONHits("search", []byte(`[
+		{"docid":"#integer","file":"qmd://daybook/a.md","score":1,"line":1},
+		{"docid":"#decimal","file":"qmd://daybook/b.md","score":0.89,"line":2}
+	]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 2 || hits[0].Score != 1 || hits[1].Score != 0.89 {
+		t.Fatalf("score decode mismatch: %+v", hits)
+	}
+
+	_, err = parseJSONHits("search", []byte(`[{"score": 0. 89}]`))
+	if !errors.Is(err, ErrInvalidOutput) {
+		t.Fatalf("malformed output must be typed: %v", err)
+	}
+	if hint := FailureHint(err); strings.Contains(hint, "indexed qmd collection") {
+		t.Fatalf("decode hint claims dependency failure: %q", hint)
 	}
 }
 

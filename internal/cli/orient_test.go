@@ -34,6 +34,18 @@ EOF
 	t.Setenv("PATH", binDir+string(filepath.ListSeparator)+os.Getenv("PATH"))
 }
 
+func TestSearchReportsInvalidQMDOutput(t *testing.T) {
+	installFakeQMD(t, `[{"score": 0. 89}]`)
+	code, body, _ := runMain(t, "", "search", "September", "--mode", "bm25")
+	if code != 1 || body["error"] != "search_unavailable" {
+		t.Fatalf("exit=%d body=%v", code, body)
+	}
+	hint, _ := body["hint"].(string)
+	if !strings.Contains(hint, "raw qmd --format json") || strings.Contains(hint, "indexed qmd collection") {
+		t.Fatalf("misclassified decode hint: %q", hint)
+	}
+}
+
 func decodeHits(t *testing.T, raw string) []map[string]any {
 	t.Helper()
 	var hits []map[string]any
