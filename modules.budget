@@ -7,7 +7,9 @@
 # Complexity ratchet: split Lint/index/GetMany/sync helpers and takeaways
 # scanner so gocognit 16 and nestif 5 can fail closed. Unlock/cleanup
 # errors join the primary failure instead of blank assignment.
-kernel	internal/kernel	57700
+# Unlock-after-success: do not convert a landed write or captured snapshot
+# into lock_failed; tests inject release failure.
+kernel	internal/kernel	58400
 # FlagSet-driven splitArgs: VisitAll replaces per-command value-flag maps.
 cli	internal/cli	16200
 fm	internal/fm	8100

@@ -343,10 +343,9 @@ func withReadSnapshot(c *Cortex, operation, path string, fn func(readSnapshot) *
 		return fail(errors.New("publisher repository has no HEAD commit"))
 	}
 	snapshot := readSnapshot{repo: root, sha: head}
-	if rerr := lock.release(); rerr != nil {
-		return attachUnlock(nil, rerr, operation, path)
-	}
-	return fn(snapshot)
+	rerr := lock.release()
+	conf := fn(snapshot)
+	return attachUnlock(conf, rerr, operation, path)
 }
 
 func snapshotUnavailable(operation, path string, err error) *Conflict {
